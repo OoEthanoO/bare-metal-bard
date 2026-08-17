@@ -7,6 +7,8 @@ kernel here is written from scratch.
 
 **Hardware:** RTX 4070 Laptop (Ada, sm_89) — 36 SMs, 256 GB/s, 8 GB, 55 W.
 
+**Writeup:** <https://bare-metal-bard.vercel.app>
+
 ---
 
 ## Results: the matmul
@@ -134,7 +136,9 @@ layernorm backward makes 14 of 16 tensors fail.
 ## Writeup
 
 A longer writeup -- the profiling story, the measurement problem, the charts --
-is a Next.js app under [`site/`](site/), deployed on Vercel. Every number on the
+is a Next.js app under [`site/`](site/), live at
+<https://bare-metal-bard.vercel.app> and deployed on Vercel (auto-deploys on
+push to `main`). Every number on the
 page is generated from `bench/results.csv` and the training log by
 `tools/make_site_data.py`, so the page cannot drift from the measurements.
 
@@ -153,9 +157,8 @@ python3 tools/make_site_data.py
 cp docs/*.svg site/public/
 ```
 
-Deploying: the Next app lives in `site/`, not the repo root, so set **Root
-Directory = `site`** when importing the project on Vercel. Everything else is
-default.
+Deploying: the Next app lives in `site/`, not the repo root, so the Vercel
+project has **Root Directory = `site`**. Everything else is default.
 
 ## Build and run
 
