@@ -2,9 +2,7 @@ node_modules/
 .next/
 out/
 next-env.d.ts
-node_modules/
-site/.next/
-site/out/
-site/next-env.d.ts
-bench/gpt.bin
-bench/logs/*.nsys-rep
+
+# Vercel link metadata and the OIDC token it writes
+.vercel
+.env*
