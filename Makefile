@@ -8,9 +8,9 @@ LDFLAGS   := -lcublas
 
 SRC     := src/bench.cu src/registry.cu $(wildcard src/kernels/*.cu)
 BIN     := bench/sgemm
-TOOLS   := bench/device_query
+TOOLS   := bench/device_query bench/test_gemm
 
-.PHONY: all clean run tools
+.PHONY: all clean run tools test
 all: $(BIN)
 
 $(BIN): $(SRC) src/kernels.h | bench
@@ -19,6 +19,12 @@ $(BIN): $(SRC) src/kernels.h | bench
 tools: $(TOOLS)
 bench/device_query: tools/device_query.cu | bench
 	$(NVCC) -ccbin $(CCBIN) -arch=$(ARCH) -O2 $< -o $@
+
+bench/test_gemm: tools/test_gemm.cu src/gemm.cu src/gemm.h src/kernels/k05_tile2d.cu | bench
+	$(NVCC) $(NVCCFLAGS) tools/test_gemm.cu src/gemm.cu -o $@ $(LDFLAGS)
+
+test: bench/test_gemm
+	./bench/test_gemm
 
 bench:
 	mkdir -p bench
