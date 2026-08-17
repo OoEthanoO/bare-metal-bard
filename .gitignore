@@ -1,0 +1,8 @@
+bench/sgemm
+bench/device_query
+*.o
+*.ncu-rep
+*.nsys-rep
+*.sqlite
+__pycache__/
+data/
