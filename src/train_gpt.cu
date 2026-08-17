@@ -150,11 +150,23 @@ static void get_batch(const std::vector<int> &data, int B, int T,
     }
 }
 
+// Linear warmup then cosine decay to lr_max/10. Warmup matters here because
+// Adam's second-moment estimate is near-meaningless for the first few steps,
+// and a full-size step taken against it can knock the model into a bad basin
+// it spends thousands of steps climbing out of.
+static float lr_at(int step, int warmup, int total, float lr_max) {
+    const float lr_min = lr_max * 0.1f;
+    if (step <= warmup) return lr_max * (float)step / (float)warmup;
+    const float p = (float)(step - warmup) / (float)std::max(1, total - warmup);
+    return lr_min + 0.5f * (lr_max - lr_min) * (1.0f + cosf(3.14159265f * p));
+}
+
 // ------------------------------------------------------------------- main
 int main(int argc, char **argv) {
     const char *data_path = "data/input.txt";
     int steps = 2000, B = 16, T = 256, n_layer = 6, n_head = 6, n_embd = 384;
-    float lr = 3e-4f, weight_decay = 0.1f;
+    float lr = 1e-3f, weight_decay = 0.1f, grad_clip = 1.0f;
+    int warmup = 100;
     int eval_every = 100, sample_every = 500, sample_len = 400;
     unsigned seed = 1337;
 
@@ -165,6 +177,8 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "-t") && i + 1 < argc) T = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-l") && i + 1 < argc) n_layer = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--lr") && i + 1 < argc) lr = atof(argv[++i]);
+        else if (!strcmp(argv[i], "--warmup") && i + 1 < argc) warmup = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--clip") && i + 1 < argc) grad_clip = atof(argv[++i]);
         else if (!strcmp(argv[i], "--eval") && i + 1 < argc) eval_every = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--sample") && i + 1 < argc) sample_every = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--seed") && i + 1 < argc) seed = atoi(argv[++i]);
@@ -216,8 +230,16 @@ int main(int argc, char **argv) {
         CUDA_CHECK(cudaEventRecord(ev0));
         const float loss = gpt_forward(g, x.data(), y.data());
         gpt_backward(g);
+
+        // Global-norm clipping: rescale the whole gradient vector so its L2
+        // norm is at most grad_clip. Rescaling globally rather than per-tensor
+        // preserves the gradient's direction, which is the point.
+        const float gnorm = grad_global_norm(g.grads_mem, (int)g.num_params);
+        const float gscale = (gnorm > grad_clip) ? grad_clip / gnorm : 1.0f;
+        const float lr_now = lr_at(step, warmup, steps, lr);
         adamw_update(g.params_mem, g.grads_mem, g.m_mem, g.v_mem,
-                     (int)g.num_params, lr, 0.9f, 0.999f, 1e-8f, weight_decay, step);
+                     (int)g.num_params, lr_now, 0.9f, 0.999f, 1e-8f,
+                     weight_decay, step, gscale);
         CUDA_CHECK(cudaEventRecord(ev1));
         CUDA_CHECK(cudaEventSynchronize(ev1));
         float ms = 0.0f;
@@ -225,8 +247,9 @@ int main(int argc, char **argv) {
         ema_ms = (step == 1) ? ms : 0.9 * ema_ms + 0.1 * ms;
 
         if (step % 10 == 0 || step == 1) {
-            printf("step %5d/%d  loss %.4f  %6.1f ms  %7.0f tok/s  %5.0f GFLOP/s\n",
-                   step, steps, loss, ms, tokens_per_step / (ms * 1e-3),
+            printf("step %5d/%d  loss %.4f  lr %.2e  |g| %.3f  %6.1f ms  %7.0f tok/s  %5.0f GFLOP/s\n",
+                   step, steps, loss, lr_now, gnorm, ms,
+                   tokens_per_step / (ms * 1e-3),
                    flops_per_step / (ms * 1e-3) / 1e9);
             fflush(stdout);
         }

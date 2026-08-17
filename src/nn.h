@@ -46,9 +46,14 @@ void crossentropy_softmax_backward(float *dlogits, const float *probs,
                                    float dloss_scale);
 
 // ---- optimizer ----
+// grad_scale multiplies every gradient on the way in, which is how gradient
+// clipping is applied without a separate pass over the gradient buffer.
 void adamw_update(float *params, float *grads, float *m, float *v, int n,
                   float lr, float beta1, float beta2, float eps,
-                  float weight_decay, int step);
+                  float weight_decay, int step, float grad_scale);
+
+// L2 norm over the whole gradient vector, for global-norm clipping.
+float grad_global_norm(const float *grads, int n);
 
 // ---- utility ----
 void zero_buffer(float *p, size_t n);

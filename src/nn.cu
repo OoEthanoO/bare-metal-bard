@@ -240,10 +240,10 @@ __global__ void xent_softmax_bwd_k(float *dlogits, const float *probs,
 // ---------------------------------------------------------------- optimizer
 __global__ void adamw_k(float *params, const float *grads, float *m, float *v,
                         int n, float lr, float beta1, float beta2, float eps,
-                        float wd, float bc1, float bc2) {
+                        float wd, float bc1, float bc2, float gscale) {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n) return;
-    const float g = grads[i];
+    const float g = grads[i] * gscale;
     const float mi = beta1 * m[i] + (1.0f - beta1) * g;
     const float vi = beta2 * v[i] + (1.0f - beta2) * g * g;
     m[i] = mi; v[i] = vi;
@@ -252,6 +252,19 @@ __global__ void adamw_k(float *params, const float *grads, float *m, float *v,
     // Decoupled weight decay: applied to the parameter, not folded into the
     // gradient, which is the "W" in AdamW.
     params[i] -= lr * (mhat / (sqrtf(vhat) + eps) + wd * params[i]);
+}
+
+// Partial sums of squares; the last few hundred partials are finished on the
+// host, which is cheaper than a second launch for this size.
+__global__ void sumsq_k(const float *g, float *partial, int n) {
+    float acc = 0.0f;
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n;
+         i += gridDim.x * blockDim.x) {
+        const float v = g[i];
+        acc += v * v;
+    }
+    acc = block_reduce<false>(acc);
+    if (threadIdx.x == 0) partial[blockIdx.x] = acc;
 }
 
 __global__ void reduce_mean_k(const float *in, float *out, int n) {
@@ -323,11 +336,23 @@ void crossentropy_softmax_backward(float *dlogits, const float *probs,
 
 void adamw_update(float *params, float *grads, float *m, float *v, int n,
                   float lr, float beta1, float beta2, float eps,
-                  float weight_decay, int step) {
+                  float weight_decay, int step, float grad_scale) {
     const float bc1 = 1.0f - powf(beta1, (float)step);
     const float bc2 = 1.0f - powf(beta2, (float)step);
     adamw_k<<<ceil_div(n, 256), 256>>>(params, grads, m, v, n, lr, beta1, beta2,
-                                       eps, weight_decay, bc1, bc2);
+                                       eps, weight_decay, bc1, bc2, grad_scale);
+}
+
+float grad_global_norm(const float *grads, int n) {
+    constexpr int NBLK = 256;
+    static float *d_partial = nullptr;
+    if (!d_partial) cudaMalloc(&d_partial, NBLK * sizeof(float));
+    sumsq_k<<<NBLK, 256>>>(grads, d_partial, n);
+    float h[NBLK];
+    cudaMemcpy(h, d_partial, NBLK * sizeof(float), cudaMemcpyDeviceToHost);
+    double s = 0.0;
+    for (int i = 0; i < NBLK; ++i) s += (double)h[i];
+    return (float)sqrt(s);
 }
 
 void zero_buffer(float *p, size_t n) { cudaMemset(p, 0, n * sizeof(float)); }
