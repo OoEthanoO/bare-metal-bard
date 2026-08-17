@@ -151,10 +151,36 @@ In queen exposed fall outterprised, which in the
 good trooping high tune of mortal hour
 ```
 
-The end-to-end 3320 GFLOP/s sits below the standalone GEMM peak (6420) because a
-training step is not all GEMM: layernorm, softmax, GELU, the attention permutes
-and the optimizer are all bandwidth-bound work at arithmetic intensity below 1,
-and the attention score matrices alone move 25 MB per layer per pass.
+The end-to-end 3320 GFLOP/s sits below the standalone GEMM peak because a
+training step is not all GEMM. Profiling every kernel launch with `ncu` and
+aggregating by category:
+
+| category | share of kernel time |
+|---|---:|
+| GEMM (matmul) | 65.8% |
+| GEMM (attention, batched) | 14.5% |
+| bias add / column reduce | 5.7% |
+| attention softmax | 3.5% |
+| attention permute | 3.1% |
+| GELU | 2.9% |
+| residual add | 2.3% |
+| layernorm | 2.0% |
+| cross-entropy, embeddings, optimizer | 0.2% |
+| **all GEMM** | **80.3%** |
+| **everything else** | **19.7%** |
+
+(Relative shares. The profiled run includes evaluation forward passes and
+`ncu`'s replay inflates absolute times, so only the ratios are meaningful.
+Eval passes are forward-only and forward is less GEMM-heavy than backward, so
+the true share for a pure training step is if anything slightly higher.)
+
+Two things follow. First, ~20% of the time goes to kernels with arithmetic
+intensity below 1 — pure bandwidth work that no amount of matmul tuning
+touches; the attention score matrices alone move 25 MB per layer per pass, which
+is what a fused FlashAttention-style kernel would eliminate. Second, even the
+80% does not run at the 6802 GF/s headline: training's matmuls are far skinnier
+than the square N=4096 benchmark (K=384 for the attention projections), and
+small K leaves less work to amortize each tile load against.
 
 ### The backward pass is gradient-checked
 
