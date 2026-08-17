@@ -20,8 +20,8 @@ tools: $(TOOLS)
 bench/device_query: tools/device_query.cu | bench
 	$(NVCC) -ccbin $(CCBIN) -arch=$(ARCH) -O2 $< -o $@
 
-bench/test_gemm: tools/test_gemm.cu src/gemm.cu src/gemm.h src/kernels/k05_tile2d.cu | bench
-	$(NVCC) $(NVCCFLAGS) tools/test_gemm.cu src/gemm.cu -o $@ $(LDFLAGS)
+bench/test_gemm: tools/test_gemm.cu src/gemm.cu src/bgemm.cu src/gemm.h | bench
+	$(NVCC) $(NVCCFLAGS) tools/test_gemm.cu src/gemm.cu src/bgemm.cu -o $@ $(LDFLAGS)
 
 # The model. Note: no -lcublas. Nothing here links a vendor BLAS.
 GPT_SRC := src/train_gpt.cu src/gpt.cu src/gemm.cu src/bgemm.cu src/nn.cu src/attention.cu
@@ -45,4 +45,4 @@ run: $(BIN)
 	./$(BIN)
 
 clean:
-	rm -f $(BIN) $(TOOLS)
+	rm -f $(BIN) $(TOOLS) bench/train_gpt bench/test_grad

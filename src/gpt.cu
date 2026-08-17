@@ -308,7 +308,8 @@ void gpt_backward(GPT &g) {
 
         float *ln1 = a.ln1 + l * s.BTC;
         float *ln1_mean = a.ln1_mean + l * s.BT, *ln1_rstd = a.ln1_rstd + l * s.BT;
-        float *qkv = a.qkv + l * s.BT3C, *qkvr = a.qkvr + l * s.qkvr;
+        // Backward reads the PERMUTED q/k/v (qkvr), not the raw fused qkv.
+        float *qkvr = a.qkvr + l * s.qkvr;
         float *att = a.att + l * s.BTNHTT, *atty = a.atty + l * s.BTC;
         float *residual2 = a.residual2 + l * s.BTC, *ln2 = a.ln2 + l * s.BTC;
         float *ln2_mean = a.ln2_mean + l * s.BT, *ln2_rstd = a.ln2_rstd + l * s.BT;

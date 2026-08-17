@@ -112,6 +112,69 @@ int main() {
         cudaFree(dA); cudaFree(dB); cudaFree(dC); cudaFree(dR);
     }
 
+    // ---- batched GEMM, the attention shapes ----
+    //
+    // These are verified indirectly by the gradient check, but only as a pass/
+    // fail on the whole model. Testing them directly localizes a failure to the
+    // batched kernel instead of to "somewhere in attention".
+    printf("\nbatched GEMM (attention shapes), vs cuBLAS per batch\n");
+    printf("--------------------------------------------------------------------------\n");
+    struct BShape { int batch, M, N, K; const char *tag; };
+    const BShape bshapes[] = {
+        {96, 256, 256, 64, "q@k^T   (B*NH=96)"},
+        {96, 256, 64, 256, "att@v   (B*NH=96)"},
+        {24, 64, 64, 32,   "small heads"},
+        {8, 100, 48, 33,   "ragged"},
+    };
+
+    for (const BShape &s : bshapes) {
+        const size_t eA = (size_t)s.M * s.K, eB = (size_t)s.K * s.N, eC = (size_t)s.M * s.N;
+        std::vector<float> hA(eA * s.batch), hB(eB * s.batch), hC(eC * s.batch);
+        fill(hA, 0x2222u); fill(hB, 0x3333u); fill(hC, 0x4444u);
+
+        float *dA, *dB, *dC, *dR;
+        CUDA_CHECK(cudaMalloc(&dA, hA.size() * 4));
+        CUDA_CHECK(cudaMalloc(&dB, hB.size() * 4));
+        CUDA_CHECK(cudaMalloc(&dC, hC.size() * 4));
+        CUDA_CHECK(cudaMalloc(&dR, hC.size() * 4));
+        CUDA_CHECK(cudaMemcpy(dA, hA.data(), hA.size() * 4, cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpy(dB, hB.data(), hB.size() * 4, cudaMemcpyHostToDevice));
+
+        for (int t = 0; t < 4; ++t) {
+            const bool TA = t & 1, TB = t & 2;
+            const char *tag = TA ? (TB ? "TT" : "TN") : (TB ? "NT" : "NN");
+            const float alpha = 0.5f, beta = 2.0f;
+
+            CUDA_CHECK(cudaMemcpy(dC, hC.data(), hC.size() * 4, cudaMemcpyHostToDevice));
+            CUDA_CHECK(cudaMemcpy(dR, hC.data(), hC.size() * 4, cudaMemcpyHostToDevice));
+
+            batched_gemm(TA, TB, s.batch, s.M, s.N, s.K, alpha, dA, (long long)eA,
+                         dB, (long long)eB, beta, dC, (long long)eC);
+            // Reference: the same problem, one batch at a time.
+            for (int b = 0; b < s.batch; ++b)
+                gemm_ref(TA, TB, s.M, s.N, s.K, alpha, dA + b * eA, dB + b * eB,
+                         beta, dR + b * eC);
+            CUDA_CHECK(cudaDeviceSynchronize());
+            CUDA_CHECK(cudaGetLastError());
+
+            std::vector<float> got(hC.size()), ref(hC.size());
+            CUDA_CHECK(cudaMemcpy(got.data(), dC, hC.size() * 4, cudaMemcpyDeviceToHost));
+            CUDA_CHECK(cudaMemcpy(ref.data(), dR, hC.size() * 4, cudaMemcpyDeviceToHost));
+
+            double maxabs = 0, refinf = 0;
+            for (size_t i = 0; i < got.size(); ++i) {
+                maxabs = std::max(maxabs, std::fabs((double)got[i] - (double)ref[i]));
+                refinf = std::max(refinf, std::fabs((double)ref[i]));
+            }
+            const double rel = maxabs / std::max(refinf, 1e-30);
+            const bool ok = rel < 1e-4;
+            if (!ok) ++failures;
+            printf("%-22s %6d %6d %6d  %-6s %10.2e  %s\n", s.tag, s.M, s.N, s.K,
+                   tag, rel, ok ? "ok" : "FAIL");
+        }
+        cudaFree(dA); cudaFree(dB); cudaFree(dC); cudaFree(dR);
+    }
+
     printf("--------------------------------------------------------------------------\n");
     printf("%s (%d failures)\n", failures ? "FAILED" : "all passed", failures);
     cublasDestroy(handle);

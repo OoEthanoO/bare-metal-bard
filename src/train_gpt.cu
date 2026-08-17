@@ -189,6 +189,40 @@ static void save_checkpoint(const GPT &g, const char *path,
                g.num_params * 4.0 / 1048576.0);
 }
 
+// Reads config and vocabulary from the file, so a checkpoint is
+// self-describing and sampling needs no matching command-line flags.
+static bool load_checkpoint(GPT &g, const char *path, std::vector<char> &itos) {
+    FILE *f = fopen(path, "rb");
+    if (!f) { fprintf(stderr, "cannot open %s\n", path); return false; }
+    int magic = 0;
+    if (fread(&magic, sizeof(int), 1, f) != 1 || magic != 0x47505431) {
+        fprintf(stderr, "%s is not a GPT1 checkpoint\n", path);
+        fclose(f);
+        return false;
+    }
+    if (fread(&g.config, sizeof(GPTConfig), 1, f) != 1) { fclose(f); return false; }
+    int nvocab = 0;
+    if (fread(&nvocab, sizeof(int), 1, f) != 1) { fclose(f); return false; }
+    itos.resize(nvocab);
+    if (fread(itos.data(), 1, nvocab, f) != (size_t)nvocab) { fclose(f); return false; }
+
+    g.T = g.config.max_seq_len;
+    gpt_alloc(g);
+    std::vector<float> h(g.num_params);
+    if (fread(h.data(), sizeof(float), g.num_params, f) != g.num_params) {
+        fprintf(stderr, "checkpoint truncated\n");
+        fclose(f);
+        return false;
+    }
+    fclose(f);
+    cudaMemcpy(g.params_mem, h.data(), g.num_params * sizeof(float),
+               cudaMemcpyHostToDevice);
+    printf("loaded %s: %d layers, %d heads, %d embd, ctx %d, vocab %d, %.2fM params\n",
+           path, g.config.n_layer, g.config.n_head, g.config.n_embd,
+           g.config.max_seq_len, g.config.vocab_size, g.num_params / 1e6);
+    return true;
+}
+
 // Linear warmup then cosine decay to lr_max/10. Warmup matters here because
 // Adam's second-moment estimate is near-meaningless for the first few steps,
 // and a full-size step taken against it can knock the model into a bad basin
@@ -209,6 +243,8 @@ int main(int argc, char **argv) {
     int eval_every = 100, sample_every = 500, sample_len = 400;
     int eval_batches = 20;
     const char *save_path = "bench/gpt.bin";
+    const char *load_path = nullptr;
+    float temperature = 0.8f;
     unsigned seed = 1337;
 
     for (int i = 1; i < argc; ++i) {
@@ -225,7 +261,21 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--seed") && i + 1 < argc) seed = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--eval-batches") && i + 1 < argc) eval_batches = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--save") && i + 1 < argc) save_path = argv[++i];
+        else if (!strcmp(argv[i], "--load") && i + 1 < argc) load_path = argv[++i];
+        else if (!strcmp(argv[i], "--len") && i + 1 < argc) sample_len = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--temp") && i + 1 < argc) temperature = atof(argv[++i]);
         else { fprintf(stderr, "unknown arg %s\n", argv[i]); return 1; }
+    }
+
+    // --load: restore a checkpoint and generate, no training, no dataset.
+    if (load_path) {
+        GPT lg;
+        lg.B = B;
+        std::vector<char> itos;
+        if (!load_checkpoint(lg, load_path, itos)) return 1;
+        std::mt19937 srng(seed + 1);
+        printf("\n%s\n", generate(lg, itos, sample_len, srng, temperature).c_str());
+        return 0;
     }
 
     Dataset ds = load_chars(data_path, 0.1f);
@@ -317,7 +367,7 @@ int main(int argc, char **argv) {
         }
 
         if (sample_every > 0 && step % sample_every == 0) {
-            const std::string txt = generate(g, ds.itos, sample_len, sample_rng, 0.8f);
+            const std::string txt = generate(g, ds.itos, sample_len, sample_rng, temperature);
             printf("  [sample] ------------------------------------------\n%s\n", txt.c_str());
             printf("  ---------------------------------------------------\n");
             fflush(stdout);
@@ -333,6 +383,6 @@ int main(int argc, char **argv) {
            best_val, best_step);
 
     printf("\nfinal sample:\n%s\n",
-           generate(g, ds.itos, 1000, sample_rng, 0.8f).c_str());
+           generate(g, ds.itos, 1000, sample_rng, temperature).c_str());
     return 0;
 }

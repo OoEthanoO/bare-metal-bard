@@ -87,10 +87,33 @@ repo.
 params    10.80M (41.2 MB; +41.2 MB grads, +82.4 MB adam state)
 memory    952.4 MB forward activations, 146.0 MB backward scratch
 batch     16 x 256 = 4096 tokens/step
-throughput ~46,300 tokens/s, ~88.6 ms/step, ~3320 GFLOP/s end-to-end
+speed     88.6 ms/step, 46,261 tokens/s, ~3320 GFLOP/s end to end
+loss      4.174 (= ln 65, uniform guess) -> 1.5157 val at step 2750
 ```
 
-Training curve and a sample are in [`docs/training.md`](docs/training.md).
+![training curve](docs/training_curve.svg)
+
+Validation bottoms at **1.5157** around step 2750 and then climbs -- 10.8M
+parameters on 1 MB of text overfits well before the LR schedule ends, so the
+best-validation checkpoint is the one kept, not the last. Full curve, config and
+sample: [`docs/training.md`](docs/training.md).
+
+Sampled from that checkpoint at temperature 0.8:
+
+```
+GLOUCESTER:
+He shall not be the curtain: an of your
+good chorn shall the gaze on the of your tried
+on prison, or brother the other reapt
+of one to supper, whom our pride to king
+In queen exposed fall outterprised, which in the
+good trooping high tune of mortal hour
+```
+
+The end-to-end 3320 GFLOP/s sits below the standalone GEMM peak (6420) because a
+training step is not all GEMM: layernorm, softmax, GELU, the attention permutes
+and the optimizer are all bandwidth-bound work at arithmetic intensity below 1,
+and the attention score matrices alone move 25 MB per layer per pass.
 
 ### The backward pass is gradient-checked
 
@@ -108,6 +131,18 @@ layernorm backward makes 14 of 16 tensors fail.
 
 ---
 
+## Writeup
+
+A longer writeup -- the profiling story, the measurement problem, the charts --
+is a static Next.js site under [`site/`](site/), deployed to GitHub Pages by
+`.github/workflows/pages.yml`. Every number on the page is generated from
+`bench/results.csv` and the training log by `tools/make_site_data.py`, so it
+cannot drift from the measurements.
+
+```bash
+npm --prefix site install && npm --prefix site run dev
+```
+
 ## Build and run
 
 Requires CUDA 12.x. On Ubuntu 26.04 the toolkit needs gcc ≤ 13 as host compiler
@@ -115,6 +150,12 @@ Requires CUDA 12.x. On Ubuntu 26.04 the toolkit needs gcc ≤ 13 as host compile
 
 ```bash
 sudo apt install nvidia-cuda-toolkit gcc-13 g++-13
+```
+
+Fetch the dataset (TinyShakespeare, ~1.1 MB; not committed):
+
+```bash
+./scripts/get_data.sh
 ```
 
 Pin the clock first — see *Methodology* below for why this is not optional:
@@ -129,7 +170,8 @@ Benchmark the matmuls against cuBLAS:
 make && ./bench/sgemm
 ```
 
-Verify the transpose-aware GEMM (40 shape × transpose combinations):
+Verify the GEMM against cuBLAS (56 shape × transpose combinations,
+including the batched kernel used by attention):
 
 ```bash
 make test
@@ -141,10 +183,16 @@ Gradient-check the model:
 make bench/test_grad && ./bench/test_grad
 ```
 
-Train the GPT:
+Train the GPT (about 7.5 minutes for 5000 steps on a 4070 Laptop):
 
 ```bash
 make gpt && ./bench/train_gpt -n 5000
+```
+
+Generate text from a saved checkpoint:
+
+```bash
+./bench/train_gpt --load bench/gpt.bin --len 1000 --temp 0.8
 ```
 
 Regenerate the charts:

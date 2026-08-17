@@ -1,8 +1,24 @@
+# build outputs
 bench/sgemm
 bench/device_query
+bench/test_gemm
+bench/test_grad
+bench/train_gpt
 *.o
+
+# trained weights (43 MB) and the dataset are reproducible; don't ship them
+bench/gpt.bin
+data/
+
+# profiler output
 *.ncu-rep
 *.nsys-rep
 *.sqlite
+
+# node / next
+node_modules/
+site/.next/
+site/out/
+site/next-env.d.ts
+
 __pycache__/
-data/

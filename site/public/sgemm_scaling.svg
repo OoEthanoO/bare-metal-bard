@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 430" font-family="ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif">
+<style>text{fill:#2b2b2b}.m{fill:#6b6b6b}@media(prefers-color-scheme:dark){text{fill:#e8e8e8}.m{fill:#a8a8a8}.grid{stroke:#3a3a3a}}</style>
+<text x="16" y="26" font-size="16" font-weight="600">Fraction of cuBLAS achieved, by matrix size</text>
+<text x="16" y="45" font-size="11.5" class="m">higher is better &#183; 100%% = matching cuBLAS SGEMM</text>
+<line class="grid" x1="62" y1="378.0" x2="710" y2="378.0" stroke="#d8d8d8" stroke-width="1"/>
+<text x="54" y="381.5" font-size="10" text-anchor="end" class="m">0%</text>
+<line class="grid" x1="62" y1="314.8" x2="710" y2="314.8" stroke="#d8d8d8" stroke-width="1"/>
+<text x="54" y="318.3" font-size="10" text-anchor="end" class="m">20%</text>
+<line class="grid" x1="62" y1="251.6" x2="710" y2="251.6" stroke="#d8d8d8" stroke-width="1"/>
+<text x="54" y="255.1" font-size="10" text-anchor="end" class="m">40%</text>
+<line class="grid" x1="62" y1="188.4" x2="710" y2="188.4" stroke="#d8d8d8" stroke-width="1"/>
+<text x="54" y="191.9" font-size="10" text-anchor="end" class="m">60%</text>
+<line class="grid" x1="62" y1="125.2" x2="710" y2="125.2" stroke="#d8d8d8" stroke-width="1"/>
+<text x="54" y="128.7" font-size="10" text-anchor="end" class="m">80%</text>
+<line class="grid" x1="62" y1="62.0" x2="710" y2="62.0" stroke="#d8d8d8" stroke-width="1"/>
+<text x="54" y="65.5" font-size="10" text-anchor="end" class="m">100%</text>
+<text x="62.0" y="398" font-size="10.5" text-anchor="middle" class="m">512</text>
+<text x="278.0" y="398" font-size="10.5" text-anchor="middle" class="m">1024</text>
+<text x="494.0" y="398" font-size="10.5" text-anchor="middle" class="m">2048</text>
+<text x="710.0" y="398" font-size="10.5" text-anchor="middle" class="m">4096</text>
+<text x="386" y="418" font-size="10.5" text-anchor="middle" class="m">matrix size N (N x N x N)</text>
+<polyline points="62.0,372.9 278.0,373.8 494.0,374.2 710.0,374.3" fill="none" stroke="#b3543f" stroke-width="2.4" stroke-linejoin="round"/>
+<circle cx="62.0" cy="372.9" r="3" fill="#b3543f"/>
+<circle cx="278.0" cy="373.8" r="3" fill="#b3543f"/>
+<circle cx="494.0" cy="374.2" r="3" fill="#b3543f"/>
+<circle cx="710.0" cy="374.3" r="3" fill="#b3543f"/>
+<text x="720" y="378.3" font-size="11.5" fill="#b3543f" font-weight="600">naive</text>
+<polyline points="62.0,334.9 278.0,343.0 494.0,346.5 710.0,349.1" fill="none" stroke="#c07f3c" stroke-width="2.4" stroke-linejoin="round"/>
+<circle cx="62.0" cy="334.9" r="3" fill="#c07f3c"/>
+<circle cx="278.0" cy="343.0" r="3" fill="#c07f3c"/>
+<circle cx="494.0" cy="346.5" r="3" fill="#c07f3c"/>
+<circle cx="710.0" cy="349.1" r="3" fill="#c07f3c"/>
+<text x="720" y="353.1" font-size="11.5" fill="#c07f3c" font-weight="600">coalesced</text>
+<polyline points="62.0,323.5 278.0,333.9 494.0,338.2 710.0,341.7" fill="none" stroke="#c9a63c" stroke-width="2.4" stroke-linejoin="round"/>
+<circle cx="62.0" cy="323.5" r="3" fill="#c9a63c"/>
+<circle cx="278.0" cy="333.9" r="3" fill="#c9a63c"/>
+<circle cx="494.0" cy="338.2" r="3" fill="#c9a63c"/>
+<circle cx="710.0" cy="341.7" r="3" fill="#c9a63c"/>
+<text x="720" y="345.7" font-size="11.5" fill="#c9a63c" font-weight="600">smem</text>
+<polyline points="62.0,226.5 278.0,252.1 494.0,254.8 710.0,263.2" fill="none" stroke="#9aa845" stroke-width="2.4" stroke-linejoin="round"/>
+<circle cx="62.0" cy="226.5" r="3" fill="#9aa845"/>
+<circle cx="278.0" cy="252.1" r="3" fill="#9aa845"/>
+<circle cx="494.0" cy="254.8" r="3" fill="#9aa845"/>
+<circle cx="710.0" cy="263.2" r="3" fill="#9aa845"/>
+<text x="720" y="267.2" font-size="11.5" fill="#9aa845" font-weight="600">tile1d</text>
+<polyline points="62.0,251.6 278.0,159.6 494.0,162.8 710.0,142.8" fill="none" stroke="#6a9f5c" stroke-width="2.4" stroke-linejoin="round"/>
+<circle cx="62.0" cy="251.6" r="3" fill="#6a9f5c"/>
+<circle cx="278.0" cy="159.6" r="3" fill="#6a9f5c"/>
+<circle cx="494.0" cy="162.8" r="3" fill="#6a9f5c"/>
+<circle cx="710.0" cy="142.8" r="3" fill="#6a9f5c"/>
+<text x="720" y="146.8" font-size="11.5" fill="#6a9f5c" font-weight="600">tile2d</text>
+<polyline points="62.0,213.1 278.0,90.1 494.0,115.3 710.0,98.9" fill="none" stroke="#3f8f74" stroke-width="2.4" stroke-linejoin="round"/>
+<circle cx="62.0" cy="213.1" r="3" fill="#3f8f74"/>
+<circle cx="278.0" cy="90.1" r="3" fill="#3f8f74"/>
+<circle cx="494.0" cy="115.3" r="3" fill="#3f8f74"/>
+<circle cx="710.0" cy="98.9" r="3" fill="#3f8f74"/>
+<text x="720" y="102.9" font-size="11.5" fill="#3f8f74" font-weight="600">vectorized</text>
+<polyline points="62.0,222.6 278.0,77.5 494.0,110.6 710.0,91.8" fill="none" stroke="#2f7d8a" stroke-width="2.4" stroke-linejoin="round"/>
+<circle cx="62.0" cy="222.6" r="3" fill="#2f7d8a"/>
+<circle cx="278.0" cy="77.5" r="3" fill="#2f7d8a"/>
+<circle cx="494.0" cy="110.6" r="3" fill="#2f7d8a"/>
+<circle cx="710.0" cy="91.8" r="3" fill="#2f7d8a"/>
+<text x="720" y="95.8" font-size="11.5" fill="#2f7d8a" font-weight="600">warptile</text>
+</svg>
