@@ -176,7 +176,6 @@ __global__ void bias_fwd_k(float *out, const float *bias, int C, int total4) {
     const float4 b = CVEC4(bias[c]);
     v.x += b.x; v.y += b.y; v.z += b.z; v.w += b.w;
     VEC4(out[i * 4]) = v;
-    (void)bias;
 }
 
 // dbias[c] = sum over all N rows of dout[n][c]. One block per output column,
@@ -358,11 +357,12 @@ float grad_global_norm(const float *grads, int n) {
 void zero_buffer(float *p, size_t n) { cudaMemset(p, 0, n * sizeof(float)); }
 
 float reduce_mean(const float *d_values, int n) {
-    float *d_out;
-    cudaMalloc(&d_out, sizeof(float));
+    // One persistent scalar rather than a malloc/free pair per call; this runs
+    // once per forward pass and cudaMalloc is not cheap.
+    static float *d_out = nullptr;
+    if (!d_out) cudaMalloc(&d_out, sizeof(float));
     reduce_mean_k<<<1, 256>>>(d_values, d_out, n);
     float h;
     cudaMemcpy(&h, d_out, sizeof(float), cudaMemcpyDeviceToHost);
-    cudaFree(d_out);
     return h;
 }

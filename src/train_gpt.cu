@@ -150,6 +150,45 @@ static void get_batch(const std::vector<int> &data, int B, int T,
     }
 }
 
+// Validation loss over several batches.
+//
+// A single batch of B*T tokens is a noisy estimate -- during development the
+// single-batch number swung by 0.17 nats between adjacent evals, which is
+// larger than the improvement being measured over the same interval. Averaging
+// over several independent batches, drawn from a dedicated RNG so evaluation
+// never perturbs the training data order, makes the curve mean something.
+static float evaluate(GPT &g, const std::vector<int> &data, int B, int T,
+                      unsigned seed, int n_batches) {
+    std::mt19937 erng(seed);
+    std::vector<int> x((size_t)B * T), y((size_t)B * T);
+    double total = 0.0;
+    for (int i = 0; i < n_batches; ++i) {
+        get_batch(data, B, T, erng, x, y);
+        total += gpt_forward(g, x.data(), y.data());
+    }
+    return (float)(total / n_batches);
+}
+
+static void save_checkpoint(const GPT &g, const char *path,
+                            const std::vector<char> &itos, bool verbose = true) {
+    FILE *f = fopen(path, "wb");
+    if (!f) { fprintf(stderr, "cannot write %s\n", path); return; }
+    const int magic = 0x47505431;  // "GPT1"
+    fwrite(&magic, sizeof(int), 1, f);
+    fwrite(&g.config, sizeof(GPTConfig), 1, f);
+    const int nvocab = (int)itos.size();
+    fwrite(&nvocab, sizeof(int), 1, f);
+    fwrite(itos.data(), 1, itos.size(), f);
+    std::vector<float> h(g.num_params);
+    cudaMemcpy(h.data(), g.params_mem, g.num_params * sizeof(float),
+               cudaMemcpyDeviceToHost);
+    fwrite(h.data(), sizeof(float), g.num_params, f);
+    fclose(f);
+    if (verbose)
+        printf("saved checkpoint -> %s (%.1f MB)\n", path,
+               g.num_params * 4.0 / 1048576.0);
+}
+
 // Linear warmup then cosine decay to lr_max/10. Warmup matters here because
 // Adam's second-moment estimate is near-meaningless for the first few steps,
 // and a full-size step taken against it can knock the model into a bad basin
@@ -168,6 +207,8 @@ int main(int argc, char **argv) {
     float lr = 1e-3f, weight_decay = 0.1f, grad_clip = 1.0f;
     int warmup = 100;
     int eval_every = 100, sample_every = 500, sample_len = 400;
+    int eval_batches = 20;
+    const char *save_path = "bench/gpt.bin";
     unsigned seed = 1337;
 
     for (int i = 1; i < argc; ++i) {
@@ -182,6 +223,8 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--eval") && i + 1 < argc) eval_every = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--sample") && i + 1 < argc) sample_every = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--seed") && i + 1 < argc) seed = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--eval-batches") && i + 1 < argc) eval_batches = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--save") && i + 1 < argc) save_path = argv[++i];
         else { fprintf(stderr, "unknown arg %s\n", argv[i]); return 1; }
     }
 
@@ -209,6 +252,8 @@ int main(int argc, char **argv) {
            act_mb, gact_mb);
     printf("batch     %d x %d = %d tokens/step\n\n", B, T, B * T);
 
+    float best_val = 1e30f;
+    int best_step = 0;
     std::mt19937 rng(seed), sample_rng(seed + 1);
     std::vector<int> x((size_t)B * T), y((size_t)B * T);
 
@@ -255,9 +300,19 @@ int main(int argc, char **argv) {
         }
 
         if (step % eval_every == 0) {
-            get_batch(ds.val, B, T, rng, x, y);
-            const float vl = gpt_forward(g, x.data(), y.data());
-            printf("  [eval] step %d  val loss %.4f\n", step, vl);
+            // Fixed seed: every eval sees the SAME validation batches, so the
+            // curve reflects the model changing rather than the sample.
+            const float vl = evaluate(g, ds.val, B, T, 7777, eval_batches);
+            const bool best = vl < best_val;
+            if (best) {
+                best_val = vl;
+                best_step = step;
+                // 10.8M params on ~1 MB of text overfits, so the final-step
+                // model is not the best one. Keep the best-validation weights.
+                if (save_path && *save_path) save_checkpoint(g, save_path, ds.itos, false);
+            }
+            printf("  [eval] step %d  val loss %.4f  (%d batches)%s\n", step, vl,
+                   eval_batches, best ? "  <- best" : "");
             fflush(stdout);
         }
 
@@ -268,6 +323,14 @@ int main(int argc, char **argv) {
             fflush(stdout);
         }
     }
+
+    const float final_val = evaluate(g, ds.val, B, T, 7777, eval_batches);
+    const float final_train = evaluate(g, ds.train, B, T, 8888, eval_batches);
+    printf("\nfinal  train loss %.4f   val loss %.4f   (%d batches each)\n",
+           final_train, final_val, eval_batches);
+
+    printf("best   val loss %.4f at step %d (checkpoint saved there)\n",
+           best_val, best_step);
 
     printf("\nfinal sample:\n%s\n",
            generate(g, ds.itos, 1000, sample_rng, 0.8f).c_str());

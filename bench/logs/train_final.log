@@ -1,0 +1,20 @@
+data      1003855 train / 111539 val tokens, vocab 65 (padded 128)
+model     6 layers, 6 heads, 384 embd, ctx 256
+params    10.80M (41.2 MB; +41.2 MB grads, +82.4 MB adam state)
+memory    952.4 MB forward activations, 146.0 MB backward scratch
+batch     16 x 256 = 4096 tokens/step
+
+step     1/5000  loss 4.2783  lr 1.00e-05  |g| 15.023    91.5 ms    44757 tok/s   3216 GFLOP/s
+step    10/5000  loss 3.0931  lr 1.00e-04  |g| 4.977    88.7 ms    46202 tok/s   3319 GFLOP/s
+step    20/5000  loss 2.7512  lr 2.00e-04  |g| 1.732    88.7 ms    46173 tok/s   3317 GFLOP/s
+step    30/5000  loss 2.6080  lr 3.00e-04  |g| 1.184    88.6 ms    46210 tok/s   3320 GFLOP/s
+step    40/5000  loss 2.5970  lr 4.00e-04  |g| 1.809    88.8 ms    46121 tok/s   3314 GFLOP/s
+step    50/5000  loss 2.5259  lr 5.00e-04  |g| 0.884    88.6 ms    46214 tok/s   3320 GFLOP/s
+step    60/5000  loss 2.5234  lr 6.00e-04  |g| 0.809    88.7 ms    46175 tok/s   3318 GFLOP/s
+step    70/5000  loss 2.4791  lr 7.00e-04  |g| 0.697    88.6 ms    46254 tok/s   3323 GFLOP/s
+step    80/5000  loss 2.4968  lr 8.00e-04  |g| 1.029    88.7 ms    46192 tok/s   3319 GFLOP/s
+step    90/5000  loss 2.5092  lr 9.00e-04  |g| 0.770    88.6 ms    46234 tok/s   3322 GFLOP/s
+step   100/5000  loss 2.5016  lr 1.00e-03  |g| 0.784    88.7 ms    46164 tok/s   3317 GFLOP/s
+step   110/5000  loss 2.5254  lr 1.00e-03  |g| 0.859    88.6 ms    46227 tok/s   3321 GFLOP/s
+step   120/5000  loss 2.4410  lr 1.00e-03  |g| 0.717    88.6 ms    46243 tok/s   3322 GFLOP/s
+step   130/5000  loss 2.4318  lr 1.00e-03  |g| 0.762    88.5 ms    46259 tok/s   3324 GFLOP/s
