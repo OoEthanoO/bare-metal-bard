@@ -131,7 +131,7 @@ struct Accuracy {
 // produces errors comparable to the entries themselves, order 1e-1 or worse.
 // A 1e-4 threshold sits three orders of magnitude clear of both.
 static Accuracy compare(const std::vector<float> &got,
-                        const std::vector<float> &ref) {
+                        const std::vector<float> &ref, double tol) {
     Accuracy a{0.0, 0.0, true};
     double ref_inf = 0.0;
     for (size_t i = 0; i < ref.size(); ++i) {
@@ -142,7 +142,7 @@ static Accuracy compare(const std::vector<float> &got,
         if (!std::isfinite((double)got[i])) { a.pass = false; }
     }
     a.norm_rel = a.max_abs / std::max(ref_inf, 1e-30);
-    if (a.norm_rel >= 1e-4) a.pass = false;
+    if (a.norm_rel >= tol) a.pass = false;
     return a;
 }
 
@@ -244,8 +244,9 @@ int main(int argc, char **argv) {
         if (!exists) fprintf(csv, "kernel_id,kernel,size,gflops_best,gflops_median,cublas_gflops_best,pct_of_cublas\n");
     }
 
-    printf("%-4s %-24s %6s %12s %12s %12s %8s  %s\n", "id", "kernel", "size",
-           "best GF/s", "med GF/s", "cuBLAS GF/s", "%cuBLAS", "verify");
+    printf("%-4s %-20s %6s %11s %11s %11s %8s  %-9s %s\n", "id", "kernel",
+           "size", "best GF/s", "med GF/s", "cuBLAS GF/s", "%cuBLAS",
+           "err", "verify");
     printf("%s\n", std::string(100, '-').c_str());
 
     for (int id : ids) {
@@ -268,7 +269,7 @@ int main(int argc, char **argv) {
                 std::vector<float> got(elems), ref(elems);
                 CUDA_CHECK(cudaMemcpy(got.data(), dC, elems * sizeof(float), cudaMemcpyDeviceToHost));
                 CUDA_CHECK(cudaMemcpy(ref.data(), dRef, elems * sizeof(float), cudaMemcpyDeviceToHost));
-                acc = compare(got, ref);
+                acc = compare(got, ref, ke->tol);
             }
 
             // --- timing, beta = 0 so repeated iterations stay bounded ---
@@ -281,11 +282,17 @@ int main(int argc, char **argv) {
             double gfb = gflops(M, N, K, tb.best_ms);
             double pct = 100.0 * gf / gfb;
 
-            printf("%-4d %-24s %6d %12.1f %12.1f %12.1f %7.1f%%  %s\n", ke->id,
-                   ke->name, n, gf, gfm, gfb, pct,
+            // The error column is normwise relative error against the fp32
+            // cuBLAS reference. It is printed always, not just on failure:
+            // for the tensor-core kernel it is the visible price of TF32's
+            // 10-bit mantissa, and that belongs in the table next to the
+            // speed it bought.
+            char errbuf[16];
+            if (verify) snprintf(errbuf, sizeof errbuf, "%.1e", acc.norm_rel);
+            else        snprintf(errbuf, sizeof errbuf, "%s", "-");
+            printf("%-4d %-20s %6d %11.1f %11.1f %11.1f %7.1f%%  %-9s %s\n",
+                   ke->id, ke->name, n, gf, gfm, gfb, pct, errbuf,
                    !verify ? "skipped" : (acc.pass ? "ok" : "FAIL"));
-            if (verify && !acc.pass)
-                printf("     max_abs=%.3e norm_rel=%.3e\n", acc.max_abs, acc.norm_rel);
 
             if (csv)
                 fprintf(csv, "%d,%s,%d,%.2f,%.2f,%.2f,%.2f\n", ke->id, ke->name,

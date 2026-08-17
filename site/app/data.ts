@@ -7,102 +7,166 @@ export const data = {
       "id": 1,
       "name": "naive",
       "gflops": 82.78,
-      "pct": 1.16,
+      "pct": 1.17,
       "note": "one thread per output element, uncoalesced",
       "intensity": 0.25,
       "bySize": {
-        "512": 1.62,
-        "1024": 1.34,
+        "512": 1.68,
+        "1024": 1.35,
         "2048": 1.21,
-        "4096": 1.16
+        "4096": 1.17
       }
     },
     {
       "id": 2,
       "name": "coalesced",
-      "gflops": 647.72,
-      "pct": 9.14,
+      "gflops": 646.56,
+      "pct": 9.12,
       "note": "swapped which index maps to threadIdx.x",
       "intensity": 0.25,
       "bySize": {
-        "512": 13.64,
-        "1024": 11.08,
-        "2048": 9.96,
-        "4096": 9.14
+        "512": 13.21,
+        "1024": 11.05,
+        "2048": 9.97,
+        "4096": 9.12
       }
     },
     {
       "id": 3,
       "name": "smem",
-      "gflops": 814.63,
+      "gflops": 814.67,
       "pct": 11.49,
       "note": "32x32 shared-memory tile",
       "intensity": 8,
       "bySize": {
-        "512": 17.24,
-        "1024": 13.95,
-        "2048": 12.59,
+        "512": 16.67,
+        "1024": 14.04,
+        "2048": 12.58,
         "4096": 11.49
       }
     },
     {
       "id": 4,
       "name": "tile1d",
-      "gflops": 2576.75,
-      "pct": 36.33,
+      "gflops": 2579.03,
+      "pct": 36.38,
       "note": "8 outputs per thread (TM=8)",
       "intensity": 16,
       "bySize": {
-        "512": 47.93,
-        "1024": 39.83,
-        "2048": 39.0,
-        "4096": 36.33
+        "512": 48.76,
+        "1024": 39.79,
+        "2048": 39.03,
+        "4096": 36.38
       }
     },
     {
       "id": 5,
       "name": "tile2d",
-      "gflops": 5273.78,
-      "pct": 74.42,
+      "gflops": 5267.36,
+      "pct": 74.33,
       "note": "8x8 register tile, outer-product form",
       "intensity": 32,
       "bySize": {
-        "512": 40.0,
-        "1024": 69.12,
-        "2048": 68.11,
-        "4096": 74.42
+        "512": 38.93,
+        "1024": 69.27,
+        "2048": 68.04,
+        "4096": 74.33
       }
     },
     {
       "id": 6,
       "name": "vectorized",
-      "gflops": 6260.16,
-      "pct": 88.33,
+      "gflops": 6254.62,
+      "pct": 88.1,
       "note": "float4 loads + transposed A tile",
       "intensity": 32,
       "bySize": {
-        "512": 52.17,
-        "1024": 91.12,
-        "2048": 83.14,
-        "4096": 88.33
+        "512": 49.58,
+        "1024": 91.1,
+        "2048": 83.11,
+        "4096": 88.1
       }
     },
     {
       "id": 7,
       "name": "warptile",
-      "gflops": 6420.37,
-      "pct": 90.58,
+      "gflops": 6405.35,
+      "pct": 90.2,
       "note": "block -> warp -> thread blocking",
       "intensity": 32,
       "bySize": {
-        "512": 49.19,
-        "1024": 95.08,
-        "2048": 84.62,
-        "4096": 90.58
+        "512": 47.97,
+        "1024": 94.29,
+        "2048": 84.32,
+        "4096": 90.2
+      }
+    },
+    {
+      "id": 8,
+      "name": "dbuffer",
+      "gflops": 6801.69,
+      "pct": 96.0,
+      "note": "double-buffered SMEM, one barrier per chunk",
+      "intensity": 32,
+      "bySize": {
+        "512": 49.57,
+        "1024": 98.3,
+        "2048": 89.34,
+        "4096": 96.0
+      }
+    },
+    {
+      "id": 9,
+      "name": "tensorcore",
+      "gflops": 8130.48,
+      "pct": 114.51,
+      "note": "WMMA m16n16k8 TF32 tensor cores",
+      "intensity": 64,
+      "bySize": {
+        "512": 60.2,
+        "1024": 109.4,
+        "2048": 104.97,
+        "4096": 114.51
       }
     }
   ],
-  "cublas": 7087.97,
+  "tf32": {
+    "dbuffer": {
+      "1024": {
+        "gflops": 5924.16,
+        "pct": 65.82,
+        "cublasTf32": 9000.65
+      },
+      "2048": {
+        "gflops": 6114.15,
+        "pct": 65.31,
+        "cublasTf32": 9362.29
+      },
+      "4096": {
+        "gflops": 6776.96,
+        "pct": 64.2,
+        "cublasTf32": 10555.86
+      }
+    },
+    "tensorcore": {
+      "1024": {
+        "gflops": 6594.82,
+        "pct": 73.58,
+        "cublasTf32": 8962.19
+      },
+      "2048": {
+        "gflops": 7191.26,
+        "pct": 77.03,
+        "cublasTf32": 9336.24
+      },
+      "4096": {
+        "gflops": 8095.16,
+        "pct": 76.72,
+        "cublasTf32": 10550.88
+      }
+    }
+  },
+  "cublas": 7100.34,
   "benchSize": 4096,
   "sizes": [
     512,

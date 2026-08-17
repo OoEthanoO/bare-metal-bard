@@ -15,6 +15,13 @@ struct KernelEntry {
     const char *name;
     sgemm_fn fn;
     const char *note;
+    // Normwise tolerance against the fp32 cuBLAS reference. Every fp32 kernel
+    // uses 1e-4; the tensor-core kernel needs more room because TF32 keeps only
+    // 10 mantissa bits, so it is computing a deliberately lower-precision
+    // answer rather than computing the same answer badly. Making this per
+    // kernel keeps that concession explicit and local instead of loosening the
+    // bar for kernels that have no excuse.
+    double tol;
 };
 
 extern const KernelEntry KERNELS[];
@@ -32,3 +39,4 @@ void sgemm_tile2d(int M, int N, int K, float alpha, const float *A, const float 
 void sgemm_vectorized(int M, int N, int K, float alpha, const float *A, const float *B, float beta, float *C);
 void sgemm_warptile(int M, int N, int K, float alpha, const float *A, const float *B, float beta, float *C);
 void sgemm_doublebuffer(int M, int N, int K, float alpha, const float *A, const float *B, float beta, float *C);
+void sgemm_tensorcore(int M, int N, int K, float alpha, const float *A, const float *B, float beta, float *C);

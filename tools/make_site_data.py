@@ -13,6 +13,7 @@ import re
 from collections import defaultdict
 
 CSV = "bench/results.csv"
+CSV_TF32 = "bench/results_tf32.csv"
 LOG = "bench/logs/train_final.log"
 OUT = "site/app/data.ts"
 
@@ -24,10 +25,13 @@ NOTES = {
     "tile2d": "8x8 register tile, outer-product form",
     "vectorized": "float4 loads + transposed A tile",
     "warptile": "block -> warp -> thread blocking",
+    "dbuffer": "double-buffered SMEM, one barrier per chunk",
+    "tensorcore": "WMMA m16n16k8 TF32 tensor cores",
 }
 INTENSITY = {
     "naive": 0.25, "coalesced": 0.25, "smem": 8, "tile1d": 16,
-    "tile2d": 32, "vectorized": 32, "warptile": 32,
+    "tile2d": 32, "vectorized": 32, "warptile": 32, "dbuffer": 32,
+    "tensorcore": 64,
 }
 
 # ---- benchmark ----
@@ -49,6 +53,20 @@ for i, name in enumerate(order):
         "note": NOTES.get(name, ""), "intensity": INTENSITY.get(name, 0),
         "bySize": {str(s): rows[name][s][1] for s in sorted(rows[name])},
     })
+
+# ---- TF32 comparison ----
+# cuBLAS SGEMM defaults to true fp32; TF32 is opt-in. Carrying both baselines
+# keeps the tensor-core kernel's numbers honest: it beats fp32 cuBLAS but
+# trails cuBLAS's own tensor-core path.
+tf32 = {}
+if os.path.exists(CSV_TF32):
+    with open(CSV_TF32) as f:
+        for r in csv.DictReader(f):
+            tf32.setdefault(r["kernel"], {})[r["size"]] = {
+                "gflops": float(r["gflops_best"]),
+                "pct": float(r["pct_of_cublas"]),
+                "cublasTf32": float(r["cublas_gflops_best"]),
+            }
 
 # ---- training ----
 train, evals = [], []
@@ -102,6 +120,7 @@ training = {
 
 data = {
     "kernels": kernels,
+    "tf32": tf32,
     "cublas": cublas[BIG],
     "benchSize": BIG,
     "sizes": sorted(cublas),

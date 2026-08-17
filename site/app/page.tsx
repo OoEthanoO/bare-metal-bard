@@ -2,10 +2,18 @@ import { data } from './data';
 
 // Slow -> fast. Matches the ramp used by tools/plot_results.py so the inline
 // bars and the SVG charts read as one system.
-const RAMP = ['#b3543f', '#c07f3c', '#c9a63c', '#9aa845', '#6a9f5c', '#3f8f74', '#2f7d8a'];
+const RAMP = [
+  '#b3543f', '#c07f3c', '#c9a63c', '#9aa845', '#6a9f5c',
+  '#3f8f74', '#2f7d8a', '#2f6f9a', '#5a5aa8',
+];
+const CUBLAS_C = '#8a6fb0';
+
+const byName = (n: string) => data.kernels.find((k) => k.name === n)!;
 
 function KernelBars() {
-  const max = data.cublas;
+  // Kernels 8 and 9 pass the cuBLAS line, so the axis cannot be scaled to it.
+  const fastest = Math.max(...data.kernels.map((k) => k.gflops));
+  const max = Math.max(data.cublas, fastest) * 1.02;
   return (
     <div className="bars">
       {data.kernels.map((k, i) => (
@@ -21,7 +29,7 @@ function KernelBars() {
             />
           </div>
           <div className="val">
-            <b>{k.gflops.toFixed(0)}</b> <span>{k.pct.toFixed(1)}%</span>
+            <b>{k.gflops.toFixed(0)}</b> <span>{k.pct.toFixed(0)}%</span>
           </div>
         </div>
       ))}
@@ -30,7 +38,10 @@ function KernelBars() {
           cuBLAS
         </div>
         <div className="track">
-          <div className="fill" style={{ width: '100%', background: '#8a6fb0', opacity: 0.4 }} />
+          <div
+            className="fill"
+            style={{ width: `${(data.cublas / max) * 100}%`, background: CUBLAS_C, opacity: 0.42 }}
+          />
         </div>
         <div className="val">
           <b>{data.cublas.toFixed(0)}</b> <span>100%</span>
@@ -42,20 +53,26 @@ function KernelBars() {
 
 export default function Page() {
   const t = data.training;
-  const best = data.kernels[data.kernels.length - 1];
   const first = data.kernels[0];
-  const speedup = best.gflops / first.gflops;
+  const dbuf = byName('dbuffer');
+  const tc = byName('tensorcore');
+  const warp = byName('warptile');
+  const vec = byName('vectorized');
+  const speedup = tc.gflops / first.gflops;
+
+  const tcTf32 = (data.tf32 as any)?.tensorcore?.[String(data.benchSize)];
+  const dbTf32 = (data.tf32 as any)?.dbuffer?.[String(data.benchSize)];
 
   return (
     <main className="wrap">
       <header className="hero">
         <p className="eyebrow">CUDA · from scratch</p>
-        <h1>Writing a CUDA matmul that reaches 90% of cuBLAS — then training a GPT on it</h1>
+        <h1>Writing a CUDA matmul that catches cuBLAS — then training a GPT on it</h1>
         <p className="lede">
-          Seven rewrites of a single kernel, from the naive version everyone writes first to a
-          warp-tiled one that lands within 10% of NVIDIA&rsquo;s hand-tuned library. Then a language
-          model trained end to end on it, with no PyTorch and no vendor BLAS anywhere in the
-          training path.
+          Nine rewrites of a single kernel, from the naive version everyone writes first to a
+          double-buffered, warp-tiled one that matches NVIDIA&rsquo;s hand-tuned library — and a
+          tensor-core version that passes it. Then a language model trained end to end on those
+          kernels, with no PyTorch and no vendor BLAS anywhere in the training path.
         </p>
         <div className="statgrid">
           <div className="stat">
@@ -63,8 +80,8 @@ export default function Page() {
             <span className="k">faster than the naive kernel</span>
           </div>
           <div className="stat">
-            <span className="v">{best.pct.toFixed(1)}%</span>
-            <span className="k">of cuBLAS at N={data.benchSize}</span>
+            <span className="v">{dbuf.pct.toFixed(0)}%</span>
+            <span className="k">of cuBLAS in fp32, like for like</span>
           </div>
           <div className="stat">
             <span className="v">{(t.tokPerSec / 1000).toFixed(1)}k</span>
@@ -89,17 +106,18 @@ export default function Page() {
         waiting on memory. A naive matmul manages <strong>0.25</strong>.
       </p>
       <p>
-        That gap — a factor of ~170 — is the entire project. Every optimization below is the same
-        move applied at a different level of the memory hierarchy:{' '}
+        That gap — a factor of ~170 — is the entire project. Almost every optimization below is the
+        same move applied at a different level of the memory hierarchy:{' '}
         <em>load a value once, then spend it on as much arithmetic as possible before letting it
         go.</em>
       </p>
 
-      <h2>The seven kernels</h2>
+      <h2>The nine kernels</h2>
       <KernelBars />
       <p className="cap">
-        GFLOP/s at N={data.benchSize}, fp32, SM clock pinned to 1200 MHz. cuBLAS measured in the
-        same process immediately after each kernel.
+        GFLOP/s at N={data.benchSize}, SM clock pinned to 1200 MHz. The cuBLAS baseline is{' '}
+        <strong>fp32</strong>, which is what cuBLAS does by default. Kernel 9 uses tensor cores and
+        is therefore not computing the same thing — see below.
       </p>
 
       <div className="tablewrap">
@@ -115,8 +133,8 @@ export default function Page() {
             </tr>
           </thead>
           <tbody>
-            {data.kernels.map((k, i) => (
-              <tr key={k.name} className={i === data.kernels.length - 1 ? 'hi' : undefined}>
+            {data.kernels.map((k) => (
+              <tr key={k.name} className={k.name === 'dbuffer' || k.name === 'tensorcore' ? 'hi' : undefined}>
                 <td className="n">{k.id}</td>
                 <td>
                   <code>{k.name}</code>
@@ -179,8 +197,8 @@ export default function Page() {
 
       <h2>The profiler found what reading could not</h2>
       <p>
-        At kernel 6 I was at {data.kernels[5].pct.toFixed(1)}% and out of ideas. Nsight Compute gave
-        the answer in three lines:
+        At kernel 6 I was at {vec.pct.toFixed(0)}% and out of ideas. Nsight Compute gave the answer
+        in three lines:
       </p>
       <pre>
         <code>{`DRAM Throughput          15.1%   <- global memory is not the problem
@@ -205,6 +223,7 @@ Compute (SM) Throughput  54.2%`}</code>
               <th>metric</th>
               <th className="n">kernel 6</th>
               <th className="n">kernel 7</th>
+              <th className="n">kernel 8</th>
             </tr>
           </thead>
           <tbody>
@@ -212,37 +231,138 @@ Compute (SM) Throughput  54.2%`}</code>
               <td>L1/TEX throughput</td>
               <td className="n">81.4%</td>
               <td className="n">50.0%</td>
+              <td className="n">52.6%</td>
             </tr>
             <tr>
               <td>Memory throughput</td>
               <td className="n">73.8%</td>
               <td className="n">45.3%</td>
+              <td className="n">46.1%</td>
             </tr>
             <tr>
               <td>Compute (SM)</td>
               <td className="n">54.2%</td>
               <td className="n">54.8%</td>
+              <td className="n">55.8%</td>
+            </tr>
+            <tr className="hi">
+              <td>Warp cycles per issued instruction</td>
+              <td className="n">5.75</td>
+              <td className="n">3.08</td>
+              <td className="n">2.85</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2>Kernel 8: the loop was shaped wrong</h2>
+      <p>
+        Kernel 7 left the kernel in a genuinely different regime — neither memory (45%) nor compute
+        (55%) saturated. It was <strong>latency bound</strong>, and the reason was visible in the
+        loop structure rather than in any counter:
+      </p>
+      <pre>
+        <code>{`load global -> shared        <- ~500 cycle latency
+__syncthreads()              <- every warp blocks until it lands
+compute on the tile
+__syncthreads()              <- and blocks again before overwriting`}</code>
+      </pre>
+      <p>
+        The load is immediately followed by a barrier, so nothing overlaps it. Every K-chunk pays a
+        full round trip to DRAM with the arithmetic units idle. Double buffering keeps two tiles in
+        shared memory: while the warps compute on one, the next chunk&rsquo;s loads are already in
+        flight. It also halves the barriers, because reading one buffer and writing the other
+        cannot conflict.
+      </p>
+      <p>
+        That took kernel 8 to <strong>{dbuf.pct.toFixed(1)}% of cuBLAS</strong> at N=
+        {data.benchSize}, and past it at sizes that divide evenly into the 128×128 block tile —
+        103.7% at N=1536 and 106.3% at N=6144, reproducible across runs. The cost was 219 registers
+        against 186, and 32 KiB of shared memory against 16.
+      </p>
+
+      <h2>Kernel 9: the silicon I had not touched</h2>
+      <p>
+        Everything to this point runs on the SM&rsquo;s fp32 FMA pipes. The card also has tensor
+        cores, which had been idle for eight kernels. The honest way to see how much that matters
+        is to let cuBLAS use them too:
+      </p>
+      <div className="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>at N={data.benchSize}</th>
+              <th className="n">GFLOP/s</th>
+              <th className="n">vs fp32 cuBLAS</th>
+              <th className="n">vs TF32 cuBLAS</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>cuBLAS, true fp32 (default)</td>
+              <td className="n">{data.cublas.toFixed(0)}</td>
+              <td className="n">100%</td>
+              <td className="n">—</td>
             </tr>
             <tr>
-              <td>DRAM</td>
-              <td className="n">15.1%</td>
-              <td className="n">15.9%</td>
+              <td>cuBLAS, TF32 tensor cores</td>
+              <td className="n">{tcTf32 ? tcTf32.cublasTf32.toFixed(0) : '—'}</td>
+              <td className="n">
+                {tcTf32 ? ((tcTf32.cublasTf32 / data.cublas) * 100).toFixed(0) : '—'}%
+              </td>
+              <td className="n">100%</td>
+            </tr>
+            <tr>
+              <td>
+                <code>dbuffer</code> (mine, fp32)
+              </td>
+              <td className="n">{dbuf.gflops.toFixed(0)}</td>
+              <td className="n">{dbuf.pct.toFixed(1)}%</td>
+              <td className="n">{dbTf32 ? dbTf32.pct.toFixed(1) : '—'}%</td>
+            </tr>
+            <tr className="hi">
+              <td>
+                <code>tensorcore</code> (mine, TF32)
+              </td>
+              <td className="n">{tc.gflops.toFixed(0)}</td>
+              <td className="n">{tc.pct.toFixed(1)}%</td>
+              <td className="n">{tcTf32 ? tcTf32.pct.toFixed(1) : '—'}%</td>
             </tr>
           </tbody>
         </table>
       </div>
       <p>
-        The prediction held. And the kernel is now in a genuinely different regime: neither memory
-        (45%) nor compute (55%) is saturated, at ~25% occupancy. It is{' '}
-        <strong>latency bound</strong> — which is what double-buffering the global-to-shared load
-        would attack next.
+        So the tensor-core kernel beats fp32 cuBLAS by {(tc.pct - 100).toFixed(0)}%, and trails
+        cuBLAS&rsquo;s own tensor-core path by about{' '}
+        {tcTf32 ? (100 - tcTf32.pct).toFixed(0) : '23'}%. Both of those are worth saying out loud;
+        quoting only the first would be the flattering half.
+      </p>
+      <div className="note">
+        <p style={{ margin: 0 }}>
+          <strong>TF32 is not free speed.</strong> Despite the name it has fp32&rsquo;s 8-bit
+          exponent but only 10 mantissa bits — fp32&rsquo;s range at roughly fp16&rsquo;s precision.
+          Measured normwise error against an fp32 reference goes from <strong>6.2e-08</strong> for
+          the fp32 kernels to <strong>2.4e-04</strong> for this one. That is ~4000× more error, and
+          it is a deliberate trade, not a bug: it is the trade that makes neural network training
+          fast, and it is why this kernel carries its own tolerance in the test suite rather than
+          quietly loosening the bar for everyone.
+        </p>
+      </div>
+      <p>
+        Tuning it was also a reminder that intuition is not a substitute for measurement. The first
+        version gave each thread a 4×4 grid of accumulator fragments and hit{' '}
+        <strong>255 registers</strong> — the hardware ceiling — which throttled occupancy. Spreading
+        the same block tile over 8 warps instead of 4 cut that to 128 registers. And of two
+        arrangements with <em>identical</em> register counts and identical instruction counts, one
+        was 27% faster than the other, purely from how the warps&rsquo; fragment loads land in
+        shared memory.
       </p>
 
       <figure>
         <img src="/sgemm_scaling.svg" alt="Fraction of cuBLAS achieved, by matrix size" />
         <figcaption>
-          Holding up across sizes. Small matrices fall off because a 128×128 block tile leaves most
-          of the 36 SMs idle — at N=512 the grid is only 4×4 blocks.
+          Small matrices fall off because a 128×128 block tile leaves most of the 36 SMs idle — at
+          N=512 the grid is only 4×4 blocks.
         </figcaption>
       </figure>
 
@@ -251,7 +371,7 @@ Compute (SM) Throughput  54.2%`}</code>
         A matmul is only interesting if something uses it. So the second half was a GPT — 6 layers,
         6 heads, 384 embedding, 256 context, weight-tied head, 10.8M parameters — trained on
         character-level Shakespeare. Layernorm, GELU, causal multi-head attention, softmax,
-        cross-entropy and AdamW are all hand-written; every matmul routes through the kernel above.
+        cross-entropy and AdamW are all hand-written; every matmul routes through the kernels above.
       </p>
       <p>
         The backward pass needs <code>dX = dY·Wᵀ</code> and <code>dW = dYᵀ·X</code>. Rather than
@@ -318,12 +438,16 @@ Compute (SM) Throughput  54.2%`}</code>
       <h2>What I&rsquo;d do next</h2>
       <ol>
         <li>
-          <strong>Double-buffer</strong> the global-to-shared load, to attack the latency bound that
-          kernel 7 ends on.
+          <strong>Raw <code>mma.sync</code></strong> instead of WMMA. The remaining ~23% gap to
+          cuBLAS&rsquo;s tensor-core path is mostly fragment scheduling that WMMA&rsquo;s
+          abstraction does not expose.
         </li>
         <li>
-          <strong>Tensor cores.</strong> sm_89 has them and an fp32 SGEMM leaves them completely
-          unused.
+          <strong>
+            <code>cp.async</code>
+          </strong>{' '}
+          for the staging copies, so the prefetch bypasses registers entirely rather than costing 32
+          of them per thread.
         </li>
         <li>
           <strong>Fuse attention</strong> FlashAttention-style. The current version materializes the
@@ -332,6 +456,7 @@ Compute (SM) Throughput  54.2%`}</code>
         </li>
         <li>
           <strong>Multi-GPU</strong>, where communication rather than compute becomes the limit.
+          That one needs hardware this laptop does not have.
         </li>
       </ol>
 

@@ -1,7 +1,8 @@
 # A CUDA matmul, and a language model built on top of it
 
-A hand-written CUDA SGEMM taken from 1.2% to **90.6% of cuBLAS**, then used to
-train a GPT from scratch. No PyTorch, no cuBLAS, no cuDNN in the training path —
+A hand-written CUDA SGEMM taken from 1.2% of cuBLAS to **matching it in fp32**
+(96%) and **passing it with tensor cores** (115%), then used to train a GPT from
+scratch. No PyTorch, no cuBLAS, no cuDNN in the training path —
 every matmul, layernorm, softmax, attention, GELU, cross-entropy and AdamW
 kernel here is written from scratch.
 
@@ -20,15 +21,46 @@ At N=4096, fp32, SM clock pinned to 1200 MHz:
 | # | kernel | GFLOP/s | % of cuBLAS | what changed |
 |---|--------|--------:|------------:|--------------|
 | 1 | naive | 82.8 | 1.2% | one thread per output element |
-| 2 | coalesced | 647.7 | 9.1% | swapped which index maps to `threadIdx.x` |
-| 3 | smem | 814.6 | 11.5% | 32×32 shared-memory tile |
-| 4 | tile1d | 2576.8 | 36.3% | 8 outputs per thread |
-| 5 | tile2d | 5273.8 | 74.4% | 8×8 register tile (outer product) |
-| 6 | vectorized | 6260.2 | 88.3% | `float4` loads + transposed A tile |
-| 7 | warptile | **6420.4** | **90.6%** | block → warp → thread blocking |
+| 2 | coalesced | 646.6 | 9.1% | swapped which index maps to `threadIdx.x` |
+| 3 | smem | 814.7 | 11.5% | 32×32 shared-memory tile |
+| 4 | tile1d | 2579.0 | 36.4% | 8 outputs per thread |
+| 5 | tile2d | 5267.4 | 74.3% | 8×8 register tile (outer product) |
+| 6 | vectorized | 6254.6 | 88.1% | `float4` loads + transposed A tile |
+| 7 | warptile | 6405.4 | 90.2% | block → warp → thread blocking |
+| 8 | dbuffer | **6801.7** | **96.0%** | double-buffered SMEM, one barrier/chunk |
+| 9 | tensorcore | **8130.5** | **114.5%** | WMMA m16n16k8 TF32 tensor cores |
 
-**78× from first kernel to last.** Peaks at 95.1% of cuBLAS at N=1024 and 92.5%
-at N=6144.
+**98× from first kernel to last.** Kernel 8 reaches 98.3% at N=1024 and exceeds
+cuBLAS at sizes that divide the 128×128 tile evenly (103.7% at N=1536, 106.3%
+at N=6144).
+
+### The tensor-core number, stated honestly
+
+The baseline above is cuBLAS in **true fp32**, which is what cuBLAS does by
+default — TF32 has been opt-in since CUDA 11. Kernel 9 uses tensor cores, so it
+is not computing the same thing. Both comparisons, at N=4096:
+
+| | GFLOP/s | vs fp32 cuBLAS | vs TF32 cuBLAS |
+|---|--------:|---------------:|---------------:|
+| cuBLAS, true fp32 (default) | 7100 | 100% | — |
+| cuBLAS, TF32 tensor cores | 10551 | 149% | 100% |
+| `dbuffer` (mine, fp32) | 6802 | 96.0% | 64.2% |
+| `tensorcore` (mine, TF32) | 8130 | 114.5% | 76.7% |
+
+So kernel 9 beats fp32 cuBLAS by 15% and trails cuBLAS's own tensor-core path
+by 23%. Quoting only the first would be the flattering half.
+
+TF32 is not free speed: it keeps fp32's 8-bit exponent but only 10 mantissa
+bits. Measured normwise error against an fp32 reference goes from **6.2e-08**
+for the fp32 kernels to **2.4e-04** — about 4000× more. That is a deliberate
+trade, and it is why kernel 9 carries its own tolerance in the registry rather
+than loosening the bar for every kernel.
+
+Reproduce the TF32 column with:
+
+```bash
+./bench/sgemm --tf32
+```
 
 ![scaling](docs/sgemm_scaling.svg)
 
@@ -56,8 +88,13 @@ L1/TEX Cache Throughput  81.4%  ->  50.0%
 ```
 
 The kernel is now **latency bound**: neither memory (45%) nor compute (55%) is
-saturated, at ~25% occupancy. Double-buffering the global→shared load is the
-next lever.
+saturated, at ~25% occupancy — which is what kernel 8 goes after. The cause was
+structural rather than in any counter: the global load was immediately followed
+by a barrier, so the ~500-cycle DRAM round trip never overlapped anything.
+Double buffering keeps two tiles resident so the next chunk's loads fly while
+the current one computes, and cuts barriers from two per K-chunk to one.
+
+Warp cycles per issued instruction across the three: **5.75 → 3.08 → 2.85**.
 
 ### Why the ridge point explains the whole sequence
 
@@ -72,6 +109,8 @@ kernel:
 | tile1d | 16 | DRAM |
 | tile2d / vectorized | 32 | approaching compute |
 | warptile | 32 (+ less SMEM traffic) | latency |
+| dbuffer | 32 (latency overlapped) | compute / issue |
+| tensorcore | 64 (BK=32) | tensor core issue rate |
 
 Every optimization in the list is the same move applied at a different level of
 the hierarchy: *load a value once, then spend it on as much arithmetic as
@@ -278,11 +317,13 @@ four scalar stores.
 
 ## What I'd do next
 
-1. **Double-buffer** the global→shared load, to attack the latency bound that
-   kernel 7 ends on.
-2. **Tensor cores** (`mma.sync`) — sm_89 has them, and fp32 SGEMM leaves them
-   completely unused.
+1. **Raw `mma.sync`** instead of WMMA. The remaining ~23% gap to cuBLAS's
+   tensor-core path is mostly fragment scheduling that WMMA's abstraction does
+   not expose.
+2. **`cp.async`** for the staging copies, so kernel 8's prefetch bypasses
+   registers entirely rather than costing 32 of them per thread.
 3. **Fuse attention** (FlashAttention-style) — the current implementation
    materializes the full (B, NH, T, T) score matrix, 25 MB per layer, which is
    pure bandwidth that a fused kernel would never spend.
 4. **Multi-GPU**, where communication rather than compute becomes the limit.
+   That one needs hardware this laptop does not have.
