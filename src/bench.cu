@@ -154,6 +154,7 @@ static void usage(const char *prog) {
     printf("  -w <n>       warmup iterations (default: 5)\n");
     printf("  --csv <path> append results as CSV\n");
     printf("  --no-verify  skip the correctness check\n");
+    printf("  --tf32       let cuBLAS use TF32 tensor cores (implies --no-verify)\n");
     printf("  -l           list kernels and exit\n");
 }
 
@@ -171,7 +172,7 @@ static std::vector<int> parse_ints(const char *s) {
 int main(int argc, char **argv) {
     std::vector<int> ids, sizes;
     int iters = 20, warmup = 5;
-    bool verify = true;
+    bool verify = true, tf32 = false;
     const char *csv_path = nullptr;
 
     for (int i = 1; i < argc; ++i) {
@@ -181,6 +182,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "-w") && i + 1 < argc)     warmup = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--csv") && i + 1 < argc)  csv_path = argv[++i];
         else if (!strcmp(argv[i], "--no-verify"))            verify = false;
+        else if (!strcmp(argv[i], "--tf32"))                 tf32 = true;
         else if (!strcmp(argv[i], "-l")) {
             for (int j = 0; j < NUM_KERNELS; ++j)
                 printf("  %2d  %-24s %s\n", KERNELS[j].id, KERNELS[j].name, KERNELS[j].note);
@@ -200,6 +202,22 @@ int main(int argc, char **argv) {
     }
 
     CUBLAS_CHECK(cublasCreate(&g_handle));
+
+    // By default cuBLAS SGEMM runs in true fp32 -- since CUDA 11, TF32 for
+    // SGEMM is opt-in, not automatic. That makes the default comparison
+    // apples-to-apples against these hand-written fp32 kernels.
+    //
+    // --tf32 opts cuBLAS into the tensor cores. It then computes a DIFFERENT
+    // thing: TF32 keeps fp32 range but only 10 mantissa bits, so results
+    // diverge from fp32 by ~1e-3 relative. Verification is therefore disabled;
+    // a failure would be measuring the format, not the kernel. The number this
+    // produces is the honest answer to "what would tensor cores buy?"
+    if (tf32) {
+        CUBLAS_CHECK(cublasSetMathMode(g_handle, CUBLAS_TF32_TENSOR_OP_MATH));
+        verify = false;
+        printf("cuBLAS math mode: TF32 tensor cores (verification disabled --\n"
+               "TF32 has 10 mantissa bits, so it does not match fp32 to 1e-4)\n\n");
+    }
 
     int max_n = *std::max_element(sizes.begin(), sizes.end());
     size_t max_elems = (size_t)max_n * max_n;
