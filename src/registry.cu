@@ -8,6 +8,7 @@ const KernelEntry KERNELS[] = {
     {4, "tile1d",    sgemm_tile1d,    "1D register tiling, TM=8"},
     {5, "tile2d",    sgemm_tile2d,    "2D register tiling, 8x8 per thread"},
     {6, "vectorized",sgemm_vectorized,"float4 loads + transposed As"},
+    {7, "warptile",  sgemm_warptile,  "warp-level tiling, BK=16"},
 };
 
 const int NUM_KERNELS = sizeof(KERNELS) / sizeof(KERNELS[0]);
