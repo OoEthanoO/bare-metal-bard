@@ -23,6 +23,18 @@ bench/device_query: tools/device_query.cu | bench
 bench/test_gemm: tools/test_gemm.cu src/gemm.cu src/gemm.h src/kernels/k05_tile2d.cu | bench
 	$(NVCC) $(NVCCFLAGS) tools/test_gemm.cu src/gemm.cu -o $@ $(LDFLAGS)
 
+# The model. Note: no -lcublas. Nothing here links a vendor BLAS.
+GPT_SRC := src/train_gpt.cu src/gpt.cu src/gemm.cu src/bgemm.cu src/nn.cu src/attention.cu
+GPT_DEP := src/gpt.h src/gemm.h src/nn.h src/attention.h src/reduce.cuh
+
+bench/train_gpt: $(GPT_SRC) $(GPT_DEP) | bench
+	$(NVCC) $(NVCCFLAGS) $(GPT_SRC) -o $@
+
+bench/test_grad: tools/test_grad.cu src/gpt.cu src/gemm.cu src/bgemm.cu src/nn.cu src/attention.cu $(GPT_DEP) | bench
+	$(NVCC) $(NVCCFLAGS) tools/test_grad.cu src/gpt.cu src/gemm.cu src/bgemm.cu src/nn.cu src/attention.cu -o $@
+
+gpt: bench/train_gpt
+
 test: bench/test_gemm
 	./bench/test_gemm
 

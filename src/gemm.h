@@ -17,3 +17,13 @@
 void gemm(bool transA, bool transB, int M, int N, int K, float alpha,
           const float *A, const float *B, float beta, float *C,
           cudaStream_t stream = 0);
+
+// Batched GEMM: `batch` independent problems, each strided by strideA/B/C.
+//
+// Attention needs B*NH = 96 independent (T x hs) @ (hs x T) products. Looping
+// the single GEMM would cost 96 kernel launches (~5 us each) for work that
+// takes tens of microseconds, so the batch index lives in gridDim.z instead.
+void batched_gemm(bool transA, bool transB, int batch, int M, int N, int K,
+                  float alpha, const float *A, long long strideA,
+                  const float *B, long long strideB, float beta, float *C,
+                  long long strideC, cudaStream_t stream = 0);

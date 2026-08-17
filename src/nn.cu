@@ -1,0 +1,343 @@
+// Elementwise, reduction, and normalization kernels for the transformer.
+//
+// The GEMMs are compute bound and got all the blocking work. Everything in
+// this file is the opposite: bandwidth bound, arithmetic intensity below 1,
+// and the only thing that matters is touching each byte once and touching it
+// with a coalesced, ideally 128-bit, access. Where a kernel has to reduce
+// along a row it uses warp shuffles rather than shared memory, because the
+// shuffle network does not pay the L1/MIO cost that shared memory does -- the
+// exact cost that was throttling GEMM kernel 6.
+#include "nn.h"
+#include "reduce.cuh"
+#include <cstdio>
+#include <cmath>
+#include <cfloat>
+
+#define VEC4(p) (reinterpret_cast<float4 *>(&(p))[0])
+#define CVEC4(p) (reinterpret_cast<const float4 *>(&(p))[0])
+
+namespace {
+using red::block_reduce;
+
+// ------------------------------------------------------------------ encoder
+__global__ void encoder_fwd_k(float *out, const int *tokens, const float *wte,
+                              const float *wpe, int T, int C, int n4) {
+    // One thread per float4 of the output. C is a multiple of 4 by config.
+    const int i4 = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i4 >= n4) return;
+    const int idx = i4 * 4;
+    const int bt = idx / C, c = idx % C;
+    const int t = bt % T;
+    const int tok = tokens[bt];
+    float4 e = CVEC4(wte[(size_t)tok * C + c]);
+    const float4 p = CVEC4(wpe[(size_t)t * C + c]);
+    e.x += p.x; e.y += p.y; e.z += p.z; e.w += p.w;
+    VEC4(out[idx]) = e;
+}
+
+__global__ void encoder_bwd_k(float *dwte, float *dwpe, const float *dout,
+                              const int *tokens, int T, int C, int total) {
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= total) return;
+    const int bt = idx / C, c = idx % C;
+    const int t = bt % T;
+    const float g = dout[idx];
+    // Many (b,t) positions share a token id, so these are genuine conflicts,
+    // not an artifact of the parallelization -- atomics are the right tool.
+    atomicAdd(&dwte[(size_t)tokens[bt] * C + c], g);
+    atomicAdd(&dwpe[(size_t)t * C + c], g);
+}
+
+// ---------------------------------------------------------------- layernorm
+// One block per row. C = 384 here, so a 128-thread block handles 3 elements
+// each and both reductions (mean, then variance) stay inside the block.
+__global__ void layernorm_fwd_k(float *out, float *mean, float *rstd,
+                                const float *inp, const float *weight,
+                                const float *bias, int C) {
+    const int row = blockIdx.x;
+    const float *x = inp + (size_t)row * C;
+    float *y = out + (size_t)row * C;
+
+    float sum = 0.0f;
+    for (int i = threadIdx.x; i < C; i += blockDim.x) sum += x[i];
+    const float mu = block_reduce<false>(sum) / C;
+
+    float sq = 0.0f;
+    for (int i = threadIdx.x; i < C; i += blockDim.x) {
+        const float d = x[i] - mu;
+        sq += d * d;
+    }
+    // Biased variance (divide by C), matching LayerNorm rather than a sample
+    // variance -- this must agree with the backward pass below.
+    const float var = block_reduce<false>(sq) / C;
+    const float rs = rsqrtf(var + 1e-5f);
+
+    if (threadIdx.x == 0) { mean[row] = mu; rstd[row] = rs; }
+    for (int i = threadIdx.x; i < C; i += blockDim.x)
+        y[i] = ((x[i] - mu) * rs) * weight[i] + bias[i];
+}
+
+// For y = w * xhat + b with xhat = (x-mu)*rstd, the input gradient is
+//     dx = rstd * (dxhat - mean(dxhat) - xhat * mean(dxhat * xhat))
+// The two subtracted terms are the corrections for mu and sigma themselves
+// depending on x; dropping them is a classic silent-wrongness bug, so both
+// means are reduced explicitly here.
+__global__ void layernorm_bwd_k(float *dinp, float *dweight, float *dbias,
+                                const float *dout, const float *inp,
+                                const float *weight, const float *mean,
+                                const float *rstd, int C) {
+    const int row = blockIdx.x;
+    const float *x = inp + (size_t)row * C;
+    const float *dy = dout + (size_t)row * C;
+    float *dx = dinp + (size_t)row * C;
+    const float mu = mean[row], rs = rstd[row];
+
+    float sum_dxhat = 0.0f, sum_dxhat_xhat = 0.0f;
+    for (int i = threadIdx.x; i < C; i += blockDim.x) {
+        const float xhat = (x[i] - mu) * rs;
+        const float dxhat = dy[i] * weight[i];
+        sum_dxhat += dxhat;
+        sum_dxhat_xhat += dxhat * xhat;
+    }
+    const float m1 = block_reduce<false>(sum_dxhat) / C;
+    const float m2 = block_reduce<false>(sum_dxhat_xhat) / C;
+
+    for (int i = threadIdx.x; i < C; i += blockDim.x) {
+        const float xhat = (x[i] - mu) * rs;
+        const float dxhat = dy[i] * weight[i];
+        dx[i] += rs * (dxhat - m1 - xhat * m2);
+        // Parameter grads accumulate across all N rows.
+        atomicAdd(&dweight[i], dy[i] * xhat);
+        atomicAdd(&dbias[i], dy[i]);
+    }
+}
+
+// --------------------------------------------------------------------- gelu
+// GPT-2's tanh approximation, kept exactly because the model is compared
+// against reference implementations that use it.
+__device__ __forceinline__ float gelu_scalar(float x) {
+    const float s = 0.7978845608028654f;  // sqrt(2/pi)
+    return 0.5f * x * (1.0f + tanhf(s * (x + 0.044715f * x * x * x)));
+}
+
+__global__ void gelu_fwd_k(float *out, const float *inp, int n4) {
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n4) return;
+    float4 v = CVEC4(inp[i * 4]);
+    v.x = gelu_scalar(v.x); v.y = gelu_scalar(v.y);
+    v.z = gelu_scalar(v.z); v.w = gelu_scalar(v.w);
+    VEC4(out[i * 4]) = v;
+}
+
+__device__ __forceinline__ float dgelu_scalar(float x, float g) {
+    const float s = 0.7978845608028654f;
+    const float inner = s * (x + 0.044715f * x * x * x);
+    const float t = tanhf(inner);
+    const float sech2 = 1.0f - t * t;
+    const float dinner = s * (1.0f + 3.0f * 0.044715f * x * x);
+    return g * (0.5f * (1.0f + t) + 0.5f * x * sech2 * dinner);
+}
+
+__global__ void gelu_bwd_k(float *dinp, const float *inp, const float *dout, int n4) {
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n4) return;
+    const float4 x = CVEC4(inp[i * 4]);
+    const float4 g = CVEC4(dout[i * 4]);
+    float4 d;
+    d.x = dgelu_scalar(x.x, g.x); d.y = dgelu_scalar(x.y, g.y);
+    d.z = dgelu_scalar(x.z, g.z); d.w = dgelu_scalar(x.w, g.w);
+    VEC4(dinp[i * 4]) = d;
+}
+
+// ----------------------------------------------------------------- residual
+__global__ void residual_fwd_k(float *out, const float *a, const float *b, int n4) {
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n4) return;
+    const float4 x = CVEC4(a[i * 4]), y = CVEC4(b[i * 4]);
+    float4 r; r.x = x.x + y.x; r.y = x.y + y.y; r.z = x.z + y.z; r.w = x.w + y.w;
+    VEC4(out[i * 4]) = r;
+}
+
+__global__ void add_inplace_k(float *dst, const float *src, int n4) {
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n4) return;
+    float4 d = CVEC4(dst[i * 4]);
+    const float4 s = CVEC4(src[i * 4]);
+    d.x += s.x; d.y += s.y; d.z += s.z; d.w += s.w;
+    VEC4(dst[i * 4]) = d;
+}
+
+// --------------------------------------------------------------------- bias
+__global__ void bias_fwd_k(float *out, const float *bias, int C, int total4) {
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= total4) return;
+    const int c = (i * 4) % C;
+    float4 v = CVEC4(out[i * 4]);
+    const float4 b = CVEC4(bias[c]);
+    v.x += b.x; v.y += b.y; v.z += b.z; v.w += b.w;
+    VEC4(out[i * 4]) = v;
+    (void)bias;
+}
+
+// dbias[c] = sum over all N rows of dout[n][c]. One block per output column,
+// striding down the rows: each thread reads a coalesced run because
+// consecutive blocks own consecutive c.
+__global__ void bias_bwd_k(float *dbias, const float *dout, int N, int C) {
+    const int c = blockIdx.x;
+    float acc = 0.0f;
+    for (int n = threadIdx.x; n < N; n += blockDim.x)
+        acc += dout[(size_t)n * C + c];
+    acc = block_reduce<false>(acc);
+    if (threadIdx.x == 0) dbias[c] += acc;
+}
+
+// ------------------------------------------------------- softmax + xent
+// One block per row of logits. Vp is padded up to a GEMM-friendly multiple,
+// and the padded columns must be excluded: leaving them in would hand real
+// probability mass to tokens that do not exist.
+__global__ void softmax_xent_fwd_k(float *probs, float *losses,
+                                   const float *logits, const int *targets,
+                                   int V, int Vp) {
+    const int row = blockIdx.x;
+    const float *x = logits + (size_t)row * Vp;
+    float *p = probs + (size_t)row * Vp;
+
+    float m = -FLT_MAX;
+    for (int i = threadIdx.x; i < V; i += blockDim.x) m = fmaxf(m, x[i]);
+    m = block_reduce<true>(m);
+
+    float s = 0.0f;
+    for (int i = threadIdx.x; i < V; i += blockDim.x) {
+        const float e = __expf(x[i] - m);   // shift for numerical stability
+        p[i] = e;
+        s += e;
+    }
+    s = block_reduce<false>(s);
+    const float inv = 1.0f / s;
+
+    for (int i = threadIdx.x; i < V; i += blockDim.x) p[i] *= inv;
+    for (int i = V + threadIdx.x; i < Vp; i += blockDim.x) p[i] = 0.0f;
+
+    if (threadIdx.x == 0) losses[row] = -logf(fmaxf(p[targets[row]], 1e-30f));
+}
+
+// d(loss)/d(logit_i) = (p_i - [i == target]) * scale. The softmax and the
+// cross-entropy Jacobians collapse into this one expression, which is why
+// they are fused rather than written as two kernels.
+__global__ void xent_softmax_bwd_k(float *dlogits, const float *probs,
+                                   const int *targets, int V, int Vp,
+                                   float scale) {
+    const int row = blockIdx.x;
+    const float *p = probs + (size_t)row * Vp;
+    float *d = dlogits + (size_t)row * Vp;
+    const int tgt = targets[row];
+    for (int i = threadIdx.x; i < Vp; i += blockDim.x) {
+        const float indicator = (i == tgt) ? 1.0f : 0.0f;
+        d[i] = (i < V) ? (p[i] - indicator) * scale : 0.0f;
+    }
+}
+
+// ---------------------------------------------------------------- optimizer
+__global__ void adamw_k(float *params, const float *grads, float *m, float *v,
+                        int n, float lr, float beta1, float beta2, float eps,
+                        float wd, float bc1, float bc2) {
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
+    const float g = grads[i];
+    const float mi = beta1 * m[i] + (1.0f - beta1) * g;
+    const float vi = beta2 * v[i] + (1.0f - beta2) * g * g;
+    m[i] = mi; v[i] = vi;
+    const float mhat = mi / bc1;
+    const float vhat = vi / bc2;
+    // Decoupled weight decay: applied to the parameter, not folded into the
+    // gradient, which is the "W" in AdamW.
+    params[i] -= lr * (mhat / (sqrtf(vhat) + eps) + wd * params[i]);
+}
+
+__global__ void reduce_mean_k(const float *in, float *out, int n) {
+    float acc = 0.0f;
+    for (int i = threadIdx.x; i < n; i += blockDim.x) acc += in[i];
+    acc = block_reduce<false>(acc);
+    if (threadIdx.x == 0) *out = acc / n;
+}
+
+inline int ceil_div(int a, int b) { return (a + b - 1) / b; }
+}  // namespace
+
+// ---------------------------------------------------------------- launchers
+void encoder_forward(float *out, const int *tokens, const float *wte,
+                     const float *wpe, int B, int T, int C) {
+    const int n4 = B * T * C / 4;
+    encoder_fwd_k<<<ceil_div(n4, 256), 256>>>(out, tokens, wte, wpe, T, C, n4);
+}
+
+void encoder_backward(float *dwte, float *dwpe, const float *dout,
+                      const int *tokens, int B, int T, int C) {
+    const int total = B * T * C;
+    encoder_bwd_k<<<ceil_div(total, 256), 256>>>(dwte, dwpe, dout, tokens, T, C, total);
+}
+
+void layernorm_forward(float *out, float *mean, float *rstd, const float *inp,
+                       const float *weight, const float *bias, int N, int C) {
+    layernorm_fwd_k<<<N, 128>>>(out, mean, rstd, inp, weight, bias, C);
+}
+
+void layernorm_backward(float *dinp, float *dweight, float *dbias,
+                        const float *dout, const float *inp,
+                        const float *weight, const float *mean,
+                        const float *rstd, int N, int C) {
+    layernorm_bwd_k<<<N, 128>>>(dinp, dweight, dbias, dout, inp, weight, mean, rstd, C);
+}
+
+void gelu_forward(float *out, const float *inp, int n) {
+    gelu_fwd_k<<<ceil_div(n / 4, 256), 256>>>(out, inp, n / 4);
+}
+void gelu_backward(float *dinp, const float *inp, const float *dout, int n) {
+    gelu_bwd_k<<<ceil_div(n / 4, 256), 256>>>(dinp, inp, dout, n / 4);
+}
+void residual_forward(float *out, const float *a, const float *b, int n) {
+    residual_fwd_k<<<ceil_div(n / 4, 256), 256>>>(out, a, b, n / 4);
+}
+void add_inplace(float *dst, const float *src, int n) {
+    add_inplace_k<<<ceil_div(n / 4, 256), 256>>>(dst, src, n / 4);
+}
+
+void bias_forward(float *out, const float *bias, int N, int C) {
+    const int total4 = N * C / 4;
+    bias_fwd_k<<<ceil_div(total4, 256), 256>>>(out, bias, C, total4);
+}
+void bias_backward(float *dbias, const float *dout, int N, int C) {
+    bias_bwd_k<<<C, 256>>>(dbias, dout, N, C);
+}
+
+void softmax_crossentropy_forward(float *probs, float *losses,
+                                  const float *logits, const int *targets,
+                                  int N, int V, int Vp) {
+    softmax_xent_fwd_k<<<N, 128>>>(probs, losses, logits, targets, V, Vp);
+}
+void crossentropy_softmax_backward(float *dlogits, const float *probs,
+                                   const int *targets, int N, int V, int Vp,
+                                   float dloss_scale) {
+    xent_softmax_bwd_k<<<N, 128>>>(dlogits, probs, targets, V, Vp, dloss_scale);
+}
+
+void adamw_update(float *params, float *grads, float *m, float *v, int n,
+                  float lr, float beta1, float beta2, float eps,
+                  float weight_decay, int step) {
+    const float bc1 = 1.0f - powf(beta1, (float)step);
+    const float bc2 = 1.0f - powf(beta2, (float)step);
+    adamw_k<<<ceil_div(n, 256), 256>>>(params, grads, m, v, n, lr, beta1, beta2,
+                                       eps, weight_decay, bc1, bc2);
+}
+
+void zero_buffer(float *p, size_t n) { cudaMemset(p, 0, n * sizeof(float)); }
+
+float reduce_mean(const float *d_values, int n) {
+    float *d_out;
+    cudaMalloc(&d_out, sizeof(float));
+    reduce_mean_k<<<1, 256>>>(d_values, d_out, n);
+    float h;
+    cudaMemcpy(&h, d_out, sizeof(float), cudaMemcpyDeviceToHost);
+    cudaFree(d_out);
+    return h;
+}
