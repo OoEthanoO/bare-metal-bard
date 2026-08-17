@@ -12,8 +12,16 @@ int main() {
         // Memory bandwidth: bus width is in bits, clock in kHz, DDR -> x2.
         double bw = 2.0 * p.memoryClockRate * (p.memoryBusWidth / 8.0) * 1e3 / 1e9;
 
+        // NOTE: p.clockRate reports the BASE clock (1605 MHz here), not the
+        // boost ceiling (3105 MHz per nvidia-smi). Peak flops quoted against
+        // it would be understated by ~2x. Since benchmarks run with the clock
+        // pinned (scripts/gpu_clocks.sh), the number that actually matters is
+        // the peak at the *locked* clock, so report all three.
+        const double BENCH_CLOCK_GHZ = 1.2;  // must match gpu_clocks.sh
+
         // FP32 peak: 128 FMA lanes/SM on Ada (sm_89), 2 flops per FMA.
         double fp32 = 2.0 * 128 * p.multiProcessorCount * (p.clockRate * 1e3) / 1e9;
+        double fp32_bench = 2.0 * 128 * p.multiProcessorCount * BENCH_CLOCK_GHZ;
 
         printf("device %d: %s (sm_%d%d)\n", d, p.name, p.major, p.minor);
         printf("  SMs                       %d\n", p.multiProcessorCount);
@@ -30,8 +38,10 @@ int main() {
         printf("  max threads / block       %d\n", p.maxThreadsPerBlock);
         printf("  max threads / SM          %d\n", p.maxThreadsPerMultiProcessor);
         printf("  warp size                 %d\n", p.warpSize);
-        printf("  peak fp32 (non-tensor)    %.1f GFLOP/s\n", fp32);
-        printf("  ridge point (FLOP/byte)   %.1f\n", fp32 / bw);
+        printf("  peak fp32 @ base clock    %.1f GFLOP/s\n", fp32);
+        printf("  peak fp32 @ %.2f GHz lock %.1f GFLOP/s   <- benchmark reference\n",
+               BENCH_CLOCK_GHZ, fp32_bench);
+        printf("  ridge point @ lock        %.1f FLOP/byte\n", fp32_bench / bw);
     }
     return 0;
 }

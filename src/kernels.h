@@ -26,3 +26,6 @@ const KernelEntry *find_kernel(int id);
 // --- kernel launch wrappers, one per optimization stage ---
 void sgemm_naive(int M, int N, int K, float alpha, const float *A, const float *B, float beta, float *C);
 void sgemm_coalesced(int M, int N, int K, float alpha, const float *A, const float *B, float beta, float *C);
+void sgemm_smem(int M, int N, int K, float alpha, const float *A, const float *B, float beta, float *C);
+void sgemm_tile1d(int M, int N, int K, float alpha, const float *A, const float *B, float beta, float *C);
+void sgemm_tile2d(int M, int N, int K, float alpha, const float *A, const float *B, float beta, float *C);
