@@ -1,7 +1,5 @@
 import { data } from './data';
 
-const BP = process.env.NEXT_PUBLIC_BASE_PATH || '';
-
 // Slow -> fast. Matches the ramp used by tools/plot_results.py so the inline
 // bars and the SVG charts read as one system.
 const RAMP = ['#b3543f', '#c07f3c', '#c9a63c', '#9aa845', '#6a9f5c', '#3f8f74', '#2f7d8a'];
@@ -241,7 +239,7 @@ Compute (SM) Throughput  54.2%`}</code>
       </p>
 
       <figure>
-        <img src={`${BP}/sgemm_scaling.svg`} alt="Fraction of cuBLAS achieved, by matrix size" />
+        <img src="/sgemm_scaling.svg" alt="Fraction of cuBLAS achieved, by matrix size" />
         <figcaption>
           Holding up across sizes. Small matrices fall off because a 128×128 block tile leaves most
           of the 36 SMs idle — at N=512 the grid is only 4×4 blocks.
@@ -283,7 +281,7 @@ Compute (SM) Throughput  54.2%`}</code>
       </div>
 
       <figure>
-        <img src={`${BP}/training_curve.svg`} alt="Training and validation loss" />
+        <img src="/training_curve.svg" alt="Training and validation loss" />
         <figcaption>
           Starting at ln(65) = 4.174 nats/char, which is what a uniform guess over the vocabulary
           scores. Validation bottoms at {t.bestVal.toFixed(4)} around step {t.bestStep} and then

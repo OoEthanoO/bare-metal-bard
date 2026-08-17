@@ -134,14 +134,28 @@ layernorm backward makes 14 of 16 tensors fail.
 ## Writeup
 
 A longer writeup -- the profiling story, the measurement problem, the charts --
-is a static Next.js site under [`site/`](site/), deployed to GitHub Pages by
-`.github/workflows/pages.yml`. Every number on the page is generated from
-`bench/results.csv` and the training log by `tools/make_site_data.py`, so it
-cannot drift from the measurements.
+is a Next.js app under [`site/`](site/), deployed on Vercel. Every number on the
+page is generated from `bench/results.csv` and the training log by
+`tools/make_site_data.py`, so the page cannot drift from the measurements.
+
+Run it locally:
 
 ```bash
 npm --prefix site install && npm --prefix site run dev
 ```
+
+Regenerate the page data after a new benchmark or training run:
+
+```bash
+python3 tools/plot_results.py
+python3 tools/plot_training.py bench/logs/train_final.log docs/training_curve.svg
+python3 tools/make_site_data.py
+cp docs/*.svg site/public/
+```
+
+Deploying: the Next app lives in `site/`, not the repo root, so set **Root
+Directory = `site`** when importing the project on Vercel. Everything else is
+default.
 
 ## Build and run
 
