@@ -41,7 +41,7 @@ for %%f in (src\kernels\*.cu) do set "KERNELS=!KERNELS! %%f"
 set "GPT_SRC=src\gpt.cu src\gemm.cu src\bgemm.cu src\nn.cu src\attention.cu"
 
 set "TARGETS=%*"
-if "%TARGETS%"=="" set "TARGETS=sgemm test_gemm train_gpt test_grad device_query"
+if "%TARGETS%"=="" set "TARGETS=sgemm test_gemm train_gpt test_grad test_flash device_query"
 
 for %%t in (%TARGETS%) do (
   echo [build] %%t
