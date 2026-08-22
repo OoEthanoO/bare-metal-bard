@@ -367,6 +367,72 @@ __syncthreads()              <- and blocks again before overwriting`}</code>
         </figcaption>
       </figure>
 
+      <h2>Four ways not to speed up a tensor-core kernel</h2>
+      <p>
+        Kernel 9 trails cuBLAS&rsquo;s own TF32 path by about 21%. The obvious place to look is the
+        profiler, which says: DRAM 64.6%, compute 36.9%, L2 hit rate 58%, occupancy 32.8%. The
+        tempting reading is <em>bandwidth bound</em> — and three of the four attempts below came
+        from taking that at face value. All four made it slower. Three runs each, N=
+        {data.benchSize}:
+      </p>
+      <div className="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>attempt</th>
+              <th className="n">GFLOP/s</th>
+              <th className="n">delta</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>grouped block scheduling</td>
+              <td className="n">8290 → 7677</td>
+              <td className="n">−7.4%</td>
+            </tr>
+            <tr className="hi">
+              <td>bigger tile, 256×128</td>
+              <td className="n">8290 → 6930</td>
+              <td className="n">−16.4%</td>
+            </tr>
+            <tr>
+              <td>
+                <code>BK</code> 32 → 16
+              </td>
+              <td className="n">8290 → 7899</td>
+              <td className="n">−4.7%</td>
+            </tr>
+            <tr>
+              <td>double buffering</td>
+              <td className="n">7899 → 7518</td>
+              <td className="n">−4.8%</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        The <strong>bigger tile is the one that settles it</strong>. A block tile&rsquo;s arithmetic
+        intensity is <code>BM·BN / (2(BM+BN))</code> — 32 FLOP/byte at 128×128, and 42.7 at 256×128,
+        which clears this card&rsquo;s 43 ridge point. If the kernel were really bandwidth bound,
+        that is the fix. It cost 16%. So it is <em>not</em> bandwidth bound, however much the DRAM
+        counter looks like it.
+      </p>
+      <p>
+        And double buffering is kernel 8&rsquo;s cure for exactly this
+        neither-counter-is-saturated signature, which earlier in this project was worth 6%. Here it
+        does nothing, and not for want of registers — 128 either way, twelve bytes of spill. So the
+        latency is not on the global-memory path either.
+      </p>
+      <div className="note">
+        <p style={{ margin: 0 }}>
+          Ruling things out is the useful part. Global bandwidth, L2 reuse, tile size and global
+          latency are all now eliminated by measurement rather than by argument, which leaves the
+          abstraction itself: WMMA fixes the fragment layout and forces a round trip through shared
+          memory that raw <code>mma.sync</code> plus <code>ldmatrix</code> would skip. That is the
+          remaining 21%, and it is a conclusion now instead of the guess this page used to make.
+        </p>
+      </div>
+
       <h2>The compiler optimized the thing it could see</h2>
       <p>
         Kernel 9 sat at 8064 GF/s until a question about a version number. The writeup said CUDA
