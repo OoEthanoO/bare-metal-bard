@@ -234,6 +234,24 @@ Requires CUDA 12.x. On Ubuntu 26.04 the toolkit needs gcc ≤ 13 as host compile
 sudo apt install nvidia-cuda-toolkit gcc-13 g++-13
 ```
 
+On Windows the Makefile does not apply (no `make`, and nvcc drives MSVC rather
+than gcc). `scripts\build.bat` is the equivalent, and builds the same targets:
+
+```
+scripts\build.bat            REM all targets
+scripts\build.bat sgemm      REM just one
+```
+
+It calls `vcvars64.bat` itself, so it works from any shell. It builds with
+whichever toolkit `CUDA_PATH` names — set that variable to pin a specific one.
+That is worth being deliberate about: nvcc's version changes the generated SASS,
+and the cuBLAS that ships alongside it is the baseline every "% of cuBLAS"
+number here is divided by. The build prints which toolkit it used for exactly
+that reason. Note also that CUDA 12.5 refuses MSVC newer than 19.40 via a
+version check in `host_config.h`; the Build Tools ship 19.44, so the script
+passes `-allow-unsupported-compiler`. CUDA 13.x supports 19.4x directly and
+does not need it.
+
 Fetch the dataset (TinyShakespeare, ~1.1 MB; not committed):
 
 ```bash
