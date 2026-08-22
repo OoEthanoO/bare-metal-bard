@@ -71,7 +71,10 @@ nvcc --version | tail -2
 make clean >/dev/null 2>&1
 # ARCH is auto-detected from compute_cap; override with `make ARCH=sm_80` if
 # the detection ever goes wrong.
-make bench/test_ddp bench/train_gpt bench/sgemm 2>&1 | tail -5 || { echo BUILD FAILED; exit 1; }
+# Shown, not piped to tail: nvcc takes a couple of minutes on nine kernels and
+# a silent terminal looks like a hang. -j because the box has cores going spare.
+echo "compiling with -j$(nproc); nvcc is slow, give it ~2 minutes"
+make -j"$(nproc)" bench/test_ddp bench/train_gpt bench/sgemm || { echo BUILD FAILED; exit 1; }
 
 log "single-GPU sanity: the matmul still is what it was"
 # Clock pinning needs root and is not always permitted on rented boxes; if it
