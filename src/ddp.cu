@@ -45,6 +45,13 @@ inline Chunk chunk_of(size_t count, int n, int r) {
 void transfer(DDP &d, int src_rank, const float *src, int dst_rank, float *dst,
               size_t len) {
     if (len == 0) return;
+    // A stream belongs to the device that was current when it was created, and
+    // an async copy must be issued with THAT device current. Omitting this is
+    // invisible when every rank shares one GPU -- every stream belongs to
+    // device 0 and device 0 is always current -- and wrong the moment the ranks
+    // are really separate. It is precisely the bug a single-GPU rehearsal
+    // cannot catch, and it cost one rented pod to find.
+    CUDA_CHECK(cudaSetDevice(d.dev[src_rank]));
     if (d.peer[src_rank][dst_rank]) {
         CUDA_CHECK(cudaMemcpyPeerAsync(dst, d.dev[dst_rank], src, d.dev[src_rank],
                                        len * sizeof(float), d.stream[src_rank]));
@@ -52,6 +59,7 @@ void transfer(DDP &d, int src_rank, const float *src, int dst_rank, float *dst,
         CUDA_CHECK(cudaMemcpyAsync(d.host_stage, src, len * sizeof(float),
                                    cudaMemcpyDeviceToHost, d.stream[src_rank]));
         CUDA_CHECK(cudaStreamSynchronize(d.stream[src_rank]));
+        CUDA_CHECK(cudaSetDevice(d.dev[dst_rank]));
         CUDA_CHECK(cudaMemcpyAsync(dst, d.host_stage, len * sizeof(float),
                                    cudaMemcpyHostToDevice, d.stream[dst_rank]));
         CUDA_CHECK(cudaStreamSynchronize(d.stream[dst_rank]));
