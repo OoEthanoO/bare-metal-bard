@@ -13,6 +13,32 @@ set -uo pipefail
 
 log() { printf '\n=== %s ===\n' "$*"; }
 
+# Containers usually run as root with no sudo installed, so ask for the tool
+# rather than assuming the wrapper.
+SUDO=""
+[ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null && SUDO="sudo"
+
+log "prerequisites"
+missing=""
+for t in git make curl nvcc; do
+  command -v "$t" >/dev/null || missing="$missing $t"
+done
+if [ -n "$missing" ]; then
+  echo "missing:$missing"
+  if command -v apt-get >/dev/null; then
+    $SUDO apt-get update -qq >/dev/null 2>&1
+    # nvcc comes from the toolkit, not build-essential; if the image lacks it
+    # the container was a runtime image and the right fix is a -devel one.
+    $SUDO apt-get install -y -qq git make curl >/dev/null 2>&1
+  fi
+  command -v nvcc >/dev/null || {
+    echo "NO nvcc: this image has the CUDA runtime but not the toolkit."
+    echo "Redeploy with a *-devel image (e.g. nvidia/cuda:12.6.2-devel-ubuntu22.04)."
+    exit 1
+  }
+fi
+echo "ok"
+
 log "machine"
 date -u
 nvidia-smi --query-gpu=index,name,compute_cap,memory.total,pcie.link.gen.max,pcie.link.width.max \
@@ -25,7 +51,12 @@ log "interconnect topology"
 # are PCIe paths of decreasing quality, and SYS means it crosses the CPU sockets.
 nvidia-smi topo -m 2>/dev/null || echo "(nvidia-smi topo unavailable)"
 
-log "peer access matrix"
+log "peer access -- read this before anything else"
+echo "GeForce cards (4090/3090) have peer-to-peer DISABLED in the driver, so"
+echo "every transfer is staged through host memory. Datacenter cards (A40,"
+echo "L40S, A100) allow direct PCIe P2P. Which one this is changes what the"
+echo "numbers below mean, so it is measured rather than assumed."
+
 for i in $(seq 0 $((NGPU-1))); do
   for j in $(seq 0 $((NGPU-1))); do
     [ "$i" = "$j" ] && continue
@@ -45,7 +76,7 @@ make bench/test_ddp bench/train_gpt bench/sgemm 2>&1 | tail -5 || { echo BUILD F
 log "single-GPU sanity: the matmul still is what it was"
 # Clock pinning needs root and is not always permitted on rented boxes; if it
 # fails the numbers are noisier but the multi-GPU ratio still holds.
-sudo nvidia-smi -lgc 1200 >/dev/null 2>&1 && echo "clock pinned to 1200 MHz" \
+$SUDO nvidia-smi -lgc 1200 >/dev/null 2>&1 && echo "clock pinned to 1200 MHz" \
   || echo "could not pin clock (fine; ratios still hold, absolutes are noisier)"
 ./bench/sgemm -k 8,9 -s 4096 2>&1 | tail -3
 
