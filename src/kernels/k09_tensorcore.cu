@@ -181,6 +181,41 @@ void sgemm_tensorcore(int M, int N, int K, float alpha, const float *A,
     // columns and 4 warp rows, so the B fragments -- the larger of the two
     // operands here -- are shared across more warps and re-read from fewer
     // distinct SMEM regions.
+    //
+    // ---- four things that did NOT work, kept so they are not retried ----
+    //
+    // ncu on this kernel reads DRAM 64.6%, compute 36.9%, L2 hit 58%,
+    // occupancy 32.8%. The tempting reading is "bandwidth bound", and three of
+    // these four attempts came from taking that at face value. Neither counter
+    // is actually saturated, which is the LATENCY signature from kernel 7 --
+    // but unlike kernel 7, this kernel does not respond to the usual cures.
+    //
+    //   grouped block scheduling   8290 -> 7677   -7.4%
+    //     Walking 8 block-rows before advancing a column, to shrink the
+    //     resident A/B panel set below L2. It also scatters the 64 MB of C
+    //     writes across a 2 MB stride, and that costs more than the L2 reuse
+    //     gains.
+    //
+    //   bigger tile, 256x128       8290 -> 6930  -16.4%
+    //     Raises arithmetic intensity from BM*BN/(2*(BM+BN)) = 32 to 42.7
+    //     FLOP/byte, over the card's 43 ridge point. If the kernel were really
+    //     bandwidth bound this should have been the answer. It is not.
+    //
+    //   BK 32 -> 16                8290 -> 7899   -4.7%
+    //     Isolated on its own, because the two attempts above needed it to fit
+    //     shared memory and it turns out not to be free: fewer independent mma
+    //     issues between barriers.
+    //
+    //   double buffering           7899 -> 7518   -4.8% (both at BK=16)
+    //     Kernel 8's cure for exactly this signature, and it does nothing here.
+    //     Not register pressure: 128 registers either way, 12 bytes of spill.
+    //     WMMA's fragment loads appear to tolerate the latency already, so the
+    //     extra shared-memory writes are pure cost.
+    //
+    // What that leaves is the abstraction itself. WMMA fixes the fragment
+    // layout and forces a round trip through shared memory that raw mma.sync
+    // plus ldmatrix would avoid, and the remaining ~21% gap to cuBLAS's own
+    // TF32 path is most likely there rather than in any tile parameter.
     constexpr int NUM_THREADS = 256;  // 8 warps
     constexpr int BM = 128, BN = 128, BK = 32;
     constexpr int WM = 32, WN = 64;   // 4 warp rows x 2 warp cols

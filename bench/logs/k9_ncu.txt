@@ -1,0 +1,87 @@
+==PROF== Connected to process 21640 (C:\Users\ethan\bare-metal-bard\bench\sgemm.exe)
+==PROF== Profiling "tensorcore_kernel": 0%....50%....100% - 9 passes
+id   kernel                 size   best GF/s    med GF/s cuBLAS GF/s  %cuBLAS  err       verify
+----------------------------------------------------------------------------------------------------
+9    tensorcore             4096      8234.3      8230.5      7023.2   117.2%  2.4e-04   ok
+==PROF== Disconnected from process 21640
+[21640] sgemm.exe@127.0.0.1
+  void tensorcore_kernel<128, 128, 32, 32, 64, 256>(int, int, int, float, const float *, const float *, float, float *) (32, 32, 1)x(256, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
+    Section: GPU Speed Of Light Throughput
+    ----------------------- ----------- -------------
+    Metric Name             Metric Unit  Metric Value
+    ----------------------- ----------- -------------
+    DRAM Frequency                  Ghz          7.99
+    SM Frequency                    Ghz          1.60
+    Elapsed Cycles                cycle    20,402,244
+    Memory Throughput                 %         64.55
+    DRAM Throughput                   %         64.55
+    Duration                         ms         12.71
+    L1/TEX Cache Throughput           %         33.67
+    L2 Cache Throughput               %         24.47
+    SM Active Cycles              cycle 19,992,137.97
+    Compute (SM) Throughput           %         36.89
+    ----------------------- ----------- -------------
+
+    OPT   Memory is more heavily utilized than Compute: Look at the Memory Workload Analysis section to identify the    
+          DRAM bottleneck. Check memory replay (coalescing) metrics to make sure you're efficiently utilizing the       
+          bytes transferred. Also consider whether it is possible to do more work per memory access (kernel fusion) or  
+          whether there are values you can (re)compute.                                                                 
+
+    Section: Memory Workload Analysis
+    --------------------------------------- ----------- ------------
+    Metric Name                             Metric Unit Metric Value
+    --------------------------------------- ----------- ------------
+    Local Memory Spilling Requests                                 0
+    Local Memory Spilling Request Overhead            %            0
+    L2 Sector Promotion Misses                        %            0
+    Shared Memory Spilling Requests                                0
+    Shared Memory Spilling Request Overhead           %            0
+    Memory Throughput                           Gbyte/s       165.10
+    Mem Busy                                          %        30.19
+    Max Bandwidth                                     %        64.55
+    L1/TEX Hit Rate                                   %         1.26
+    L2 Persisting Size                            Mbyte         6.29
+    L2 Compression Success Rate                       %            0
+    L2 Compression Ratio                                           0
+    L2 Compression Input Sectors                 sector            0
+    L2 Hit Rate                                       %        57.98
+    Mem Pipes Busy                                    %        33.30
+    --------------------------------------- ----------- ------------
+
+    Section: Instruction Statistics
+    ---------------------------------------- ----------- ------------
+    Metric Name                              Metric Unit Metric Value
+    ---------------------------------------- ----------- ------------
+    Local Memory Spilling Requests                  byte            0
+    Shared Memory Spilling Requests                 byte            0
+    Avg. Executed Instructions Per Scheduler        inst    4,372,480
+    Executed Instructions                           inst  629,637,120
+    Avg. Issued Instructions Per Scheduler          inst 4,372,561.89
+    Issued Instructions                             inst  629,648,912
+    ---------------------------------------- ----------- ------------
+
+    OPT   Est. Local Speedup: 25%                                                                                       
+          This workload executes 524288 fused and 524288 non-fused FP32 instructions. By converting pairs of non-fused  
+          instructions to their fused (https://docs.nvidia.com/cuda/floating-point/#cuda-and-floating-point),           
+          higher-throughput equivalent, the achieved FP32 performance could be increased by up to 25% (relative to its  
+          current performance).                                                                                         
+
+    Section: Occupancy
+    ------------------------------- ----------- ------------
+    Metric Name                     Metric Unit Metric Value
+    ------------------------------- ----------- ------------
+    Block Limit SM                        block           24
+    Block Limit Registers                 block            2
+    Block Limit Shared Mem                block            2
+    Block Limit Warps                     block            6
+    Theoretical Active Warps per SM        warp           16
+    Theoretical Occupancy                     %        33.33
+    Achieved Occupancy                        %        32.80
+    Achieved Active Warps Per SM           warp        15.74
+    ------------------------------- ----------- ------------
+
+    OPT   Est. Local Speedup: 66.67%                                                                                    
+          The 4.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
+          hardware maximum of 12. This kernel's theoretical occupancy (33.3%) is limited by the number of required      
+          registers, and the required amount of shared memory.                                                          
+

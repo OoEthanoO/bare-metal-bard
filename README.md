@@ -649,9 +649,27 @@ four scalar stores.
 
 ## What I'd do next
 
-1. **Raw `mma.sync`** instead of WMMA. The remaining ~23% gap to cuBLAS's
-   tensor-core path is mostly fragment scheduling that WMMA's abstraction does
-   not expose.
+1. **Raw `mma.sync`** instead of WMMA, and this is now the *only* candidate
+   left rather than a guess. Kernel 9 trails cuBLAS's own TF32 path by ~21%,
+   and four attempts to close it from the outside all failed, measured at
+   N=4096:
+
+   | attempt | result | |
+   |---|---:|---|
+   | grouped block scheduling | 8290 → 7677 | −7.4% |
+   | bigger tile, 256×128 | 8290 → 6930 | −16.4% |
+   | `BK` 32 → 16 | 8290 → 7899 | −4.7% |
+   | double buffering | 7899 → 7518 | −4.8% (both `BK`=16) |
+
+   `ncu` reads DRAM 64.6%, compute 36.9%, L2 hit 58%, occupancy 32.8% —
+   *neither* counter saturated, which is the latency signature kernel 7 had.
+   But unlike kernel 7 it does not respond to the cures. The bigger tile is the
+   informative failure: it lifts arithmetic intensity from 32 to 42.7
+   FLOP/byte, past the 43 ridge point, and made things 16% worse. So the kernel
+   is not bandwidth bound however much the DRAM counter looks like it, and
+   double buffering not helping says the latency is not on the global path
+   either. What is left is the abstraction: WMMA fixes the fragment layout and
+   forces a shared-memory round trip that `mma.sync` + `ldmatrix` would skip.
 2. **`cp.async`** for the staging copies, so kernel 8's prefetch bypasses
    registers entirely rather than costing 32 of them per thread.
 3. ~~**Fuse attention** (FlashAttention-style)~~ — [done](#fused-attention-the-score-matrix-never-exists).

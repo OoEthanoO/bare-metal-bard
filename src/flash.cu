@@ -895,7 +895,8 @@ bool launch_bwd(float *dqkv, float *dsum, const float *dout, const float *qkv,
     X(3, 32, 32, 64, 4, 4, 8, 4, 8, 4, "br32 bc32 t64  kv8x4 q8x4")            \
     X(4, 32, 32, 64, 4, 4, 4, 4, 4, 4, "br32 bc32 t64  kv4x4 q4x4")            \
     X(5, 32, 32, 128, 4, 2, 4, 4, 4, 4, "br32 bc32 t128 kv4x4 q4x4")           \
-    X(6, 32, 64, 128, 4, 4, 8, 4, 4, 4, "br32 bc64 t128 kv8x4 q4x4")
+    X(6, 32, 64, 128, 4, 4, 8, 4, 4, 4, "br32 bc64 t128 kv8x4 q4x4")           \
+    X(7, 64, 32, 64, 8, 4, 8, 4, 8, 8, "br64 bc32 t64  8x4 kv8x4 q8x8")
 
 template <int BR, int BC, int HS, int NT, int RT, int CT, int AT, int BT,
           int QAT, int QBT>
