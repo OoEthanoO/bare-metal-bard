@@ -1,0 +1,87 @@
+# Multi-GPU on 2x NVIDIA A40 (RunPod, CA-MTL-1), CUDA 12.8, sm_86
+# Clock NOT pinned (not permitted in the container), so absolutes are noisier
+# than the laptop numbers; the ratios are what matter here.
+#
+# Topology:
+#   GPU0 <-> GPU1 : PXB (multiple PCIe bridges, does not cross the host bridge)
+#   PCIe gen 4 x16
+#   cudaDeviceCanAccessPeer: 1 both directions, peer access enables cleanly
+#
+# ---------------------------------------------------------------------------
+# FINDING 1: peer-to-peer is advertised on this host and does not work.
+# ---------------------------------------------------------------------------
+# ddp_init sends four bytes across each enabled pair and reads them back:
+#
+#   peer 0->1 enabled but moves the wrong bytes (sent 2.0, got 0.0)
+#   peer 1->0 enabled but moves the wrong bytes (sent 101.0, got 0.0)
+#
+# Every cudaMemcpyPeerAsync returned success. Every stream sync returned
+# success. The bytes never arrived. This is what PCIe ACS / IOMMU
+# misconfiguration looks like on a virtualised host, and it is silent: a
+# collective that trusts cudaDeviceCanAccessPeer computes wrong gradients at
+# full speed and reports nothing.
+#
+# Before the probe existed, the symptoms were:
+#   - all-reduce correctness FAILED at every size, error exactly 1.00
+#     (result exactly zero)
+#   - 197 ms for a 43 MB all-reduce, 0.2 GB/s
+#   - training with 2 ranks reported |g| 7.672 where 1 rank reported 15.023 --
+#     exactly half, because each rank kept its own shard's gradient and then
+#     divided by nranks. No sum ever happened.
+#
+# With the fallback to host staging, all correctness checks pass.
+#
+# ---------------------------------------------------------------------------
+# all-reduce, 43.2 MB, 2 ranks, staged through pinned host memory
+# ---------------------------------------------------------------------------
+#   best              8.65 ms
+#   reduce-scatter    4.51 ms
+#   all-gather        4.34 ms
+#   moved/device      43.2 MB
+#   effective         5.0 GB/s
+#
+# 5.0 GB/s is the round trip through host memory, not the PCIe link. A working
+# direct P2P path on gen4 x16 should be roughly 4x that.
+#
+# ---------------------------------------------------------------------------
+# FINDING 2: at this model size the interconnect is NOT the bottleneck.
+# ---------------------------------------------------------------------------
+# Training, TinyShakespeare GPT, 10.8M params, ctx 256, fused attention:
+#
+#   ranks  global batch   per GPU   step      tokens/s    comm
+#   1      16             16        40.9 ms   100,206     --
+#   1      32             32        77.5 ms   105,707     --
+#   2      32             16        149.1 ms   54,951      8.9 ms (6.0%)
+#
+# Two GPUs are ~1.9x SLOWER than one for the same total work, and
+# communication is 6% of the step. The wire is not the problem.
+#
+# The problem is host-side orchestration. One process drives both devices, and
+# gpt_forward blocks on a token upload and again on the loss reduction, so the
+# ranks do not overlap as much as they should. Giving each rank its own host
+# thread (CUDA's current device is per-thread) moved 159.1 -> 149.1 ms, which
+# is real but nowhere near the ~85 ms two overlapped ranks should reach.
+#
+# So the honest state: the collective is correct and cheap, and the data
+# parallel driver is not yet good enough to profit from it. What is left is
+# either one process per GPU, or removing every blocking call from the step so
+# the two devices genuinely run at once. That is the next piece of work, and it
+# is a scheduling problem rather than a communication one -- which is itself
+# the lesson, since "communication becomes the bottleneck" is the thing
+# everyone expects to find and it is not what the measurement says.
+#
+# ---------------------------------------------------------------------------
+# Single-GPU, for reference: the A40 vs the RTX 4070 Laptop
+# ---------------------------------------------------------------------------
+#   kernel        A40 GF/s   % of cuBLAS      4070 GF/s   % of cuBLAS
+#   dbuffer        19722       87.4%            6712        95.0%
+#   tensorcore     34098      152.4%            8299       117.4%
+#
+# cuBLAS fp32 on the A40 is 22573 GF/s. The tensor-core kernel reaches 152% of
+# it on Ampere against 117% on Ada -- the __launch_bounds__(NUM_THREADS, 2)
+# occupancy target was tuned on Ada and transfers to Ampere better than it was
+# tuned for. The fp32 kernel goes the other way, 95% -> 87%, so kernel 8 is the
+# more Ada-specific of the two.
+#
+# Training throughput, single GPU: 100,206 tok/s on the A40 against 47,531 on
+# the 4070 -- 2.1x, on a card with 5.7x the memory bandwidth.

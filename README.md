@@ -679,5 +679,21 @@ four scalar stores.
    chunks K, so that bigger register tiles and more blocks per SM stop
    competing for the same shared memory. DRAM sits at 21%, so there is
    bandwidth to pay for the re-staging.
-4. **Multi-GPU**, where communication rather than compute becomes the limit.
-   That one needs hardware this laptop does not have.
+4. **Multi-GPU** — started, and the first measurements are in
+   [`bench/logs/multigpu_a40.txt`](bench/logs/multigpu_a40.txt). A ring
+   all-reduce written from scratch (no NCCL), data-parallel training behind
+   `--gpus N`, run on 2x A40. Two findings, neither the expected one:
+
+   **Peer-to-peer was advertised and did not work.** Every `cudaMemcpyPeerAsync`
+   returned success, every sync returned success, and the bytes never arrived —
+   PCIe ACS/IOMMU misconfiguration on a virtualised host. Silent: the collective
+   produced wrong gradients at full speed. `ddp_init` now sends four bytes across
+   each enabled pair and checks they land before trusting it.
+
+   **Communication is 6% of a step, and two GPUs are still 1.9x slower than
+   one.** The wire is fine; the host loop is not. One process driving both
+   devices, with blocking calls inside the step, keeps them from overlapping.
+   Giving each rank its own thread helped (159 -> 149 ms) and is not enough.
+   "Communication becomes the bottleneck" is the lesson everyone quotes, and it
+   is not what the measurement says — which is exactly why it was worth
+   measuring. Next: one process per GPU, or a step with no blocking calls.
