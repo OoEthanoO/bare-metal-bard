@@ -247,6 +247,7 @@ int main(int argc, char **argv) {
     float temperature = 0.8f;
     unsigned seed = 1337;
     bool use_flash = true;  // --unfused selects the three-kernel attention
+    bool alloc_only = false;
 
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "-d") && i + 1 < argc) data_path = argv[++i];
@@ -265,6 +266,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--load") && i + 1 < argc) load_path = argv[++i];
         else if (!strcmp(argv[i], "--len") && i + 1 < argc) sample_len = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--temp") && i + 1 < argc) temperature = atof(argv[++i]);
+        else if (!strcmp(argv[i], "--alloc-only")) alloc_only = true;
         else if (!strcmp(argv[i], "--unfused")) use_flash = false;
         else { fprintf(stderr, "unknown arg %s\n", argv[i]); return 1; }
     }
@@ -305,7 +307,14 @@ int main(int argc, char **argv) {
            g.num_params / 1e6, param_mb, param_mb, 2 * param_mb);
     printf("memory    %.1f MB forward activations, %.1f MB backward scratch\n",
            act_mb, gact_mb);
-    printf("batch     %d x %d = %d tokens/step\n\n", B, T, B * T);
+    printf("total     %.2f GB resident (params+grads+adam+activations+scratch)\n",
+           (4.0 * param_mb + act_mb + gact_mb) / 1024.0);
+    // Allocation is the whole question for a context-length study, and a step
+    // at long context is slow. Note that on Windows the driver will happily
+    // oversubscribe VRAM into system memory, so a successful cudaMalloc is NOT
+    // evidence that the model fits -- the printed total against the card's
+    // memory is.
+    if (alloc_only) return 0;
 
     float best_val = 1e30f;
     int best_step = 0;
@@ -387,7 +396,11 @@ int main(int argc, char **argv) {
     printf("best   val loss %.4f at step %d (checkpoint saved there)\n",
            best_val, best_step);
 
-    printf("\nfinal sample:\n%s\n",
-           generate(g, ds.itos, 1000, sample_rng, temperature).c_str());
+    // Generation is autoregressive -- one full forward per token -- so this is
+    // not free, and at long context it dwarfs the training it is reporting on.
+    // --len 0 skips it, which is what you want for a short measurement run.
+    if (sample_len > 0)
+        printf("\nfinal sample:\n%s\n",
+               generate(g, ds.itos, sample_len, sample_rng, temperature).c_str());
     return 0;
 }

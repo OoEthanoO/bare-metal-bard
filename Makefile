@@ -24,14 +24,17 @@ bench/test_gemm: tools/test_gemm.cu src/gemm.cu src/bgemm.cu src/gemm.h | bench
 	$(NVCC) $(NVCCFLAGS) tools/test_gemm.cu src/gemm.cu src/bgemm.cu -o $@ $(LDFLAGS)
 
 # The model. Note: no -lcublas. Nothing here links a vendor BLAS.
-GPT_SRC := src/train_gpt.cu src/gpt.cu src/gemm.cu src/bgemm.cu src/nn.cu src/attention.cu
-GPT_DEP := src/gpt.h src/gemm.h src/nn.h src/attention.h src/reduce.cuh
+GPT_SRC := src/train_gpt.cu src/gpt.cu src/gemm.cu src/bgemm.cu src/nn.cu src/attention.cu src/flash.cu
+GPT_DEP := src/gpt.h src/gemm.h src/nn.h src/attention.h src/flash.h src/reduce.cuh
 
 bench/train_gpt: $(GPT_SRC) $(GPT_DEP) | bench
 	$(NVCC) $(NVCCFLAGS) $(GPT_SRC) -o $@
 
-bench/test_grad: tools/test_grad.cu src/gpt.cu src/gemm.cu src/bgemm.cu src/nn.cu src/attention.cu $(GPT_DEP) | bench
-	$(NVCC) $(NVCCFLAGS) tools/test_grad.cu src/gpt.cu src/gemm.cu src/bgemm.cu src/nn.cu src/attention.cu -o $@
+bench/test_grad: tools/test_grad.cu src/gpt.cu src/gemm.cu src/bgemm.cu src/nn.cu src/attention.cu src/flash.cu $(GPT_DEP) | bench
+	$(NVCC) $(NVCCFLAGS) tools/test_grad.cu src/gpt.cu src/gemm.cu src/bgemm.cu src/nn.cu src/attention.cu src/flash.cu -o $@
+
+bench/test_flash: tools/test_flash.cu src/flash.cu src/attention.cu src/bgemm.cu src/gemm.cu $(GPT_DEP) | bench
+	$(NVCC) $(NVCCFLAGS) tools/test_flash.cu src/flash.cu src/attention.cu src/bgemm.cu src/gemm.cu -o $@
 
 gpt: bench/train_gpt
 
@@ -45,4 +48,4 @@ run: $(BIN)
 	./$(BIN)
 
 clean:
-	rm -f $(BIN) $(TOOLS) bench/train_gpt bench/test_grad
+	rm -f $(BIN) $(TOOLS) bench/train_gpt bench/test_grad bench/test_flash

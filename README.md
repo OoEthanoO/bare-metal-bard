@@ -2,7 +2,9 @@
 
 A hand-written CUDA SGEMM taken from 1.2% of cuBLAS to **matching it in fp32**
 (96%) and **passing it with tensor cores** (115%), then used to train a GPT from
-scratch. No PyTorch, no cuBLAS, no cuDNN in the training path —
+scratch — including a **fused FlashAttention-style kernel** that never
+materializes the score matrix, which doubled the context length this 8 GB card
+can train. No PyTorch, no cuBLAS, no cuDNN in the training path —
 every matmul, layernorm, softmax, attention, GELU, cross-entropy and AdamW
 kernel here is written from scratch.
 
@@ -177,7 +179,10 @@ the true share for a pure training step is if anything slightly higher.)
 Two things follow. First, ~20% of the time goes to kernels with arithmetic
 intensity below 1 — pure bandwidth work that no amount of matmul tuning
 touches; the attention score matrices alone move 25 MB per layer per pass, which
-is what a fused FlashAttention-style kernel would eliminate. Second, even the
+is what a fused FlashAttention-style kernel would eliminate. That became
+[the next piece of work](#fused-attention-the-score-matrix-never-exists), and
+the three attention rows in this table (14.5 + 3.5 + 3.1 = 21.1%) are what it
+went after. Second, even the
 80% does not run at the 6802 GF/s headline: training's matmuls are far skinnier
 than the square N=4096 benchmark (K=384 for the attention projections), and
 small K leaves less work to amortize each tile load against.
@@ -197,6 +202,148 @@ All 16 parameter tensors agree to 1e-5…2e-3 relative. And the check is
 layernorm backward makes 14 of 16 tensors fail.
 
 ---
+
+---
+
+## Fused attention: the score matrix never exists
+
+The profile above says attention costs ~21% of a training step across three
+kernels. None of them is badly written — the batched GEMM is the same code that
+reaches 90% of cuBLAS. The cost is structural. A `(B, NH, T, T)` score matrix
+gets written to global memory and read back, and the softmax over it does about
+5 flops per 8 bytes on a card whose ridge point is **43 FLOP/byte**. That is
+0.6% of peak no matter how good the kernel is. The only fix is to not have the
+intermediate.
+
+A softmax normally needs the whole row before it can emit anything, because it
+needs the row max and the row sum. But both are *running* statistics. After
+seeing part of a row you hold a partial max `m` and a partial sum `l`, and when
+a later block raises the max to `m'`, everything computed so far is corrected by
+one factor:
+
+```
+m' = max(m, rowmax(S_j))
+l' = l * exp(m - m') + rowsum(exp(S_j - m'))
+O' = O * exp(m - m') + exp(S_j - m') @ V_j
+```
+
+with `O` divided by `l` only at the end. Each score tile lives in registers for
+the few instructions it takes to consume it and is then gone. This is
+FlashAttention (Dao et al. 2022). Note that it does *more* arithmetic than the
+unfused version, not less — the entire win is in what never gets written.
+
+Two more wins fall out of the structure, and on this hardware they matter as
+much as the famous one:
+
+- **Causality becomes a loop bound, not a mask.** The unfused path computes all
+  `T x T` scores and throws away the upper triangle inside the softmax. A query
+  block here simply never visits key blocks past its diagonal, so both attention
+  matmuls do half the work.
+- **The head permute disappears.** The unfused path pays a full bandwidth-bound
+  pass over `3*B*T*C` to make each head's slice contiguous, because a batched
+  GEMM needs uniform strides. The fused kernel indexes q/k/v straight out of the
+  `(B, T, 3C)` projection — one block owns one head, so the head offset is a
+  constant on the row pointer, and the `qkvr` buffer goes away with it.
+
+Backward never stores the score matrix either. It rebuilds the probabilities
+from the saved log-sum-exp, which is exact and needs no reductions at all:
+
+```
+P[i,j] = exp(S[i,j] - lse[i])
+```
+
+Recomputing `S` costs one matmul. Reading a stored score matrix back costs 25 MB
+of DRAM per layer. On this card that trade is not close. It is two kernels
+rather than one, because `dQ` reduces over keys while `dK` and `dV` reduce over
+queries — fusing them would push one of the three through global atomics on a
+tensor the size of the activations. **Recompute beats communication**, which is
+this repo's whole lesson restated one level up.
+
+### Measured
+
+`B=16, T=256, C=384, NH=6`, SM clock pinned to 1200 MHz, best of 50:
+
+| | unfused | fused | |
+|---|--------:|------:|---|
+| attention forward | 1.132 ms | **0.337 ms** | 3.36x |
+| attention backward | 1.828 ms | **1.595 ms** | 1.15x |
+| forward activations | 952.4 MB | **665.0 MB** | -30% |
+| backward scratch | 146.0 MB | **98.1 MB** | -33% |
+
+Accuracy against the attention this repo already trains with: **2.09e-07**
+normwise on the output, and 3.00e-07 / 4.19e-07 / 3.26e-07 on dq / dk / dv.
+That is fp32 rounding, the same order as the GEMM tests. The full model still
+gradient-checks through the fused path, all 16 tensors. Thirty steps each way
+give train loss 2.6105 vs 2.6103 and val 2.6234 vs 2.6235 — the two paths
+compute the same thing.
+
+```bash
+./bench/test_flash            # sweeps every tile config, both directions
+./bench/train_gpt --unfused   # the three-kernel path, for comparison
+```
+
+### The backward is only 1.15x, and here is why
+
+The forward result is most of the story; the backward is nearly a wash, and it
+is worth saying why rather than quoting the forward alone.
+
+The first answer was a guess: the fastest backward config ran 64 threads per
+block at 46 KB of shared memory — two blocks per SM, 8% occupancy. So I added a
+config with twice the threads. It gained 2.4%. `ncu` explains why:
+
+| | L1/TEX | DRAM | Compute | Occupancy |
+|---|---:|---:|---:|---:|
+| `flash_fwd` | 70.4% | 40.5% | 39.0% | 16.0% |
+| `flash_bwd_kv` | 71.1% | 20.9% | 26.3% | 8.2% |
+| `flash_bwd_q` | 66.9% | 23.4% | 25.1% | 8.2% |
+
+L1/TEX saturated near 70% with DRAM at 21% is a signature this project has met
+before — kernel 6 showed 81% against 15%. Shared memory and L1 share the
+LSU/MIO datapath, so this is shared-memory→register traffic and the FMA pipes
+are starved. **The same disease as kernel 6, at a different level of the
+hierarchy.**
+
+Counting loads per FMA agrees. The forward spends 12 shared loads on 32 FMAs in
+its `P@V` loop (0.375); the backward accumulation spends 16 on 32 (0.5), and its
+score loop is worse still. That is also why more threads did not help: a
+narrower column tile buys occupancy by loading *more* per unit of arithmetic, so
+the two effects very nearly cancel.
+
+The cure is kernel 7's — bigger register tiles — but here it collides with
+shared memory, because staging the whole head dimension at once makes the tiles
+proportional to `BR`. Chunking the head dimension the way a GEMM chunks `K`
+would stop register tiles and blocks-per-SM competing for the same resource, and
+DRAM at 21% says there is bandwidth to spare for the re-staging. That is the
+next thing to do here.
+
+Reproduce the table with `scripts\profile_flash.bat` (needs elevation — reading
+GPU performance counters is admin-only on Windows).
+
+### What the memory actually buys: twice the context
+
+The forward speedup is nice. The memory is the part that changes what the card
+can do, because the unfused footprint is *quadratic* in context length and the
+fused one is *linear*. Total resident memory at `B=16` (params + grads + Adam
+state + activations + backward scratch), measured with `--alloc-only`:
+
+| ctx | fused | unfused |
+|----:|------:|--------:|
+| 256 | 0.91 GB | 1.23 GB |
+| 512 | 1.65 GB | 2.64 GB |
+| 1024 | 3.15 GB | 6.42 GB |
+| 2048 | **6.13 GB** | 17.94 GB |
+| 3072 | 9.12 GB | out of memory |
+
+This card has 8 GB. The unfused path tops out at **ctx 1024**; the fused path
+trains at **ctx 2048** — 1118 ms/step, 29,303 tok/s, 3678 GFLOP/s — and the
+unfused path would need 17.94 GB to do the same, nearly three times the card.
+**Fusing attention doubled the context this GPU can train.**
+
+One caveat found while measuring this, worth knowing on Windows: a successful
+`cudaMalloc` is not evidence that a model fits. WDDM will oversubscribe VRAM
+into system memory and page, so the 15.7 GB allocation above *succeeded* and
+then ran at a crawl. The number that means something is the total against the
+card's memory, which is why `train_gpt` now prints it.
 
 ## Writeup
 
@@ -277,6 +424,13 @@ including the batched kernel used by attention):
 make test
 ```
 
+Check the fused attention against the unfused path — accuracy, time and memory,
+sweeping every tile configuration in both directions:
+
+```bash
+make bench/test_flash && ./bench/test_flash
+```
+
 Gradient-check the model:
 
 ```bash
@@ -335,16 +489,20 @@ src/
   bgemm.cu          batched GEMM for attention
   nn.cu             layernorm, GELU, softmax+cross-entropy, AdamW, encoder
   attention.cu      causal multi-head attention, forward and backward
+  flash.cu          fused attention: no score matrix, no permute (default)
   gpt.cu            model: allocation, init, forward, backward
   train_gpt.cu      training loop, sampling, data
   reduce.cuh        warp-shuffle block reductions
 tools/
   test_gemm.cu      GEMM vs cuBLAS, all transpose combinations
+  test_flash.cu     fused vs unfused attention: accuracy, time, memory
   test_grad.cu      directional-derivative gradient check
   device_query.cu   roofline numbers for this GPU
   plot_results.py   CSV -> SVG charts
 scripts/
   gpu_clocks.sh     lock/unlock SM clock for reproducible benchmarks
+  build.bat         Windows build (nvcc + MSVC), the Makefile's equivalent
+  profile_flash.bat ncu counters for the fused kernels; needs elevation
 ```
 
 ### Notes on the transpose-aware GEMM
@@ -366,8 +524,12 @@ four scalar stores.
    not expose.
 2. **`cp.async`** for the staging copies, so kernel 8's prefetch bypasses
    registers entirely rather than costing 32 of them per thread.
-3. **Fuse attention** (FlashAttention-style) — the current implementation
-   materializes the full (B, NH, T, T) score matrix, 25 MB per layer, which is
-   pure bandwidth that a fused kernel would never spend.
+3. ~~**Fuse attention** (FlashAttention-style)~~ — [done](#fused-attention-the-score-matrix-never-exists).
+   Forward is 3.36x and activation memory is down 30%. The backward is only
+   1.15x and the profiler says why: shared-memory→register traffic, kernel 6's
+   problem at a different level. **Chunk the head dimension** the way a GEMM
+   chunks K, so that bigger register tiles and more blocks per SM stop
+   competing for the same shared memory. DRAM sits at 21%, so there is
+   bandwidth to pay for the re-staging.
 4. **Multi-GPU**, where communication rather than compute becomes the limit.
    That one needs hardware this laptop does not have.
