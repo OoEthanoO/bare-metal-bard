@@ -1,0 +1,235 @@
+// Ring all-reduce, written out rather than linked in.
+#include "ddp.h"
+#include <cstdio>
+#include <cstdlib>
+
+#define CUDA_CHECK(x)                                                          \
+    do {                                                                       \
+        cudaError_t e__ = (x);                                                 \
+        if (e__ != cudaSuccess) {                                              \
+            fprintf(stderr, "CUDA error: %s at %s:%d\n",                       \
+                    cudaGetErrorString(e__), __FILE__, __LINE__);              \
+            exit(1);                                                           \
+        }                                                                      \
+    } while (0)
+
+namespace {
+
+inline size_t ceil_div(size_t a, size_t b) { return (a + b - 1) / b; }
+
+// dst += src, elementwise. The only arithmetic in a ring all-reduce; everything
+// else is scheduling.
+__global__ void add_into_k(float *__restrict__ dst, const float *__restrict__ src,
+                           size_t n) {
+    size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    const size_t stride = (size_t)gridDim.x * blockDim.x;
+    for (; i < n; i += stride) dst[i] += src[i];
+}
+
+// Chunk r of a `count`-element buffer split n ways. The last chunk absorbs the
+// remainder, which is why every chunk is described by an explicit (off, len)
+// rather than assumed equal.
+struct Chunk { size_t off, len; };
+
+inline Chunk chunk_of(size_t count, int n, int r) {
+    const size_t per = ceil_div(count, (size_t)n);
+    const size_t off = per * (size_t)r;
+    if (off >= count) return {count, 0};
+    const size_t len = (off + per <= count) ? per : count - off;
+    return {off, len};
+}
+
+// One rank-to-rank transfer. Direct when the driver allows peer access,
+// otherwise bounced through pinned host memory -- which is exactly the
+// difference the multi-GPU section is trying to measure, so it is not hidden.
+void transfer(DDP &d, int src_rank, const float *src, int dst_rank, float *dst,
+              size_t len) {
+    if (len == 0) return;
+    if (d.peer[src_rank][dst_rank]) {
+        CUDA_CHECK(cudaMemcpyPeerAsync(dst, d.dev[dst_rank], src, d.dev[src_rank],
+                                       len * sizeof(float), d.stream[src_rank]));
+    } else {
+        CUDA_CHECK(cudaMemcpyAsync(d.host_stage, src, len * sizeof(float),
+                                   cudaMemcpyDeviceToHost, d.stream[src_rank]));
+        CUDA_CHECK(cudaStreamSynchronize(d.stream[src_rank]));
+        CUDA_CHECK(cudaMemcpyAsync(dst, d.host_stage, len * sizeof(float),
+                                   cudaMemcpyHostToDevice, d.stream[dst_rank]));
+        CUDA_CHECK(cudaStreamSynchronize(d.stream[dst_rank]));
+    }
+}
+
+void sync_all(DDP &d) {
+    for (int r = 0; r < d.n; ++r) {
+        CUDA_CHECK(cudaSetDevice(d.dev[r]));
+        CUDA_CHECK(cudaStreamSynchronize(d.stream[r]));
+    }
+}
+}  // namespace
+
+void ddp_init(DDP &d, int n, const int *devices) {
+    d.n = n;
+    for (int r = 0; r < n; ++r) d.dev[r] = devices[r];
+
+    d.any_peer = false;
+    for (int i = 0; i < n; ++i) {
+        for (int j = 0; j < n; ++j) {
+            d.peer[i][j] = false;
+            if (i == j) continue;
+            if (d.dev[i] == d.dev[j]) {
+                // Same physical device: a "peer" copy is just a device-to-device
+                // copy, always available. This is the single-GPU rehearsal path.
+                d.peer[i][j] = true;
+                d.any_peer = true;
+                continue;
+            }
+            int can = 0;
+            CUDA_CHECK(cudaDeviceCanAccessPeer(&can, d.dev[i], d.dev[j]));
+            if (can) {
+                CUDA_CHECK(cudaSetDevice(d.dev[i]));
+                const cudaError_t e = cudaDeviceEnablePeerAccess(d.dev[j], 0);
+                if (e != cudaSuccess && e != cudaErrorPeerAccessAlreadyEnabled) {
+                    cudaGetLastError();  // swallow; fall back to host staging
+                    can = 0;
+                }
+            }
+            d.peer[i][j] = can != 0;
+            d.any_peer = d.any_peer || d.peer[i][j];
+        }
+    }
+
+    d.recv_cap = 0;
+    d.stage_cap = 0;
+    d.host_stage = nullptr;
+    for (int r = 0; r < n; ++r) {
+        CUDA_CHECK(cudaSetDevice(d.dev[r]));
+        CUDA_CHECK(cudaStreamCreate(&d.stream[r]));
+        CUDA_CHECK(cudaEventCreate(&d.start[r]));
+        CUDA_CHECK(cudaEventCreate(&d.stop[r]));
+        d.recv[r] = nullptr;
+    }
+    d.last = {0, 0, 0, 0};
+}
+
+void ddp_free(DDP &d) {
+    for (int r = 0; r < d.n; ++r) {
+        CUDA_CHECK(cudaSetDevice(d.dev[r]));
+        if (d.recv[r]) cudaFree(d.recv[r]);
+        cudaStreamDestroy(d.stream[r]);
+        cudaEventDestroy(d.start[r]);
+        cudaEventDestroy(d.stop[r]);
+    }
+    if (d.host_stage) cudaFreeHost(d.host_stage);
+    d.host_stage = nullptr;
+}
+
+void ddp_allreduce(DDP &d, float **bufs, size_t count) {
+    if (d.n == 1) {
+        d.last = {0.0, 0.0, 0.0, 0};
+        return;
+    }
+
+    const size_t per = ceil_div(count, (size_t)d.n);
+    if (d.recv_cap < per) {
+        for (int r = 0; r < d.n; ++r) {
+            CUDA_CHECK(cudaSetDevice(d.dev[r]));
+            if (d.recv[r]) CUDA_CHECK(cudaFree(d.recv[r]));
+            CUDA_CHECK(cudaMalloc(&d.recv[r], per * sizeof(float)));
+        }
+        d.recv_cap = per;
+    }
+    if (!d.any_peer && d.stage_cap < per) {
+        if (d.host_stage) CUDA_CHECK(cudaFreeHost(d.host_stage));
+        CUDA_CHECK(cudaMallocHost(&d.host_stage, per * sizeof(float)));
+        d.stage_cap = per;
+    }
+
+    cudaEvent_t t0, t1, t2;
+    CUDA_CHECK(cudaSetDevice(d.dev[0]));
+    CUDA_CHECK(cudaEventCreate(&t0));
+    CUDA_CHECK(cudaEventCreate(&t1));
+    CUDA_CHECK(cudaEventCreate(&t2));
+    sync_all(d);
+    CUDA_CHECK(cudaEventRecord(t0, d.stream[0]));
+
+    // ---- phase 1: reduce-scatter ----
+    // At step s, rank r sends chunk (r - s) and receives chunk (r - s - 1),
+    // adding it into its own copy. After n-1 steps rank r holds the complete
+    // sum for chunk (r + 1) mod n.
+    for (int s = 0; s < d.n - 1; ++s) {
+        for (int r = 0; r < d.n; ++r) {
+            const int send_idx = ((r - s) % d.n + d.n) % d.n;
+            const int dst = (r + 1) % d.n;
+            const Chunk c = chunk_of(count, d.n, send_idx);
+            transfer(d, r, bufs[r] + c.off, dst, d.recv[dst], c.len);
+        }
+        sync_all(d);
+        for (int r = 0; r < d.n; ++r) {
+            const int recv_idx = ((r - s - 1) % d.n + d.n) % d.n;
+            const Chunk c = chunk_of(count, d.n, recv_idx);
+            if (c.len == 0) continue;
+            CUDA_CHECK(cudaSetDevice(d.dev[r]));
+            const int threads = 256;
+            const int blocks = (int)(ceil_div(c.len, (size_t)threads) < 1024
+                                         ? ceil_div(c.len, (size_t)threads)
+                                         : 1024);
+            add_into_k<<<blocks, threads, 0, d.stream[r]>>>(bufs[r] + c.off,
+                                                            d.recv[r], c.len);
+        }
+        sync_all(d);
+    }
+    CUDA_CHECK(cudaSetDevice(d.dev[0]));
+    CUDA_CHECK(cudaEventRecord(t1, d.stream[0]));
+
+    // ---- phase 2: all-gather ----
+    // Same ring, but the arriving chunk replaces rather than accumulates.
+    for (int s = 0; s < d.n - 1; ++s) {
+        for (int r = 0; r < d.n; ++r) {
+            const int send_idx = ((r - s + 1) % d.n + d.n) % d.n;
+            const int dst = (r + 1) % d.n;
+            const Chunk c = chunk_of(count, d.n, send_idx);
+            transfer(d, r, bufs[r] + c.off, dst, bufs[dst] + c.off, c.len);
+        }
+        sync_all(d);
+    }
+    CUDA_CHECK(cudaSetDevice(d.dev[0]));
+    CUDA_CHECK(cudaEventRecord(t2, d.stream[0]));
+    sync_all(d);
+
+    float ms1 = 0.f, ms2 = 0.f;
+    CUDA_CHECK(cudaEventElapsedTime(&ms1, t0, t1));
+    CUDA_CHECK(cudaEventElapsedTime(&ms2, t1, t2));
+    d.last.reduce_scatter_ms = ms1;
+    d.last.all_gather_ms = ms2;
+    d.last.total_ms = ms1 + ms2;
+    // 2*(n-1) steps, S/n bytes each.
+    d.last.bytes_per_device =
+        (size_t)(2 * (d.n - 1)) * per * sizeof(float);
+    cudaEventDestroy(t0);
+    cudaEventDestroy(t1);
+    cudaEventDestroy(t2);
+}
+
+const DDPTiming &ddp_timing(const DDP &d) { return d.last; }
+
+void ddp_report_topology(const DDP &d) {
+    printf("ddp       %d rank(s) on device(s)", d.n);
+    for (int r = 0; r < d.n; ++r) printf(" %d", d.dev[r]);
+    bool same = true;
+    for (int r = 1; r < d.n; ++r) same = same && (d.dev[r] == d.dev[0]);
+    if (same && d.n > 1) printf("  [SIMULATED: one physical GPU]");
+    printf("\n");
+
+    if (d.n > 1) {
+        printf("links     ");
+        bool all_peer = true;
+        for (int i = 0; i < d.n; ++i)
+            for (int j = 0; j < d.n; ++j)
+                if (i != j) all_peer = all_peer && d.peer[i][j];
+        if (all_peer)
+            printf("peer-to-peer enabled on every pair\n");
+        else if (d.any_peer)
+            printf("peer-to-peer on some pairs; others staged through host\n");
+        else
+            printf("NO peer access -- every transfer staged through host memory\n");
+    }
+}

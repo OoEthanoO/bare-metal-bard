@@ -80,7 +80,7 @@ echo [toolkit] %CUDA_PATH%
 set "KERNELS="
 for %%f in (src\kernels\*.cu) do set "KERNELS=!KERNELS! %%f"
 
-set "GPT_SRC=src\gpt.cu src\gemm.cu src\bgemm.cu src\nn.cu src\attention.cu src\flash.cu"
+set "GPT_SRC=src\gpt.cu src\gemm.cu src\bgemm.cu src\nn.cu src\attention.cu src\flash.cu src\ddp.cu"
 
 REM Collected by walking the arguments rather than using %*, because %* still
 REM contains the --cuda pair that shift already consumed.
@@ -91,7 +91,7 @@ set "TARGETS=!TARGETS! %~1"
 shift
 goto argloop
 :argdone
-if "%TARGETS%"=="" set "TARGETS=sgemm test_gemm train_gpt test_grad test_flash device_query"
+if "%TARGETS%"=="" set "TARGETS=sgemm test_gemm train_gpt test_grad test_flash test_ddp device_query"
 
 for %%t in (%TARGETS%) do (
   echo [build] %%t
@@ -100,6 +100,7 @@ for %%t in (%TARGETS%) do (
   if "%%t"=="train_gpt"    "%NVCC%" %FLAGS% src\train_gpt.cu %GPT_SRC% -o bench\train_gpt.exe
   if "%%t"=="test_grad"    "%NVCC%" %FLAGS% tools\test_grad.cu %GPT_SRC% -o bench\test_grad.exe
   if "%%t"=="test_flash"   "%NVCC%" %FLAGS% tools\test_flash.cu src\flash.cu src\attention.cu src\bgemm.cu src\gemm.cu -o bench\test_flash.exe
+  if "%%t"=="test_ddp"     "%NVCC%" %FLAGS% tools\test_ddp.cu src\ddp.cu -o bench\test_ddp.exe
   if "%%t"=="device_query" "%NVCC%" -arch=sm_89 -O2 -std=c++17 -allow-unsupported-compiler tools\device_query.cu -o bench\device_query.exe
   if errorlevel 1 exit /b 1
 )

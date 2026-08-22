@@ -30,6 +30,8 @@
 
 #include "gpt.h"
 #include "nn.h"
+#include "ddp.h"
+#include <chrono>
 
 #define CUDA_CHECK(x)                                                          \
     do {                                                                       \
@@ -248,6 +250,7 @@ int main(int argc, char **argv) {
     unsigned seed = 1337;
     bool use_flash = true;  // --unfused selects the three-kernel attention
     bool alloc_only = false;
+    int nranks = 1;  // --gpus N: data-parallel replicas
 
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "-d") && i + 1 < argc) data_path = argv[++i];
@@ -267,6 +270,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--len") && i + 1 < argc) sample_len = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--temp") && i + 1 < argc) temperature = atof(argv[++i]);
         else if (!strcmp(argv[i], "--alloc-only")) alloc_only = true;
+        else if (!strcmp(argv[i], "--gpus") && i + 1 < argc) nranks = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--unfused")) use_flash = false;
         else { fprintf(stderr, "unknown arg %s\n", argv[i]); return 1; }
     }
@@ -287,16 +291,44 @@ int main(int argc, char **argv) {
     const int V = (int)ds.itos.size();
     const int Vp = ((V + 127) / 128) * 128;  // pad so the head matmul is aligned
 
-    GPT g;
-    g.config = {T, V, Vp, n_layer, n_head, n_embd};
-    g.B = B; g.T = T;
-    g.use_flash = use_flash;
+    // Data parallel: each rank owns a full replica of the model and a shard of
+    // the batch. Ranks are placed round-robin over the physical devices, so
+    // --gpus 2 on one GPU is a faithful rehearsal of the whole path (identical
+    // arithmetic, identical collective) with only the transport differing.
+    if (B % nranks != 0) {
+        fprintf(stderr, "batch %d does not divide across %d ranks\n", B, nranks);
+        return 1;
+    }
+    const int Bshard = B / nranks;
+    int ndev = 0;
+    CUDA_CHECK(cudaGetDeviceCount(&ndev));
+    if (ndev < 1) { fprintf(stderr, "no CUDA device\n"); return 1; }
+    std::vector<int> devs(nranks);
+    for (int r = 0; r < nranks; ++r) devs[r] = r % ndev;
+
+    std::vector<GPT> reps(nranks);
+    for (int r = 0; r < nranks; ++r) {
+        CUDA_CHECK(cudaSetDevice(devs[r]));
+        reps[r].config = {T, V, Vp, n_layer, n_head, n_embd};
+        reps[r].B = Bshard;
+        reps[r].T = T;
+        reps[r].use_flash = use_flash;
+    }
+    GPT &g = reps[0];
 
     printf("data      %zu train / %zu val tokens, vocab %d (padded %d)\n",
            ds.train.size(), ds.val.size(), V, Vp);
 
-    gpt_alloc(g);
-    gpt_init(g, seed);
+    for (int r = 0; r < nranks; ++r) {
+        CUDA_CHECK(cudaSetDevice(devs[r]));
+        gpt_alloc(reps[r]);
+        // Same seed on every rank, so the replicas start identical and the
+        // all-reduce is the only thing keeping them that way.
+        gpt_init(reps[r], seed);
+    }
+    DDP ddp;
+    ddp_init(ddp, nranks, devs.data());
+    CUDA_CHECK(cudaSetDevice(devs[0]));
 
     const double param_mb = g.num_params * 4.0 / 1048576.0;
     const double act_mb = g.num_acts * 4.0 / 1048576.0;
@@ -309,6 +341,7 @@ int main(int argc, char **argv) {
            act_mb, gact_mb);
     printf("total     %.2f GB resident (params+grads+adam+activations+scratch)\n",
            (4.0 * param_mb + act_mb + gact_mb) / 1024.0);
+    if (nranks > 1) ddp_report_topology(ddp);
     // Allocation is the whole question for a context-length study, and a step
     // at long context is slow. Note that on Windows the driver will happily
     // oversubscribe VRAM into system memory, so a successful cudaMalloc is NOT
@@ -331,35 +364,91 @@ int main(int argc, char **argv) {
     cudaEvent_t ev0, ev1;
     CUDA_CHECK(cudaEventCreate(&ev0));
     CUDA_CHECK(cudaEventCreate(&ev1));
-    double ema_ms = 0.0;
+    double ema_ms = 0.0, ema_comm = 0.0;
+    std::vector<float *> gbufs(nranks);
 
     for (int step = 1; step <= steps; ++step) {
         get_batch(ds.train, B, T, rng, x, y);
 
-        CUDA_CHECK(cudaEventRecord(ev0));
-        const float loss = gpt_forward(g, x.data(), y.data());
-        gpt_backward(g);
+        // Wall-clock, not events: with several devices in flight the thing
+        // worth timing is the step, and an event on one device's stream does
+        // not see the others.
+        for (int r = 0; r < nranks; ++r) {
+            CUDA_CHECK(cudaSetDevice(devs[r]));
+            CUDA_CHECK(cudaDeviceSynchronize());
+        }
+        const auto t_begin = std::chrono::steady_clock::now();
+
+        // Each rank runs its own shard of the batch. Averaging the shard means
+        // reproduces the full-batch mean exactly, so N ranks of B/N compute the
+        // same gradient as one rank of B.
+        double loss_sum = 0.0;
+        for (int r = 0; r < nranks; ++r) {
+            CUDA_CHECK(cudaSetDevice(devs[r]));
+            const size_t off = (size_t)r * Bshard * T;
+            loss_sum += gpt_forward(reps[r], x.data() + off, y.data() + off);
+            gpt_backward(reps[r]);
+        }
+        const float loss = (float)(loss_sum / nranks);
+        // Without this the compute/communication split is a lie: the backward
+        // pass is still running on each device's default stream, and because
+        // the legacy default stream synchronises with other streams, the
+        // all-reduce's first transfer waits for it. That tail then gets counted
+        // as communication. It read 31 ms of "comm" for a collective that
+        // takes 1.5 ms in isolation.
+        for (int r = 0; r < nranks; ++r) {
+            CUDA_CHECK(cudaSetDevice(devs[r]));
+            CUDA_CHECK(cudaDeviceSynchronize());
+        }
+        const auto t_compute = std::chrono::steady_clock::now();
+
+        // ---- the only line that needs more than one GPU to mean anything ----
+        for (int r = 0; r < nranks; ++r) gbufs[r] = reps[r].grads_mem;
+        ddp_allreduce(ddp, gbufs.data(), g.num_params);
+        const auto t_comm = std::chrono::steady_clock::now();
 
         // Global-norm clipping: rescale the whole gradient vector so its L2
         // norm is at most grad_clip. Rescaling globally rather than per-tensor
         // preserves the gradient's direction, which is the point.
-        const float gnorm = grad_global_norm(g.grads_mem, (int)g.num_params);
-        const float gscale = (gnorm > grad_clip) ? grad_clip / gnorm : 1.0f;
+        //
+        // The all-reduce leaves the SUM over ranks, so both the norm and the
+        // update carry a 1/nranks to turn it back into the mean.
         const float lr_now = lr_at(step, warmup, steps, lr);
-        adamw_update(g.params_mem, g.grads_mem, g.m_mem, g.v_mem,
-                     (int)g.num_params, lr_now, 0.9f, 0.999f, 1e-8f,
-                     weight_decay, step, gscale);
-        CUDA_CHECK(cudaEventRecord(ev1));
-        CUDA_CHECK(cudaEventSynchronize(ev1));
-        float ms = 0.0f;
-        CUDA_CHECK(cudaEventElapsedTime(&ms, ev0, ev1));
+        float gnorm = 0.0f;
+        for (int r = 0; r < nranks; ++r) {
+            CUDA_CHECK(cudaSetDevice(devs[r]));
+            const float gn =
+                grad_global_norm(reps[r].grads_mem, (int)reps[r].num_params) /
+                nranks;
+            if (r == 0) gnorm = gn;
+            const float gs = ((gn > grad_clip) ? grad_clip / gn : 1.0f) / nranks;
+            adamw_update(reps[r].params_mem, reps[r].grads_mem, reps[r].m_mem,
+                         reps[r].v_mem, (int)reps[r].num_params, lr_now, 0.9f,
+                         0.999f, 1e-8f, weight_decay, step, gs);
+        }
+        for (int r = 0; r < nranks; ++r) {
+            CUDA_CHECK(cudaSetDevice(devs[r]));
+            CUDA_CHECK(cudaDeviceSynchronize());
+        }
+        CUDA_CHECK(cudaSetDevice(devs[0]));
+        const auto t_end = std::chrono::steady_clock::now();
+
+        auto msec = [](auto a, auto b) {
+            return std::chrono::duration<double, std::milli>(b - a).count();
+        };
+        const float ms = (float)msec(t_begin, t_end);
+        const double comm_ms = msec(t_compute, t_comm);
         ema_ms = (step == 1) ? ms : 0.9 * ema_ms + 0.1 * ms;
+        ema_comm = (step == 1) ? comm_ms : 0.9 * ema_comm + 0.1 * comm_ms;
 
         if (step % 10 == 0 || step == 1) {
-            printf("step %5d/%d  loss %.4f  lr %.2e  |g| %.3f  %6.1f ms  %7.0f tok/s  %5.0f GFLOP/s\n",
+            printf("step %5d/%d  loss %.4f  lr %.2e  |g| %.3f  %6.1f ms  %7.0f tok/s  %5.0f GFLOP/s",
                    step, steps, loss, lr_now, gnorm, ms,
                    tokens_per_step / (ms * 1e-3),
                    flops_per_step / (ms * 1e-3) / 1e9);
+            if (nranks > 1)
+                printf("  comm %5.1f ms (%4.1f%%)", comm_ms, 100.0 * comm_ms / ms);
+            printf("\n");
             fflush(stdout);
         }
 
