@@ -65,6 +65,34 @@ __device__ __forceinline__ float row_reduce(float v) {
     return v;
 }
 
+// Move N contiguous floats to or from shared memory, vectorized when N allows.
+//
+// The tile shapes want to be free to use a 2-wide column tile, which a float4
+// cannot express. Rather than exclude those shapes -- and they are the ones
+// that double occupancy, because a narrower tile means more threads per block
+// for the same shared memory -- the width becomes a compile-time branch.
+template <int N>
+__device__ __forceinline__ void load_n(float *dst, const float *src) {
+    if constexpr (N % 4 == 0) {
+#pragma unroll
+        for (int i = 0; i < N; i += 4) VEC4(dst[i]) = CVEC4(src[i]);
+    } else {
+#pragma unroll
+        for (int i = 0; i < N; ++i) dst[i] = src[i];
+    }
+}
+
+template <int N>
+__device__ __forceinline__ void store_n(float *dst, const float *src) {
+    if constexpr (N % 4 == 0) {
+#pragma unroll
+        for (int i = 0; i < N; i += 4) VEC4(dst[i]) = CVEC4(src[i]);
+    } else {
+#pragma unroll
+        for (int i = 0; i < N; ++i) dst[i] = src[i];
+    }
+}
+
 // ---------------------------------------------------------------- forward
 //
 // Grid  (ceil(T/BR), B*NH): one block owns BR query rows of one head.
@@ -474,7 +502,7 @@ __global__ __launch_bounds__(NT) void flash_bwd_kv_k(
 
     static_assert(RG * CG == NT, "score tile must cover the thread block");
     static_assert(AG * BG == NT, "accumulator tile must cover it too");
-    static_assert(RT % 4 == 0 && CT % 4 == 0, "vector loads");
+    static_assert(RT % 4 == 0, "vector loads");
     static_assert(AT % 4 == 0 && BT % 4 == 0, "vector loads");
     static_assert(NT % V4 == 0, "staging must tile evenly");
 
@@ -567,11 +595,8 @@ __global__ __launch_bounds__(NT) void flash_bwd_kv_k(
                 VEC4(rq[r]) = CVEC4(Qst[i * QW + r0 + r]);
                 VEC4(rdo[r]) = CVEC4(dOst[i * QW + r0 + r]);
             }
-#pragma unroll
-            for (int c = 0; c < CT; c += 4) {
-                VEC4(rk[c]) = CVEC4(Kst[i * KW + c0 + c]);
-                VEC4(rv[c]) = CVEC4(Vst[i * KW + c0 + c]);
-            }
+            load_n<CT>(rk, &Kst[i * KW + c0]);
+            load_n<CT>(rv, &Vst[i * KW + c0]);
 #pragma unroll
             for (int r = 0; r < RT; ++r)
 #pragma unroll
@@ -599,11 +624,8 @@ __global__ __launch_bounds__(NT) void flash_bwd_kv_k(
         }
 #pragma unroll
         for (int r = 0; r < RT; ++r) {
-#pragma unroll
-            for (int c = 0; c < CT; c += 4) {
-                VEC4(Pst[(r0 + r) * PW + c0 + c]) = VEC4(s[r][c]);
-                VEC4(dSst[(r0 + r) * PW + c0 + c]) = VEC4(dp[r][c]);
-            }
+            store_n<CT>(&Pst[(r0 + r) * PW + c0], s[r]);
+            store_n<CT>(&dSst[(r0 + r) * PW + c0], dp[r]);
         }
         __syncthreads();
 
@@ -665,7 +687,7 @@ __global__ __launch_bounds__(NT) void flash_bwd_q_k(
 
     static_assert(RG * CG == NT, "score tile must cover the thread block");
     static_assert(AG * BG == NT, "accumulator tile must cover it too");
-    static_assert(RT % 4 == 0 && CT % 4 == 0, "vector loads");
+    static_assert(RT % 4 == 0, "vector loads");
     static_assert(AT % 4 == 0 && BT % 4 == 0, "vector loads");
     static_assert(NT % V4 == 0, "staging must tile evenly");
 
@@ -755,11 +777,8 @@ __global__ __launch_bounds__(NT) void flash_bwd_q_k(
                 VEC4(rq[r]) = CVEC4(Qst[i * QW + r0 + r]);
                 VEC4(rdo[r]) = CVEC4(dOst[i * QW + r0 + r]);
             }
-#pragma unroll
-            for (int c = 0; c < CT; c += 4) {
-                VEC4(rk[c]) = CVEC4(Kst[i * KW + c0 + c]);
-                VEC4(rv[c]) = CVEC4(Vst[i * KW + c0 + c]);
-            }
+            load_n<CT>(rk, &Kst[i * KW + c0]);
+            load_n<CT>(rv, &Vst[i * KW + c0]);
 #pragma unroll
             for (int r = 0; r < RT; ++r)
 #pragma unroll
@@ -872,7 +891,9 @@ bool launch_bwd(float *dqkv, float *dsum, const float *dout, const float *qkv,
     X(1, 64, 32, 128, 4, 4, 4, 4, 4, 8, "br64 bc32 t128 kv4x4 q4x8")           \
     X(2, 32, 32, 64, 4, 4, 4, 8, 4, 8, "br32 bc32 t64  kv4x8 q4x8")            \
     X(3, 32, 32, 64, 4, 4, 8, 4, 8, 4, "br32 bc32 t64  kv8x4 q8x4")            \
-    X(4, 32, 32, 64, 4, 4, 4, 4, 4, 4, "br32 bc32 t64  kv4x4 q4x4")
+    X(4, 32, 32, 64, 4, 4, 4, 4, 4, 4, "br32 bc32 t64  kv4x4 q4x4")            \
+    X(5, 32, 32, 128, 4, 2, 4, 4, 4, 4, "br32 bc32 t128 kv4x4 q4x4")           \
+    X(6, 32, 64, 128, 4, 4, 8, 4, 4, 4, "br32 bc64 t128 kv8x4 q4x4")
 
 template <int BR, int BC, int HS, int NT, int RT, int CT, int AT, int BT,
           int QAT, int QBT>
@@ -933,9 +954,15 @@ const char *flash_bwd_config_name(int cfg) {
     }
 }
 
-// Also measured: the 8x4 accumulator tile beats 4x8 by 25%, which is the extra
-// reuse on the strided dO/Q reads paying for itself.
-int flash_default_bwd_config() { return 3; }
+// Measured. The profiler says both backward kernels are bound on
+// shared-memory-to-register traffic (L1/TEX ~70%, DRAM ~21%, compute ~26%),
+// which is kernel 6 disease at a different level of the hierarchy. Occupancy is
+// the lesser of the two effects: config 5 doubles resident threads over config
+// 3 and gains only 2.4%, because a narrower column tile also loads more per
+// FMA. Fixing this properly means staging the head dimension in chunks so that
+// bigger register tiles and more blocks per SM stop competing for the same
+// shared memory -- the next thing to do here.
+int flash_default_bwd_config() { return 5; }
 
 bool flash_attention_backward_cfg(int cfg, float *dqkv, float *dsum,
                                   const float *dout, const float *qkv,
