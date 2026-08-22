@@ -105,6 +105,52 @@ void ddp_init(DDP &d, int n, const int *devices) {
         }
     }
 
+    // Peer access being ENABLED is not evidence that it WORKS. On virtualised
+    // hosts -- which is most rented hardware -- the driver can advertise P2P
+    // while PCIe ACS or the IOMMU quietly sends the DMA somewhere else. The
+    // copy returns success, the sync returns success, and the bytes never
+    // arrive. A collective that trusts the flag then computes wrong gradients
+    // at full speed and says nothing, which is the worst of all outcomes.
+    //
+    // So: actually move four bytes and check they landed.
+    if (getenv("DDP_NO_P2P")) {
+        for (int i = 0; i < n; ++i)
+            for (int j = 0; j < n; ++j) d.peer[i][j] = false;
+        printf("ddp       DDP_NO_P2P set: staging every transfer through host\n");
+    }
+    for (int i = 0; i < n; ++i) {
+        for (int j = 0; j < n; ++j) {
+            if (!d.peer[i][j] || d.dev[i] == d.dev[j]) continue;
+            float *a = nullptr, *b = nullptr;
+            const float probe = 1.0f + 100.0f * i + j;
+            float back = -1.0f;
+            CUDA_CHECK(cudaSetDevice(d.dev[i]));
+            CUDA_CHECK(cudaMalloc(&a, sizeof(float)));
+            CUDA_CHECK(cudaMemcpy(a, &probe, sizeof(float), cudaMemcpyHostToDevice));
+            CUDA_CHECK(cudaSetDevice(d.dev[j]));
+            CUDA_CHECK(cudaMalloc(&b, sizeof(float)));
+            CUDA_CHECK(cudaMemset(b, 0, sizeof(float)));
+            CUDA_CHECK(cudaSetDevice(d.dev[i]));
+            CUDA_CHECK(cudaMemcpyPeer(b, d.dev[j], a, d.dev[i], sizeof(float)));
+            CUDA_CHECK(cudaSetDevice(d.dev[j]));
+            CUDA_CHECK(cudaMemcpy(&back, b, sizeof(float), cudaMemcpyDeviceToHost));
+            if (back != probe) {
+                printf("ddp       WARNING: peer %d->%d is enabled but moves the "
+                       "wrong bytes (sent %.1f, got %.1f). Falling back to host "
+                       "staging for that pair.\n", d.dev[i], d.dev[j], probe, back);
+                d.peer[i][j] = false;
+            }
+            CUDA_CHECK(cudaSetDevice(d.dev[i]));
+            CUDA_CHECK(cudaFree(a));
+            CUDA_CHECK(cudaSetDevice(d.dev[j]));
+            CUDA_CHECK(cudaFree(b));
+        }
+    }
+    d.any_peer = false;
+    for (int i = 0; i < n; ++i)
+        for (int j = 0; j < n; ++j)
+            if (i != j) d.any_peer = d.any_peer || d.peer[i][j];
+
     d.recv_cap = 0;
     d.stage_cap = 0;
     d.host_stage = nullptr;
@@ -145,7 +191,11 @@ void ddp_allreduce(DDP &d, float **bufs, size_t count) {
         }
         d.recv_cap = per;
     }
-    if (!d.any_peer && d.stage_cap < per) {
+    bool need_stage = false;
+    for (int i = 0; i < d.n; ++i)
+        for (int j = 0; j < d.n; ++j)
+            if (i != j && !d.peer[i][j]) need_stage = true;
+    if (need_stage && d.stage_cap < per) {
         if (d.host_stage) CUDA_CHECK(cudaFreeHost(d.host_stage));
         CUDA_CHECK(cudaMallocHost(&d.host_stage, per * sizeof(float)));
         d.stage_cap = per;
