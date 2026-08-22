@@ -6,167 +6,167 @@ export const data = {
     {
       "id": 1,
       "name": "naive",
-      "gflops": 82.78,
+      "gflops": 82.79,
       "pct": 1.17,
       "note": "one thread per output element, uncoalesced",
       "intensity": 0.25,
       "bySize": {
-        "512": 1.68,
-        "1024": 1.35,
-        "2048": 1.21,
+        "512": 1.81,
+        "1024": 1.38,
+        "2048": 1.22,
         "4096": 1.17
       }
     },
     {
       "id": 2,
       "name": "coalesced",
-      "gflops": 646.56,
-      "pct": 9.12,
+      "gflops": 639.77,
+      "pct": 9.04,
       "note": "swapped which index maps to threadIdx.x",
       "intensity": 0.25,
       "bySize": {
-        "512": 13.21,
-        "1024": 11.05,
-        "2048": 9.97,
-        "4096": 9.12
+        "512": 14.48,
+        "1024": 11.25,
+        "2048": 10.01,
+        "4096": 9.04
       }
     },
     {
       "id": 3,
       "name": "smem",
       "gflops": 814.67,
-      "pct": 11.49,
+      "pct": 11.52,
       "note": "32x32 shared-memory tile",
       "intensity": 8,
       "bySize": {
-        "512": 16.67,
-        "1024": 14.04,
-        "2048": 12.58,
-        "4096": 11.49
+        "512": 18.57,
+        "1024": 14.26,
+        "2048": 12.67,
+        "4096": 11.52
       }
     },
     {
       "id": 4,
       "name": "tile1d",
-      "gflops": 2579.03,
-      "pct": 36.38,
+      "gflops": 2578.38,
+      "pct": 36.42,
       "note": "8 outputs per thread (TM=8)",
       "intensity": 16,
       "bySize": {
-        "512": 48.76,
-        "1024": 39.79,
-        "2048": 39.03,
-        "4096": 36.38
+        "512": 52.03,
+        "1024": 40.34,
+        "2048": 39.06,
+        "4096": 36.42
       }
     },
     {
       "id": 5,
       "name": "tile2d",
-      "gflops": 5267.36,
-      "pct": 74.33,
+      "gflops": 5248.0,
+      "pct": 74.13,
       "note": "8x8 register tile, outer-product form",
       "intensity": 32,
       "bySize": {
-        "512": 38.93,
-        "1024": 69.27,
-        "2048": 68.04,
-        "4096": 74.33
+        "512": 42.11,
+        "1024": 70.18,
+        "2048": 68.11,
+        "4096": 74.13
       }
     },
     {
       "id": 6,
       "name": "vectorized",
-      "gflops": 6254.62,
-      "pct": 88.1,
+      "gflops": 6245.59,
+      "pct": 88.21,
       "note": "float4 loads + transposed A tile",
       "intensity": 32,
       "bySize": {
-        "512": 49.58,
-        "1024": 91.1,
-        "2048": 83.11,
-        "4096": 88.1
+        "512": 54.24,
+        "1024": 91.93,
+        "2048": 83.34,
+        "4096": 88.21
       }
     },
     {
       "id": 7,
       "name": "warptile",
-      "gflops": 6405.35,
-      "pct": 90.2,
+      "gflops": 6379.78,
+      "pct": 90.12,
       "note": "block -> warp -> thread blocking",
       "intensity": 32,
       "bySize": {
-        "512": 47.97,
-        "1024": 94.29,
-        "2048": 84.32,
-        "4096": 90.2
+        "512": 53.28,
+        "1024": 95.15,
+        "2048": 84.75,
+        "4096": 90.12
       }
     },
     {
       "id": 8,
       "name": "dbuffer",
-      "gflops": 6801.69,
-      "pct": 96.0,
+      "gflops": 6718.61,
+      "pct": 94.9,
       "note": "double-buffered SMEM, one barrier per chunk",
       "intensity": 32,
       "bySize": {
-        "512": 49.57,
-        "1024": 98.3,
-        "2048": 89.34,
-        "4096": 96.0
+        "512": 53.28,
+        "1024": 85.27,
+        "2048": 88.54,
+        "4096": 94.9
       }
     },
     {
       "id": 9,
       "name": "tensorcore",
-      "gflops": 8130.48,
-      "pct": 114.51,
+      "gflops": 8266.17,
+      "pct": 116.77,
       "note": "WMMA m16n16k8 TF32 tensor cores",
       "intensity": 64,
       "bySize": {
-        "512": 60.2,
-        "1024": 109.4,
-        "2048": 104.97,
-        "4096": 114.51
+        "512": 64.6,
+        "1024": 96.98,
+        "2048": 108.37,
+        "4096": 116.77
       }
     }
   ],
   "tf32": {
     "dbuffer": {
       "1024": {
-        "gflops": 5924.16,
-        "pct": 65.82,
-        "cublasTf32": 9000.65
+        "gflops": 5890.88,
+        "pct": 66.85,
+        "cublasTf32": 8811.56
       },
       "2048": {
-        "gflops": 6114.15,
-        "pct": 65.31,
-        "cublasTf32": 9362.29
+        "gflops": 6048.02,
+        "pct": 65.07,
+        "cublasTf32": 9295.18
       },
       "4096": {
-        "gflops": 6776.96,
-        "pct": 64.2,
-        "cublasTf32": 10555.86
+        "gflops": 6707.87,
+        "pct": 63.72,
+        "cublasTf32": 10527.71
       }
     },
     "tensorcore": {
       "1024": {
-        "gflops": 6594.82,
-        "pct": 73.58,
-        "cublasTf32": 8962.19
+        "gflops": 6721.64,
+        "pct": 75.96,
+        "cublasTf32": 8848.74
       },
       "2048": {
-        "gflops": 7191.26,
-        "pct": 77.03,
-        "cublasTf32": 9336.24
+        "gflops": 7397.36,
+        "pct": 79.41,
+        "cublasTf32": 9315.5
       },
       "4096": {
-        "gflops": 8095.16,
-        "pct": 76.72,
-        "cublasTf32": 10550.88
+        "gflops": 8253.97,
+        "pct": 78.4,
+        "cublasTf32": 10528.53
       }
     }
   },
-  "cublas": 7100.34,
+  "cublas": 7078.99,
   "benchSize": 4096,
   "sizes": [
     512,

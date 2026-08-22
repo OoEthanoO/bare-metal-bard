@@ -1,7 +1,7 @@
 # A CUDA matmul, and a language model built on top of it
 
 A hand-written CUDA SGEMM taken from 1.2% of cuBLAS to **matching it in fp32**
-(96%) and **passing it with tensor cores** (115%), then used to train a GPT from
+(95%) and **passing it with tensor cores** (117%), then used to train a GPT from
 scratch — including a **fused FlashAttention-style kernel** that never
 materializes the score matrix, which doubled the context length this 8 GB card
 can train. No PyTorch, no cuBLAS, no cuDNN in the training path —
@@ -18,23 +18,34 @@ kernel here is written from scratch.
 
 ![SGEMM progression](docs/sgemm_bars.svg)
 
-At N=4096, fp32, SM clock pinned to 1200 MHz:
+At N=4096, fp32, SM clock pinned to 1200 MHz, CUDA 12.5:
 
 | # | kernel | GFLOP/s | % of cuBLAS | what changed |
 |---|--------|--------:|------------:|--------------|
 | 1 | naive | 82.8 | 1.2% | one thread per output element |
-| 2 | coalesced | 646.6 | 9.1% | swapped which index maps to `threadIdx.x` |
+| 2 | coalesced | 639.8 | 9.0% | swapped which index maps to `threadIdx.x` |
 | 3 | smem | 814.7 | 11.5% | 32×32 shared-memory tile |
-| 4 | tile1d | 2579.0 | 36.4% | 8 outputs per thread |
-| 5 | tile2d | 5267.4 | 74.3% | 8×8 register tile (outer product) |
-| 6 | vectorized | 6254.6 | 88.1% | `float4` loads + transposed A tile |
-| 7 | warptile | 6405.4 | 90.2% | block → warp → thread blocking |
-| 8 | dbuffer | **6801.7** | **96.0%** | double-buffered SMEM, one barrier/chunk |
-| 9 | tensorcore | **8130.5** | **114.5%** | WMMA m16n16k8 TF32 tensor cores |
+| 4 | tile1d | 2578.4 | 36.4% | 8 outputs per thread |
+| 5 | tile2d | 5248.0 | 74.1% | 8×8 register tile (outer product) |
+| 6 | vectorized | 6245.6 | 88.2% | `float4` loads + transposed A tile |
+| 7 | warptile | 6379.8 | 90.1% | block → warp → thread blocking |
+| 8 | dbuffer | **6718.6** | **94.9%** | double-buffered SMEM, one barrier/chunk |
+| 9 | tensorcore | **8266.2** | **116.8%** | WMMA m16n16k8 TF32 tensor cores |
 
-**98× from first kernel to last.** Kernel 8 reaches 98.3% at N=1024 and exceeds
-cuBLAS at sizes that divide the 128×128 tile evenly (103.7% at N=1536, 106.3%
-at N=6144).
+**100× from first kernel to last.** Both top kernels do better at sizes that
+divide the 128×128 block tile evenly, where no thread block is partly idle:
+kernel 8 exceeds cuBLAS at N=1536 (104.0%) and N=6144 (104.2%), and kernel 9
+reaches 121.9% and 121.5% at those sizes against 116.8% at N=4096.
+
+These numbers were re-measured on the machine the GPU actually lives in
+(Windows, CUDA 12.5). An earlier set, taken on a Linux box with CUDA 12.4, is in
+the git history. Kernels 1–7 reproduce across both to within ~1%. Kernels 8 and
+9 do not, and only at small sizes: at N≤1024 they lose 12–15% here (kernel 8 was
+98.3% of cuBLAS at N=1024 there, 85.3% here), while at N≥2048 they agree to
+within ~2%. Both are the kernels with the largest shared-memory tiles and the
+highest register pressure, so the small-size gap is plausibly launch and
+wave-quantization overhead that Windows pays more of — but I have not proved
+that, so it is recorded as an open question rather than an explanation.
 
 ### The tensor-core number, stated honestly
 
@@ -44,13 +55,13 @@ is not computing the same thing. Both comparisons, at N=4096:
 
 | | GFLOP/s | vs fp32 cuBLAS | vs TF32 cuBLAS |
 |---|--------:|---------------:|---------------:|
-| cuBLAS, true fp32 (default) | 7100 | 100% | — |
-| cuBLAS, TF32 tensor cores | 10551 | 149% | 100% |
-| `dbuffer` (mine, fp32) | 6802 | 96.0% | 64.2% |
-| `tensorcore` (mine, TF32) | 8130 | 114.5% | 76.7% |
+| cuBLAS, true fp32 (default) | 7079 | 100% | — |
+| cuBLAS, TF32 tensor cores | 10529 | 149% | 100% |
+| `dbuffer` (mine, fp32) | 6719 | 94.9% | 63.7% |
+| `tensorcore` (mine, TF32) | 8266 | 116.8% | 78.4% |
 
-So kernel 9 beats fp32 cuBLAS by 15% and trails cuBLAS's own tensor-core path
-by 23%. Quoting only the first would be the flattering half.
+So kernel 9 beats fp32 cuBLAS by 17% and trails cuBLAS's own tensor-core path
+by 22%. Quoting only the first would be the flattering half.
 
 TF32 is not free speed: it keeps fp32's 8-bit exponent but only 10 mantissa
 bits. Measured normwise error against an fp32 reference goes from **6.2e-08**
@@ -65,6 +76,65 @@ Reproduce the TF32 column with:
 ```
 
 ![scaling](docs/sgemm_scaling.svg)
+
+### The compiler optimized the thing it could see
+
+Kernel 9 was sitting at 8064 GF/s until a question about a version number: the
+writeup said CUDA 12.5, but 13.3 was also installed. Building the same source
+with both, same machine, same pinned clock, N=4096:
+
+| kernel | CUDA 12.5 | CUDA 13.3 | |
+|---|--------:|--------:|---|
+| naive … warptile | — | — | agree within 1% |
+| dbuffer | 6709 | 6579 | −1.9% |
+| tensorcore | **8064** | **6499** | **−19.4%** |
+
+Eight of nine kernels are indistinguishable. The tensor-core kernel loses a
+fifth of its throughput, reproducibly, at *identical* numerical error — so it is
+still genuinely TF32, just slower. `ptxas -v` gives the whole story in two
+lines:
+
+```
+12.5:  128 registers, 12 bytes spill stores
+13.3:  142 registers,  0 spills
+```
+
+nvcc 13.3 spent 14 more registers to eliminate a 12-byte spill. That is a good
+trade in isolation and a bad one here, because at 256 threads per block it
+crosses an occupancy cliff. Registers are allocated per warp in multiples of 8:
+
+- 128 regs → 4096/warp → 65536/4096 = **16 warps/SM** → 2 resident blocks
+- 142 regs → rounds to 144 → 4608/warp → 65536/4608 = **14 warps/SM** → 1 block
+
+Halving resident blocks to avoid twelve bytes of spill. The compiler optimized
+what it could see — the spill — and could not see what it cost.
+
+The fix is to say what the kernel needs, rather than hoping the register
+allocator infers it:
+
+```cuda
+__global__ __launch_bounds__(NUM_THREADS, 2) void tensorcore_kernel(...)
+```
+
+The second argument is minimum blocks per SM. Both toolkits then allocate 128
+registers and accept the spill, and this is *not* a 13.3 workaround — it is
+faster on both:
+
+| | before | after |
+|---|--------:|--------:|
+| CUDA 12.5 | 8064 (113.9%) | **8250 (116.7%)** |
+| CUDA 13.3 | 6499 (91.6%) | **8290 (117.3%)** |
+
+A spilled byte is cheap; a resident block is not. `__launch_bounds__` is how you
+tell the compiler which one you are buying.
+
+The repo builds with 12.5 by default (`scripts\build.bat --cuda 13.3` selects
+the other). After the fix the two are within ~2% of each other on every kernel —
+12.5 keeps a 1.9% edge on `dbuffer`, 13.3 a 0.5% edge on `tensorcore` — so the
+choice is close enough that it is worth stating both rather than quietly
+picking. Note also that CUDA 13 moves the runtime DLLs from `bin\` to
+`bin\x64\`, splits `crt` and `nvvm` into separate installer components, and
+removes `cudaDeviceProp::clockRate`, deprecated through 12.x.
 
 ### The one measurement that mattered
 

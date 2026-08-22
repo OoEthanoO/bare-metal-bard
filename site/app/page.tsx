@@ -278,7 +278,7 @@ __syncthreads()              <- and blocks again before overwriting`}</code>
       <p>
         That took kernel 8 to <strong>{dbuf.pct.toFixed(1)}% of cuBLAS</strong> at N=
         {data.benchSize}, and past it at sizes that divide evenly into the 128×128 block tile —
-        103.7% at N=1536 and 106.3% at N=6144, reproducible across runs. The cost was 219 registers
+        104.0% at N=1536 and 104.2% at N=6144, reproducible across runs. The cost was 219 registers
         against 186, and 32 KiB of shared memory against 16.
       </p>
 
