@@ -386,18 +386,10 @@ __syncthreads()              <- and blocks again before overwriting`}</code>
           </thead>
           <tbody>
             <tr>
-              <td>naive … warptile</td>
+              <td>naive … dbuffer</td>
               <td className="n">—</td>
               <td className="n">—</td>
               <td className="n">within 1%</td>
-            </tr>
-            <tr>
-              <td>
-                <code>dbuffer</code>
-              </td>
-              <td className="n">6709</td>
-              <td className="n">6579</td>
-              <td className="n">−1.9%</td>
             </tr>
             <tr className="hi">
               <td>
@@ -472,9 +464,18 @@ __syncthreads()              <- and blocks again before overwriting`}</code>
       </div>
       <p>
         A spilled byte is cheap; a resident block is not. <code>__launch_bounds__</code> is how you
-        tell the compiler which one you are buying — and the 19% was invisible until someone asked
-        why the page said 12.5.
+        tell the compiler which one you are buying. With the fix in place the two toolkits agree
+        across the board, so the build now takes whichever is newest and prints which one it used.
       </p>
+      <div className="note">
+        <p style={{ margin: 0 }}>
+          The lasting lesson is not that one compiler release regressed. It is that a{' '}
+          <strong>19% loss passed every correctness test, every gradient check and every loss
+          curve</strong> without a murmur, and surfaced only because someone asked why a page said
+          12.5. Performance regressions are invisible to correctness testing by construction. The
+          only thing that catches them is measuring on purpose.
+        </p>
+      </div>
 
       <h2>Then: a language model on top of it</h2>
       <p>
@@ -742,11 +743,11 @@ O' = O * exp(m - m') + exp(S_j - m') @ V_j`}</code>
 
       <footer>
         <p>
-          Built on an RTX 4070 Laptop. The SGEMM numbers were measured under CUDA 12.4 on Linux;
-          the fused-attention and training numbers under CUDA 12.5 on Windows, driver 610.88 —
-          which is worth stating, because nvcc&rsquo;s version determines the generated SASS and
-          the cuBLAS beside it is the denominator of every &ldquo;% of cuBLAS&rdquo; here. All
-          numbers on this page are generated directly from <code>bench/results.csv</code>, the
+          Built on an RTX 4070 Laptop, CUDA 13.3, driver 610.88, SM clock pinned to 1200 MHz. Every
+          benchmark cell is the median of three independent sweeps, because pinning the clock fixes
+          variance <em>within</em> a run and does nothing about a bad run — which cost me a
+          published paragraph explaining a slowdown that three later sweeps showed did not exist.
+          All numbers on this page are generated directly from <code>bench/results.csv</code>, the
           training log and the profiler output — see <code>tools/make_site_data.py</code>.
         </p>
       </footer>

@@ -18,26 +18,57 @@ if not defined VSCMD_ARG_HOST_ARCH (
   call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
 )
 
-REM Toolkits install side by side. CUDA_PATH points at the newest one the
-REM installer saw; override it to pin a specific toolkit, which matters because
-REM nvcc version changes the generated SASS and cuBLAS version changes the
-REM baseline every percentage in the README is measured against.
-REM   scripts\build.bat --cuda 13.3 sgemm
+REM Toolkits install side by side and this builds with the NEWEST one present.
+REM That matters because nvcc's version determines the generated SASS and the
+REM cuBLAS beside it is the denominator of every percentage in the README, so
+REM which toolkit built a binary is part of the measurement, not a detail.
 REM
-REM The flag exists because setting CUDA_PATH from another shell is unreliable:
-REM cmd expands %VAR% when it parses a line, not when it runs it, so a
-REM `set ... && build.bat` one-liner quietly builds with the old toolkit. Ask
-REM for the version explicitly instead of hoping the environment carried.
+REM To pin an older one on purpose:
+REM   scripts\build.bat --cuda 12.5 sgemm
 set "CUDA_ROOT=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA"
 if /i "%~1"=="--cuda" (
-  set "CUDA_PATH=%CUDA_ROOT%\v%~2"
+  set "CUDA_PIN=%CUDA_ROOT%\v%~2"
   shift
   shift
 )
-if not defined CUDA_PATH set "CUDA_PATH=%CUDA_ROOT%\v12.5"
+
+REM Default to the newest COMPLETE toolkit installed, compared numerically so
+REM v10 beats v9 rather than losing a string compare.
+REM
+REM The ambient CUDA_PATH is deliberately IGNORED. It records whichever
+REM installer ran last, not the newest toolkit present -- installing 13.3
+REM alongside 12.5 left it pointing at 12.5 -- and trusting it is what caused
+REM this repo to benchmark on the old toolkit for a whole session without
+REM anyone noticing. Pass --cuda <version> to pin one on purpose.
+REM
+REM "Complete" is checked rather than assumed, because a toolkit can be
+REM installed and still not compile: CUDA 13 ships crt and nvvm as separate
+REM installer components, and a partial install has an nvcc that fails on the
+REM first #include. Silently defaulting to that is worse than not finding it.
+if not defined CUDA_PIN (
+  set /a BEST_NUM=0
+  for /d %%d in ("%CUDA_ROOT%\v*") do (
+    set "VER=%%~nxd"
+    set "VER=!VER:~1!"
+    for /f "tokens=1,2 delims=." %%a in ("!VER!.0") do (
+      set /a NUM=%%a*1000+%%b
+      if exist "%%~fd\bin\nvcc.exe" if exist "%%~fd\include\crt\host_config.h" if exist "%%~fd\nvvm" (
+        if !NUM! GTR !BEST_NUM! (
+          set /a BEST_NUM=!NUM!
+          set "CUDA_PIN=%%~fd"
+        )
+      )
+    )
+  )
+)
+if not defined CUDA_PIN (
+  echo no complete CUDA toolkit found under "%CUDA_ROOT%"
+  exit /b 1
+)
+set "CUDA_PATH=%CUDA_PIN%"
 set "NVCC=%CUDA_PATH%\bin\nvcc.exe"
 if not exist "%NVCC%" (
-  echo no nvcc at "%NVCC%" -- set CUDA_PATH to an installed toolkit
+  echo no nvcc at "%NVCC%" -- pass --cuda ^<version^> for an installed toolkit
   exit /b 1
 )
 set "FLAGS=-arch=sm_89 -O3 -lineinfo -std=c++17 -allow-unsupported-compiler"

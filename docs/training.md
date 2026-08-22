@@ -16,9 +16,9 @@ total     0.91 GB resident (params+grads+adam+activations+scratch)
 
 | metric | median over 501 logged steps |
 |---|---:|
-| step time | 85.7 ms |
-| tokens/s | 47,814 |
-| end-to-end | 3,435 GFLOP/s |
+| step time | 86.2 ms |
+| tokens/s | 47,531 |
+| end-to-end | 3,415 GFLOP/s |
 
 The end-to-end figure counts `6*N*P` for the parameter matmuls plus the attention terms. It sits below the standalone GEMM peak (~6420 GFLOP/s) because a training step is not all GEMM: layernorm, softmax, GELU and the optimizer are all bandwidth-bound work at arithmetic intensity below 1. The attention score matrices no longer cost anything: the fused kernel keeps them in registers and never writes them to memory.
 
@@ -29,24 +29,24 @@ The end-to-end figure counts `6*N*P` for the parameter matmuls plus the attentio
 | step | val loss |
 |---:|---:|
 | 100 | 2.5258 |
-| 500 | 1.8961 |
-| 900 | 1.7079 |
-| 1300 | 1.6034 |
-| 1700 | 1.5570 |
-| 2100 | 1.5276 |
-| 2500 | 1.5089 |
-| 2900 | 1.5209 |
-| 3300 | 1.5526 |
-| 3700 | 1.6157 |
-| 4100 | 1.6962 |
-| 4500 | 1.8050 |
-| 4900 | 1.9079 |
+| 500 | 1.8895 |
+| 900 | 1.7124 |
+| 1300 | 1.5958 |
+| 1700 | 1.5613 |
+| 2100 | 1.5224 |
+| 2500 | 1.5132 |
+| 2900 | 1.5277 |
+| 3300 | 1.5501 |
+| 3700 | 1.6165 |
+| 4100 | 1.6972 |
+| 4500 | 1.8034 |
+| 4900 | 1.9245 |
 
-Best validation loss **1.5056** at step 2400.
+Best validation loss **1.5035** at step 2400.
 
 ```
-final  train loss 0.6484   val loss 1.9316   (20 batches each)
-best   val loss 1.5056 at step 2400 (checkpoint saved there)
+final  train loss 0.6463   val loss 1.9647   (20 batches each)
+best   val loss 1.5035 at step 2400 (checkpoint saved there)
 final sample:
 ```
 
@@ -57,21 +57,19 @@ A uniform guess over the 65-character vocabulary would score ln(65) = 4.174 nats
 Generated from the trained model at temperature 0.8:
 
 ```
-What say you,--
+What say you?' be many thoughts and swords!
+Here one that were more in the cold forehead,
+And say that shall stand for.
 
-CORIOLANUS:
-That would the gods them half by day name them well.
-Hear me speak their man with fond thunderous wreaths;
-But thus I might be before the murderous knaves.
-
-BRAKENBURY:
-I am not yet but done that by your name,
-But told you me name with at all their life.
-
-CLARENCE:
-Are they gone to make an ambush for the Tower:
-If you please to the treason of God
-Directing of the suppl
+Shepherd:
+Sometimes body,
+The sway do destroy the gates,
+That e'er spare not on thee, of the queen,
+And by the honour of Salisbury
+He was not so long without right:
+I would nothing our harm pleasure for that
+The people shall be satisfied. My son, good m
+Is all the best; where is
 ```
 
 Reproduce with:

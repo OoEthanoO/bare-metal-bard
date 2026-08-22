@@ -29,52 +29,52 @@
 <circle cx="494.0" cy="374.8" r="3" fill="#b3543f"/>
 <circle cx="710.0" cy="374.9" r="3" fill="#b3543f"/>
 <text x="720" y="378.9" font-size="11.5" fill="#b3543f" font-weight="600">naive</text>
-<polyline points="62.0,339.9 278.0,348.4 494.0,351.6 710.0,354.2" fill="none" stroke="#c07f3c" stroke-width="2.4" stroke-linejoin="round"/>
-<circle cx="62.0" cy="339.9" r="3" fill="#c07f3c"/>
-<circle cx="278.0" cy="348.4" r="3" fill="#c07f3c"/>
-<circle cx="494.0" cy="351.6" r="3" fill="#c07f3c"/>
-<circle cx="710.0" cy="354.2" r="3" fill="#c07f3c"/>
-<text x="720" y="358.2" font-size="11.5" fill="#c07f3c" font-weight="600">coalesced</text>
-<polyline points="62.0,329.1 278.0,340.4 494.0,344.6 710.0,347.7" fill="none" stroke="#c9a63c" stroke-width="2.4" stroke-linejoin="round"/>
+<polyline points="62.0,339.3 278.0,348.3 494.0,351.7 710.0,353.9" fill="none" stroke="#c07f3c" stroke-width="2.4" stroke-linejoin="round"/>
+<circle cx="62.0" cy="339.3" r="3" fill="#c07f3c"/>
+<circle cx="278.0" cy="348.3" r="3" fill="#c07f3c"/>
+<circle cx="494.0" cy="351.7" r="3" fill="#c07f3c"/>
+<circle cx="710.0" cy="353.9" r="3" fill="#c07f3c"/>
+<text x="720" y="357.9" font-size="11.5" fill="#c07f3c" font-weight="600">coalesced</text>
+<polyline points="62.0,329.1 278.0,340.4 494.0,344.7 710.0,347.7" fill="none" stroke="#c9a63c" stroke-width="2.4" stroke-linejoin="round"/>
 <circle cx="62.0" cy="329.1" r="3" fill="#c9a63c"/>
 <circle cx="278.0" cy="340.4" r="3" fill="#c9a63c"/>
-<circle cx="494.0" cy="344.6" r="3" fill="#c9a63c"/>
+<circle cx="494.0" cy="344.7" r="3" fill="#c9a63c"/>
 <circle cx="710.0" cy="347.7" r="3" fill="#c9a63c"/>
 <text x="720" y="351.7" font-size="11.5" fill="#c9a63c" font-weight="600">smem</text>
-<polyline points="62.0,241.0 278.0,271.8 494.0,275.1 710.0,282.1" fill="none" stroke="#9aa845" stroke-width="2.4" stroke-linejoin="round"/>
-<circle cx="62.0" cy="241.0" r="3" fill="#9aa845"/>
-<circle cx="278.0" cy="271.8" r="3" fill="#9aa845"/>
-<circle cx="494.0" cy="275.1" r="3" fill="#9aa845"/>
-<circle cx="710.0" cy="282.1" r="3" fill="#9aa845"/>
-<text x="720" y="286.1" font-size="11.5" fill="#9aa845" font-weight="600">tile1d</text>
-<polyline points="62.0,267.1 278.0,193.2 494.0,198.6 710.0,182.8" fill="none" stroke="#6a9f5c" stroke-width="2.4" stroke-linejoin="round"/>
-<circle cx="62.0" cy="267.1" r="3" fill="#6a9f5c"/>
-<circle cx="278.0" cy="193.2" r="3" fill="#6a9f5c"/>
-<circle cx="494.0" cy="198.6" r="3" fill="#6a9f5c"/>
-<circle cx="710.0" cy="182.8" r="3" fill="#6a9f5c"/>
-<text x="720" y="186.8" font-size="11.5" fill="#6a9f5c" font-weight="600">tile2d</text>
-<polyline points="62.0,235.2 278.0,135.9 494.0,158.5 710.0,145.7" fill="none" stroke="#3f8f74" stroke-width="2.4" stroke-linejoin="round"/>
-<circle cx="62.0" cy="235.2" r="3" fill="#3f8f74"/>
-<circle cx="278.0" cy="135.9" r="3" fill="#3f8f74"/>
-<circle cx="494.0" cy="158.5" r="3" fill="#3f8f74"/>
-<circle cx="710.0" cy="145.7" r="3" fill="#3f8f74"/>
-<text x="720" y="149.7" font-size="11.5" fill="#3f8f74" font-weight="600">vectorized</text>
-<polyline points="62.0,237.7 278.0,127.4 494.0,154.8 710.0,140.7" fill="none" stroke="#2f7d8a" stroke-width="2.4" stroke-linejoin="round"/>
-<circle cx="62.0" cy="237.7" r="3" fill="#2f7d8a"/>
-<circle cx="278.0" cy="127.4" r="3" fill="#2f7d8a"/>
-<circle cx="494.0" cy="154.8" r="3" fill="#2f7d8a"/>
-<circle cx="710.0" cy="140.7" r="3" fill="#2f7d8a"/>
-<text x="720" y="144.7" font-size="11.5" fill="#2f7d8a" font-weight="600">warptile</text>
-<polyline points="62.0,237.7 278.0,153.5 494.0,144.8 710.0,128.1" fill="none" stroke="#2f6f9a" stroke-width="2.4" stroke-linejoin="round"/>
-<circle cx="62.0" cy="237.7" r="3" fill="#2f6f9a"/>
-<circle cx="278.0" cy="153.5" r="3" fill="#2f6f9a"/>
-<circle cx="494.0" cy="144.8" r="3" fill="#2f6f9a"/>
-<circle cx="710.0" cy="128.1" r="3" fill="#2f6f9a"/>
-<text x="720" y="132.1" font-size="11.5" fill="#2f6f9a" font-weight="600">dbuffer</text>
-<polyline points="62.0,207.9 278.0,122.6 494.0,92.6 710.0,70.5" fill="none" stroke="#5a5aa8" stroke-width="2.4" stroke-linejoin="round"/>
-<circle cx="62.0" cy="207.9" r="3" fill="#5a5aa8"/>
-<circle cx="278.0" cy="122.6" r="3" fill="#5a5aa8"/>
-<circle cx="494.0" cy="92.6" r="3" fill="#5a5aa8"/>
-<circle cx="710.0" cy="70.5" r="3" fill="#5a5aa8"/>
-<text x="720" y="74.5" font-size="11.5" fill="#5a5aa8" font-weight="600">tensorcore</text>
+<polyline points="62.0,245.3 278.0,274.4 494.0,277.9 710.0,281.1" fill="none" stroke="#9aa845" stroke-width="2.4" stroke-linejoin="round"/>
+<circle cx="62.0" cy="245.3" r="3" fill="#9aa845"/>
+<circle cx="278.0" cy="274.4" r="3" fill="#9aa845"/>
+<circle cx="494.0" cy="277.9" r="3" fill="#9aa845"/>
+<circle cx="710.0" cy="281.1" r="3" fill="#9aa845"/>
+<text x="720" y="285.1" font-size="11.5" fill="#9aa845" font-weight="600">tile1d</text>
+<polyline points="62.0,264.6 278.0,192.3 494.0,198.1 710.0,182.2" fill="none" stroke="#6a9f5c" stroke-width="2.4" stroke-linejoin="round"/>
+<circle cx="62.0" cy="264.6" r="3" fill="#6a9f5c"/>
+<circle cx="278.0" cy="192.3" r="3" fill="#6a9f5c"/>
+<circle cx="494.0" cy="198.1" r="3" fill="#6a9f5c"/>
+<circle cx="710.0" cy="182.2" r="3" fill="#6a9f5c"/>
+<text x="720" y="186.2" font-size="11.5" fill="#6a9f5c" font-weight="600">tile2d</text>
+<polyline points="62.0,231.7 278.0,135.3 494.0,158.2 710.0,145.4" fill="none" stroke="#3f8f74" stroke-width="2.4" stroke-linejoin="round"/>
+<circle cx="62.0" cy="231.7" r="3" fill="#3f8f74"/>
+<circle cx="278.0" cy="135.3" r="3" fill="#3f8f74"/>
+<circle cx="494.0" cy="158.2" r="3" fill="#3f8f74"/>
+<circle cx="710.0" cy="145.4" r="3" fill="#3f8f74"/>
+<text x="720" y="149.4" font-size="11.5" fill="#3f8f74" font-weight="600">vectorized</text>
+<polyline points="62.0,235.4 278.0,122.6 494.0,154.6 710.0,139.7" fill="none" stroke="#2f7d8a" stroke-width="2.4" stroke-linejoin="round"/>
+<circle cx="62.0" cy="235.4" r="3" fill="#2f7d8a"/>
+<circle cx="278.0" cy="122.6" r="3" fill="#2f7d8a"/>
+<circle cx="494.0" cy="154.6" r="3" fill="#2f7d8a"/>
+<circle cx="710.0" cy="139.7" r="3" fill="#2f7d8a"/>
+<text x="720" y="143.7" font-size="11.5" fill="#2f7d8a" font-weight="600">warptile</text>
+<polyline points="62.0,234.2 278.0,116.1 494.0,143.6 710.0,127.9" fill="none" stroke="#2f6f9a" stroke-width="2.4" stroke-linejoin="round"/>
+<circle cx="62.0" cy="234.2" r="3" fill="#2f6f9a"/>
+<circle cx="278.0" cy="116.1" r="3" fill="#2f6f9a"/>
+<circle cx="494.0" cy="143.6" r="3" fill="#2f6f9a"/>
+<circle cx="710.0" cy="127.9" r="3" fill="#2f6f9a"/>
+<text x="720" y="131.9" font-size="11.5" fill="#2f6f9a" font-weight="600">dbuffer</text>
+<polyline points="62.0,206.8 278.0,83.0 494.0,91.3 710.0,68.9" fill="none" stroke="#5a5aa8" stroke-width="2.4" stroke-linejoin="round"/>
+<circle cx="62.0" cy="206.8" r="3" fill="#5a5aa8"/>
+<circle cx="278.0" cy="83.0" r="3" fill="#5a5aa8"/>
+<circle cx="494.0" cy="91.3" r="3" fill="#5a5aa8"/>
+<circle cx="710.0" cy="68.9" r="3" fill="#5a5aa8"/>
+<text x="720" y="72.9" font-size="11.5" fill="#5a5aa8" font-weight="600">tensorcore</text>
 </svg>

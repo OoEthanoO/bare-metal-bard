@@ -1,26 +1,26 @@
 # Fused vs unfused attention, RTX 4070 Laptop (sm_89)
-# SM clock pinned to 1200 MHz; CUDA 12.5; driver 610.88
+# SM clock pinned to 1200 MHz; CUDA 13.3; driver 610.88
 # clock during run: 1200 MHz
 
 B=16 T=256 C=384 NH=6 (hs=64)
 
 impl                     best ms    med ms    GFLOP/s vs unfused     norm err
-unfused (3 kernels)        1.133     1.138      713.8      1.00x            -
-br64 bc64 t128 4x8         0.456     0.461     1774.2      2.49x     2.09e-07 ok
-br64 bc32 t128 4x4         0.339     0.348     2385.2      3.34x     2.09e-07 ok
-br64 bc64 t256 4x4         0.356     0.361     2268.7      3.18x     2.09e-07 ok
-br128 bc32 t256 4x4        0.423     0.428     1911.6      2.68x     2.09e-07 ok
-br32 bc32 t64 4x4          0.381     0.390     2122.3      2.97x     2.09e-07 ok
+unfused (3 kernels)        1.130     1.138      715.1      1.00x            -
+br64 bc64 t128 4x8         0.446     0.449     1810.8      2.53x     2.09e-07 ok
+br64 bc32 t128 4x4         0.333     0.346     2429.2      3.40x     2.09e-07 ok
+br64 bc64 t256 4x4         0.355     0.357     2275.2      3.18x     2.09e-07 ok
+br128 bc32 t256 4x4        0.424     0.426     1907.0      2.67x     2.09e-07 ok
+br32 bc32 t64 4x4          0.391     0.397     2066.8      2.89x     2.09e-07 ok
 
 backward                 best ms    med ms    GFLOP/s vs unfused     dq err     dk err     dv err
-unfused (7 kernels)        1.832     1.861     1544.6      1.00x
-br64 bc32 t128 kv4x4 q8x4     1.763     1.773     1604.7      1.04x   3.00e-07   4.19e-07   3.26e-07 ok
-br64 bc32 t128 kv4x4 q4x8     1.960     1.972     1443.7      0.93x   3.00e-07   4.19e-07   3.26e-07 ok
-br32 bc32 t64  kv4x8 q4x8     2.079     2.102     1361.2      0.88x   3.00e-07   4.19e-07   3.26e-07 ok
-br32 bc32 t64  kv8x4 q8x4     1.640     1.660     1724.9      1.12x   3.00e-07   4.19e-07   3.26e-07 ok
+unfused (7 kernels)        1.905     1.919     1485.6      1.00x
+br64 bc32 t128 kv4x4 q8x4     1.783     1.793     1587.2      1.07x   3.00e-07   4.19e-07   3.26e-07 ok
+br64 bc32 t128 kv4x4 q4x8     1.960     1.969     1443.7      0.97x   3.00e-07   4.19e-07   3.26e-07 ok
+br32 bc32 t64  kv4x8 q4x8     2.091     2.113     1353.2      0.91x   3.00e-07   4.19e-07   3.26e-07 ok
+br32 bc32 t64  kv8x4 q8x4     1.640     1.658     1724.9      1.16x   3.00e-07   4.19e-07   3.26e-07 ok
 br32 bc32 t64  kv4x4 q4x4         - (not valid for hs=64)
-br32 bc32 t128 kv4x4 q4x4     1.602     1.628     1766.8      1.14x   3.00e-07   4.19e-07   3.26e-07 ok
-br32 bc64 t128 kv8x4 q4x4     2.004     2.016     1412.0      0.91x   3.00e-07   4.19e-07   3.26e-07 ok
+br32 bc32 t128 kv4x4 q4x4     1.597     1.623     1771.3      1.19x   3.00e-07   4.19e-07   3.26e-07 ok
+br32 bc64 t128 kv8x4 q4x4     2.000     2.009     1414.9      0.95x   3.00e-07   4.19e-07   3.26e-07 ok
 
 per layer, per forward pass:
   score matrix (B,NH,T,T)       25.2 MB   written once, read twice
@@ -35,4 +35,4 @@ ragged shapes (context does not divide the tile):
   B=2   T=129   C=256  NH=8  (hs=32)   out 1.79e-07   dqkv 2.97e-07  ok
   B=5   T=200   C=128  NH=4  (hs=32)   out 1.49e-07   dqkv 3.12e-07  ok
 
-fastest config: br64 bc32 t128 4x4 (0.339 ms)
+fastest config: br64 bc32 t128 4x4 (0.333 ms)

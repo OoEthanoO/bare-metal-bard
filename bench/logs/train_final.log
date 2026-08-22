@@ -3,757 +3,728 @@ model     6 layers, 6 heads, 384 embd, ctx 256, fused attention
 params    10.80M (41.2 MB; +41.2 MB grads, +82.4 MB adam state)
 memory    665.0 MB forward activations, 98.1 MB backward scratch
 total     0.91 GB resident (params+grads+adam+activations+scratch)
-step     1/5000  loss 4.2625  lr 1.00e-05  |g| 15.666    89.3 ms    45856 tok/s   3295 GFLOP/s
-step    10/5000  loss 3.1103  lr 1.00e-04  |g| 6.345    85.7 ms    47783 tok/s   3433 GFLOP/s
-step    20/5000  loss 2.7430  lr 2.00e-04  |g| 1.405    85.8 ms    47726 tok/s   3429 GFLOP/s
-step    30/5000  loss 2.6149  lr 3.00e-04  |g| 1.379    85.7 ms    47807 tok/s   3435 GFLOP/s
-step    40/5000  loss 2.5989  lr 4.00e-04  |g| 1.659    85.7 ms    47806 tok/s   3435 GFLOP/s
-step    50/5000  loss 2.5336  lr 5.00e-04  |g| 0.915    85.7 ms    47822 tok/s   3436 GFLOP/s
-step    60/5000  loss 2.5306  lr 6.00e-04  |g| 0.881    85.7 ms    47806 tok/s   3435 GFLOP/s
-step    70/5000  loss 2.4765  lr 7.00e-04  |g| 0.731    85.8 ms    47755 tok/s   3431 GFLOP/s
-step    80/5000  loss 2.4957  lr 8.00e-04  |g| 0.950    85.7 ms    47777 tok/s   3433 GFLOP/s
-step    90/5000  loss 2.5092  lr 9.00e-04  |g| 0.710    85.9 ms    47684 tok/s   3426 GFLOP/s
-step   100/5000  loss 2.4958  lr 1.00e-03  |g| 0.702    85.7 ms    47776 tok/s   3433 GFLOP/s
+step     1/5000  loss 4.2617  lr 1.00e-05  |g| 15.666    89.7 ms    45647 tok/s   3280 GFLOP/s
+step    10/5000  loss 3.1103  lr 1.00e-04  |g| 6.345    86.3 ms    47445 tok/s   3409 GFLOP/s
+step    20/5000  loss 2.7430  lr 2.00e-04  |g| 1.405    86.2 ms    47512 tok/s   3414 GFLOP/s
+step    30/5000  loss 2.6149  lr 3.00e-04  |g| 1.379    86.2 ms    47518 tok/s   3414 GFLOP/s
+step    40/5000  loss 2.5989  lr 4.00e-04  |g| 1.659    86.4 ms    47405 tok/s   3406 GFLOP/s
+step    50/5000  loss 2.5335  lr 5.00e-04  |g| 0.915    86.3 ms    47473 tok/s   3411 GFLOP/s
+step    60/5000  loss 2.5306  lr 6.00e-04  |g| 0.881    86.2 ms    47544 tok/s   3416 GFLOP/s
+step    70/5000  loss 2.4765  lr 7.00e-04  |g| 0.731    86.2 ms    47512 tok/s   3414 GFLOP/s
+step    80/5000  loss 2.4957  lr 8.00e-04  |g| 0.950    86.4 ms    47410 tok/s   3406 GFLOP/s
+step    90/5000  loss 2.5084  lr 9.00e-04  |g| 0.710    86.2 ms    47514 tok/s   3414 GFLOP/s
+step   100/5000  loss 2.4958  lr 1.00e-03  |g| 0.702    86.2 ms    47513 tok/s   3414 GFLOP/s
   [eval] step 100  val loss 2.5258  (20 batches)  <- best
-step   110/5000  loss 2.5246  lr 1.00e-03  |g| 0.730    85.7 ms    47796 tok/s   3434 GFLOP/s
-step   120/5000  loss 2.4466  lr 1.00e-03  |g| 0.691    85.7 ms    47794 tok/s   3434 GFLOP/s
-step   130/5000  loss 2.4270  lr 1.00e-03  |g| 0.687    85.6 ms    47868 tok/s   3439 GFLOP/s
-step   140/5000  loss 2.4549  lr 1.00e-03  |g| 0.680    85.6 ms    47849 tok/s   3438 GFLOP/s
-step   150/5000  loss 2.4166  lr 1.00e-03  |g| 0.702    85.7 ms    47815 tok/s   3435 GFLOP/s
-step   160/5000  loss 2.4101  lr 1.00e-03  |g| 0.702    85.6 ms    47843 tok/s   3437 GFLOP/s
-step   170/5000  loss 2.4118  lr 1.00e-03  |g| 0.651    85.6 ms    47823 tok/s   3436 GFLOP/s
-step   180/5000  loss 2.3990  lr 9.99e-04  |g| 1.039    85.8 ms    47754 tok/s   3431 GFLOP/s
-step   190/5000  loss 2.3878  lr 9.99e-04  |g| 0.724    85.6 ms    47830 tok/s   3436 GFLOP/s
-step   200/5000  loss 2.3841  lr 9.99e-04  |g| 0.870    85.6 ms    47837 tok/s   3437 GFLOP/s
+step   110/5000  loss 2.5246  lr 1.00e-03  |g| 0.730    86.3 ms    47461 tok/s   3410 GFLOP/s
+step   120/5000  loss 2.4466  lr 1.00e-03  |g| 0.691    86.2 ms    47536 tok/s   3415 GFLOP/s
+step   130/5000  loss 2.4270  lr 1.00e-03  |g| 0.687    86.1 ms    47557 tok/s   3417 GFLOP/s
+step   140/5000  loss 2.4544  lr 1.00e-03  |g| 0.680    86.3 ms    47488 tok/s   3412 GFLOP/s
+step   150/5000  loss 2.4169  lr 1.00e-03  |g| 0.702    86.3 ms    47484 tok/s   3412 GFLOP/s
+step   160/5000  loss 2.4101  lr 1.00e-03  |g| 0.702    86.3 ms    47485 tok/s   3412 GFLOP/s
+step   170/5000  loss 2.4118  lr 1.00e-03  |g| 0.651    86.2 ms    47539 tok/s   3416 GFLOP/s
+step   180/5000  loss 2.3986  lr 9.99e-04  |g| 1.039    86.1 ms    47555 tok/s   3417 GFLOP/s
+step   190/5000  loss 2.3878  lr 9.99e-04  |g| 0.724    86.2 ms    47532 tok/s   3415 GFLOP/s
+step   200/5000  loss 2.3841  lr 9.99e-04  |g| 0.870    86.1 ms    47547 tok/s   3416 GFLOP/s
   [eval] step 200  val loss 2.4060  (20 batches)  <- best
-step   210/5000  loss 2.3918  lr 9.99e-04  |g| 0.896    86.0 ms    47621 tok/s   3421 GFLOP/s
-step   220/5000  loss 2.3115  lr 9.99e-04  |g| 0.730    85.6 ms    47832 tok/s   3437 GFLOP/s
-step   230/5000  loss 2.2556  lr 9.98e-04  |g| 0.903    85.7 ms    47803 tok/s   3435 GFLOP/s
-step   240/5000  loss 2.2052  lr 9.98e-04  |g| 1.492    85.5 ms    47889 tok/s   3441 GFLOP/s
-step   250/5000  loss 2.1590  lr 9.98e-04  |g| 0.738    85.6 ms    47858 tok/s   3439 GFLOP/s
-step   260/5000  loss 2.1199  lr 9.98e-04  |g| 0.931    85.7 ms    47812 tok/s   3435 GFLOP/s
-step   270/5000  loss 2.1409  lr 9.97e-04  |g| 1.238    85.7 ms    47787 tok/s   3433 GFLOP/s
-step   280/5000  loss 2.0727  lr 9.97e-04  |g| 0.783    85.6 ms    47831 tok/s   3437 GFLOP/s
-step   290/5000  loss 2.0876  lr 9.97e-04  |g| 0.915    85.7 ms    47817 tok/s   3436 GFLOP/s
-step   300/5000  loss 2.0165  lr 9.96e-04  |g| 0.833    85.8 ms    47766 tok/s   3432 GFLOP/s
-  [eval] step 300  val loss 2.1374  (20 batches)  <- best
-step   310/5000  loss 2.0243  lr 9.96e-04  |g| 0.969    85.6 ms    47863 tok/s   3439 GFLOP/s
-step   320/5000  loss 2.0351  lr 9.96e-04  |g| 0.876    85.7 ms    47789 tok/s   3434 GFLOP/s
-step   330/5000  loss 2.0004  lr 9.95e-04  |g| 0.957    85.7 ms    47814 tok/s   3435 GFLOP/s
-step   340/5000  loss 1.9982  lr 9.95e-04  |g| 0.840    85.7 ms    47768 tok/s   3432 GFLOP/s
-step   350/5000  loss 1.9099  lr 9.94e-04  |g| 0.802    85.7 ms    47817 tok/s   3436 GFLOP/s
-step   360/5000  loss 1.8726  lr 9.94e-04  |g| 1.079    85.7 ms    47808 tok/s   3435 GFLOP/s
-step   370/5000  loss 1.9317  lr 9.93e-04  |g| 0.819    85.6 ms    47837 tok/s   3437 GFLOP/s
-step   380/5000  loss 1.8603  lr 9.93e-04  |g| 0.779    85.6 ms    47855 tok/s   3438 GFLOP/s
-step   390/5000  loss 1.8081  lr 9.92e-04  |g| 0.766    85.6 ms    47843 tok/s   3437 GFLOP/s
-step   400/5000  loss 1.8917  lr 9.92e-04  |g| 0.837    85.6 ms    47861 tok/s   3439 GFLOP/s
-  [eval] step 400  val loss 1.9905  (20 batches)  <- best
-step   410/5000  loss 1.8081  lr 9.91e-04  |g| 0.750    85.6 ms    47831 tok/s   3437 GFLOP/s
-step   420/5000  loss 1.8293  lr 9.91e-04  |g| 0.776    85.8 ms    47744 tok/s   3430 GFLOP/s
-step   430/5000  loss 1.8924  lr 9.90e-04  |g| 0.801    85.6 ms    47834 tok/s   3437 GFLOP/s
-step   440/5000  loss 1.8353  lr 9.89e-04  |g| 0.869    85.6 ms    47862 tok/s   3439 GFLOP/s
-step   450/5000  loss 1.8579  lr 9.89e-04  |g| 0.813    85.5 ms    47929 tok/s   3444 GFLOP/s
-step   460/5000  loss 1.8000  lr 9.88e-04  |g| 0.778    85.5 ms    47894 tok/s   3441 GFLOP/s
-step   470/5000  loss 1.7615  lr 9.87e-04  |g| 0.851    85.6 ms    47864 tok/s   3439 GFLOP/s
-step   480/5000  loss 1.7971  lr 9.87e-04  |g| 0.868    85.8 ms    47734 tok/s   3430 GFLOP/s
-step   490/5000  loss 1.6694  lr 9.86e-04  |g| 0.724    85.6 ms    47852 tok/s   3438 GFLOP/s
-step   500/5000  loss 1.7417  lr 9.85e-04  |g| 0.666    85.7 ms    47804 tok/s   3435 GFLOP/s
-  [eval] step 500  val loss 1.8961  (20 batches)  <- best
+step   210/5000  loss 2.3922  lr 9.99e-04  |g| 0.896    86.1 ms    47564 tok/s   3417 GFLOP/s
+step   220/5000  loss 2.3115  lr 9.99e-04  |g| 0.730    86.1 ms    47553 tok/s   3417 GFLOP/s
+step   230/5000  loss 2.2552  lr 9.98e-04  |g| 0.903    86.1 ms    47564 tok/s   3417 GFLOP/s
+step   240/5000  loss 2.2053  lr 9.98e-04  |g| 1.493    86.2 ms    47521 tok/s   3414 GFLOP/s
+step   250/5000  loss 2.1590  lr 9.98e-04  |g| 0.738    86.1 ms    47572 tok/s   3418 GFLOP/s
+step   260/5000  loss 2.1200  lr 9.98e-04  |g| 0.929    86.2 ms    47523 tok/s   3414 GFLOP/s
+step   270/5000  loss 2.1412  lr 9.97e-04  |g| 1.238    86.2 ms    47517 tok/s   3414 GFLOP/s
+step   280/5000  loss 2.0726  lr 9.97e-04  |g| 0.783    86.0 ms    47606 tok/s   3420 GFLOP/s
+step   290/5000  loss 2.0874  lr 9.97e-04  |g| 0.913    86.1 ms    47562 tok/s   3417 GFLOP/s
+step   300/5000  loss 2.0167  lr 9.96e-04  |g| 0.827    86.2 ms    47506 tok/s   3413 GFLOP/s
+  [eval] step 300  val loss 2.1380  (20 batches)  <- best
+step   310/5000  loss 2.0239  lr 9.96e-04  |g| 0.960    86.1 ms    47573 tok/s   3418 GFLOP/s
+step   320/5000  loss 2.0349  lr 9.96e-04  |g| 0.862    86.1 ms    47574 tok/s   3418 GFLOP/s
+step   330/5000  loss 2.0027  lr 9.95e-04  |g| 0.973    86.2 ms    47538 tok/s   3415 GFLOP/s
+step   340/5000  loss 1.9973  lr 9.95e-04  |g| 0.835    86.1 ms    47584 tok/s   3419 GFLOP/s
+step   350/5000  loss 1.9070  lr 9.94e-04  |g| 0.815    86.3 ms    47448 tok/s   3409 GFLOP/s
+step   360/5000  loss 1.8697  lr 9.94e-04  |g| 1.016    86.2 ms    47510 tok/s   3414 GFLOP/s
+step   370/5000  loss 1.9349  lr 9.93e-04  |g| 0.856    86.1 ms    47571 tok/s   3418 GFLOP/s
+step   380/5000  loss 1.8643  lr 9.93e-04  |g| 0.806    86.1 ms    47578 tok/s   3418 GFLOP/s
+step   390/5000  loss 1.8086  lr 9.92e-04  |g| 0.727    86.1 ms    47574 tok/s   3418 GFLOP/s
+step   400/5000  loss 1.9011  lr 9.92e-04  |g| 0.841    86.2 ms    47512 tok/s   3414 GFLOP/s
+  [eval] step 400  val loss 2.0034  (20 batches)  <- best
+step   410/5000  loss 1.8044  lr 9.91e-04  |g| 0.796    86.1 ms    47570 tok/s   3418 GFLOP/s
+step   420/5000  loss 1.8346  lr 9.91e-04  |g| 0.784    86.1 ms    47586 tok/s   3419 GFLOP/s
+step   430/5000  loss 1.8886  lr 9.90e-04  |g| 0.799    86.2 ms    47523 tok/s   3414 GFLOP/s
+step   440/5000  loss 1.8330  lr 9.89e-04  |g| 0.790    86.1 ms    47558 tok/s   3417 GFLOP/s
+step   450/5000  loss 1.8407  lr 9.89e-04  |g| 0.813    86.2 ms    47509 tok/s   3413 GFLOP/s
+step   460/5000  loss 1.8058  lr 9.88e-04  |g| 0.851    86.2 ms    47519 tok/s   3414 GFLOP/s
+step   470/5000  loss 1.7628  lr 9.87e-04  |g| 0.756    86.1 ms    47557 tok/s   3417 GFLOP/s
+step   480/5000  loss 1.8069  lr 9.87e-04  |g| 0.852    86.2 ms    47525 tok/s   3415 GFLOP/s
+step   490/5000  loss 1.6812  lr 9.86e-04  |g| 0.774    86.2 ms    47529 tok/s   3415 GFLOP/s
+step   500/5000  loss 1.7413  lr 9.85e-04  |g| 0.688    86.3 ms    47479 tok/s   3411 GFLOP/s
+  [eval] step 500  val loss 1.8895  (20 batches)  <- best
   [sample] ------------------------------------------
-Betagent so have on an his val
-In the nath me cunse, and a day to bear dring,
-To a miness is sain they with my do scowill
-Once cortonal so the lay, it not there with well;
-But have my string the murkers a very in to thysed thust,
-From that to must in still for tell cland frayyry,
-For like his again,
-As the me goddery the plant, and the his well his veansting the shall to weread by was dideriught.
+ISece to plan think an his wan
+For make side faven my ou a cavent adven with my bding.
 
+ORTHUS:
+I shalls sends an they cold age it the his the may dive,
+Think thoughts my beher?
+'Tis doynly sparding other werth!
+And thy sday with not to be to morter and for thou me deagan,
+And with lord the than head to a's heardravonster.
+
+KING RICHARD II:
+But how we his me the shand thesence choover earends
+From
   ---------------------------------------------------
-step   510/5000  loss 1.7144  lr 9.85e-04  |g| 0.693    85.7 ms    47805 tok/s   3435 GFLOP/s
-step   520/5000  loss 1.6521  lr 9.84e-04  |g| 0.707    85.6 ms    47849 tok/s   3438 GFLOP/s
-step   530/5000  loss 1.6873  lr 9.83e-04  |g| 0.807    85.5 ms    47893 tok/s   3441 GFLOP/s
-step   540/5000  loss 1.7604  lr 9.82e-04  |g| 0.776    85.6 ms    47823 tok/s   3436 GFLOP/s
-step   550/5000  loss 1.6826  lr 9.81e-04  |g| 0.693    85.6 ms    47869 tok/s   3439 GFLOP/s
-step   560/5000  loss 1.7656  lr 9.81e-04  |g| 0.703    85.5 ms    47884 tok/s   3440 GFLOP/s
-step   570/5000  loss 1.6685  lr 9.80e-04  |g| 0.777    85.7 ms    47802 tok/s   3434 GFLOP/s
-step   580/5000  loss 1.6426  lr 9.79e-04  |g| 0.714    85.7 ms    47769 tok/s   3432 GFLOP/s
-step   590/5000  loss 1.7302  lr 9.78e-04  |g| 0.774    85.7 ms    47816 tok/s   3435 GFLOP/s
-step   600/5000  loss 1.6536  lr 9.77e-04  |g| 0.736    85.5 ms    47880 tok/s   3440 GFLOP/s
-  [eval] step 600  val loss 1.8305  (20 batches)  <- best
-step   610/5000  loss 1.6736  lr 9.76e-04  |g| 0.661    85.6 ms    47876 tok/s   3440 GFLOP/s
-step   620/5000  loss 1.6206  lr 9.75e-04  |g| 0.740    85.7 ms    47806 tok/s   3435 GFLOP/s
-step   630/5000  loss 1.5664  lr 9.74e-04  |g| 0.692    85.7 ms    47803 tok/s   3435 GFLOP/s
-step   640/5000  loss 1.6848  lr 9.73e-04  |g| 0.772    85.7 ms    47810 tok/s   3435 GFLOP/s
-step   650/5000  loss 1.6087  lr 9.72e-04  |g| 0.684    85.7 ms    47790 tok/s   3434 GFLOP/s
-step   660/5000  loss 1.5790  lr 9.71e-04  |g| 0.637    85.6 ms    47869 tok/s   3439 GFLOP/s
-step   670/5000  loss 1.6356  lr 9.70e-04  |g| 0.633    85.7 ms    47821 tok/s   3436 GFLOP/s
-step   680/5000  loss 1.6656  lr 9.69e-04  |g| 0.746    85.5 ms    47888 tok/s   3441 GFLOP/s
-step   690/5000  loss 1.5631  lr 9.68e-04  |g| 0.699    85.7 ms    47805 tok/s   3435 GFLOP/s
-step   700/5000  loss 1.5875  lr 9.67e-04  |g| 0.674    85.5 ms    47893 tok/s   3441 GFLOP/s
-  [eval] step 700  val loss 1.7790  (20 batches)  <- best
-step   710/5000  loss 1.5624  lr 9.66e-04  |g| 0.587    85.6 ms    47850 tok/s   3438 GFLOP/s
-step   720/5000  loss 1.6133  lr 9.65e-04  |g| 0.649    85.6 ms    47841 tok/s   3437 GFLOP/s
-step   730/5000  loss 1.6216  lr 9.64e-04  |g| 0.656    85.7 ms    47796 tok/s   3434 GFLOP/s
-step   740/5000  loss 1.5996  lr 9.63e-04  |g| 0.599    85.7 ms    47803 tok/s   3435 GFLOP/s
-step   750/5000  loss 1.6240  lr 9.61e-04  |g| 0.705    85.7 ms    47795 tok/s   3434 GFLOP/s
-step   760/5000  loss 1.5723  lr 9.60e-04  |g| 0.582    85.6 ms    47853 tok/s   3438 GFLOP/s
-step   770/5000  loss 1.5230  lr 9.59e-04  |g| 0.594    86.0 ms    47640 tok/s   3423 GFLOP/s
-step   780/5000  loss 1.6299  lr 9.58e-04  |g| 0.637    85.6 ms    47839 tok/s   3437 GFLOP/s
-step   790/5000  loss 1.5346  lr 9.57e-04  |g| 0.581    85.7 ms    47816 tok/s   3435 GFLOP/s
-step   800/5000  loss 1.5245  lr 9.55e-04  |g| 0.621    85.7 ms    47809 tok/s   3435 GFLOP/s
-  [eval] step 800  val loss 1.7306  (20 batches)  <- best
-step   810/5000  loss 1.6005  lr 9.54e-04  |g| 0.668    85.7 ms    47781 tok/s   3433 GFLOP/s
-step   820/5000  loss 1.5214  lr 9.53e-04  |g| 0.641    85.7 ms    47785 tok/s   3433 GFLOP/s
-step   830/5000  loss 1.5660  lr 9.52e-04  |g| 0.675    85.6 ms    47871 tok/s   3439 GFLOP/s
-step   840/5000  loss 1.5615  lr 9.50e-04  |g| 0.593    85.4 ms    47937 tok/s   3444 GFLOP/s
-step   850/5000  loss 1.4958  lr 9.49e-04  |g| 0.608    85.6 ms    47874 tok/s   3440 GFLOP/s
-step   860/5000  loss 1.4633  lr 9.48e-04  |g| 0.600    85.7 ms    47818 tok/s   3436 GFLOP/s
-step   870/5000  loss 1.5066  lr 9.46e-04  |g| 0.608    85.7 ms    47812 tok/s   3435 GFLOP/s
-step   880/5000  loss 1.4820  lr 9.45e-04  |g| 0.581    85.6 ms    47868 tok/s   3439 GFLOP/s
-step   890/5000  loss 1.5300  lr 9.44e-04  |g| 0.644    85.6 ms    47861 tok/s   3439 GFLOP/s
-step   900/5000  loss 1.5131  lr 9.42e-04  |g| 0.614    85.6 ms    47868 tok/s   3439 GFLOP/s
-  [eval] step 900  val loss 1.7079  (20 batches)  <- best
-step   910/5000  loss 1.5140  lr 9.41e-04  |g| 0.600    85.6 ms    47856 tok/s   3438 GFLOP/s
-step   920/5000  loss 1.5229  lr 9.39e-04  |g| 0.570    85.6 ms    47854 tok/s   3438 GFLOP/s
-step   930/5000  loss 1.5329  lr 9.38e-04  |g| 0.568    85.7 ms    47815 tok/s   3435 GFLOP/s
-step   940/5000  loss 1.5043  lr 9.36e-04  |g| 0.593    85.6 ms    47827 tok/s   3436 GFLOP/s
-step   950/5000  loss 1.5165  lr 9.35e-04  |g| 0.557    85.6 ms    47838 tok/s   3437 GFLOP/s
-step   960/5000  loss 1.5177  lr 9.33e-04  |g| 0.597    85.6 ms    47844 tok/s   3437 GFLOP/s
-step   970/5000  loss 1.4918  lr 9.32e-04  |g| 0.576    85.6 ms    47832 tok/s   3437 GFLOP/s
-step   980/5000  loss 1.4606  lr 9.30e-04  |g| 0.591    85.6 ms    47861 tok/s   3439 GFLOP/s
-step   990/5000  loss 1.5124  lr 9.29e-04  |g| 0.559    85.6 ms    47858 tok/s   3438 GFLOP/s
-step  1000/5000  loss 1.5001  lr 9.27e-04  |g| 0.606    85.6 ms    47856 tok/s   3438 GFLOP/s
-  [eval] step 1000  val loss 1.6762  (20 batches)  <- best
+step   510/5000  loss 1.7106  lr 9.85e-04  |g| 0.695    86.2 ms    47523 tok/s   3414 GFLOP/s
+step   520/5000  loss 1.6535  lr 9.84e-04  |g| 0.696    86.2 ms    47514 tok/s   3414 GFLOP/s
+step   530/5000  loss 1.6933  lr 9.83e-04  |g| 0.855    86.0 ms    47616 tok/s   3421 GFLOP/s
+step   540/5000  loss 1.7750  lr 9.82e-04  |g| 0.772    86.1 ms    47549 tok/s   3416 GFLOP/s
+step   550/5000  loss 1.6879  lr 9.81e-04  |g| 0.778    86.2 ms    47502 tok/s   3413 GFLOP/s
+step   560/5000  loss 1.7759  lr 9.81e-04  |g| 0.746    86.2 ms    47530 tok/s   3415 GFLOP/s
+step   570/5000  loss 1.6631  lr 9.80e-04  |g| 0.648    86.2 ms    47504 tok/s   3413 GFLOP/s
+step   580/5000  loss 1.6399  lr 9.79e-04  |g| 0.631    86.0 ms    47604 tok/s   3420 GFLOP/s
+step   590/5000  loss 1.7307  lr 9.78e-04  |g| 0.780    86.1 ms    47560 tok/s   3417 GFLOP/s
+step   600/5000  loss 1.6476  lr 9.77e-04  |g| 0.683    86.3 ms    47442 tok/s   3409 GFLOP/s
+  [eval] step 600  val loss 1.8194  (20 batches)  <- best
+step   610/5000  loss 1.6766  lr 9.76e-04  |g| 0.672    86.2 ms    47541 tok/s   3416 GFLOP/s
+step   620/5000  loss 1.6156  lr 9.75e-04  |g| 0.689    86.0 ms    47605 tok/s   3420 GFLOP/s
+step   630/5000  loss 1.5683  lr 9.74e-04  |g| 0.633    86.2 ms    47509 tok/s   3413 GFLOP/s
+step   640/5000  loss 1.6847  lr 9.73e-04  |g| 0.827    86.2 ms    47505 tok/s   3413 GFLOP/s
+step   650/5000  loss 1.6023  lr 9.72e-04  |g| 0.678    86.2 ms    47523 tok/s   3414 GFLOP/s
+step   660/5000  loss 1.5790  lr 9.71e-04  |g| 0.647    86.2 ms    47528 tok/s   3415 GFLOP/s
+step   670/5000  loss 1.6470  lr 9.70e-04  |g| 0.640    86.2 ms    47499 tok/s   3413 GFLOP/s
+step   680/5000  loss 1.6508  lr 9.69e-04  |g| 0.644    86.2 ms    47510 tok/s   3413 GFLOP/s
+step   690/5000  loss 1.5547  lr 9.68e-04  |g| 0.667    86.2 ms    47545 tok/s   3416 GFLOP/s
+step   700/5000  loss 1.5828  lr 9.67e-04  |g| 0.674    86.1 ms    47554 tok/s   3417 GFLOP/s
+  [eval] step 700  val loss 1.7727  (20 batches)  <- best
+step   710/5000  loss 1.5578  lr 9.66e-04  |g| 0.628    86.3 ms    47489 tok/s   3412 GFLOP/s
+step   720/5000  loss 1.6125  lr 9.65e-04  |g| 0.685    86.1 ms    47592 tok/s   3419 GFLOP/s
+step   730/5000  loss 1.6275  lr 9.64e-04  |g| 0.662    86.1 ms    47585 tok/s   3419 GFLOP/s
+step   740/5000  loss 1.5965  lr 9.63e-04  |g| 0.642    86.3 ms    47478 tok/s   3411 GFLOP/s
+step   750/5000  loss 1.6033  lr 9.61e-04  |g| 0.674    86.1 ms    47548 tok/s   3416 GFLOP/s
+step   760/5000  loss 1.5676  lr 9.60e-04  |g| 0.574    86.1 ms    47548 tok/s   3416 GFLOP/s
+step   770/5000  loss 1.5280  lr 9.59e-04  |g| 0.614    86.2 ms    47502 tok/s   3413 GFLOP/s
+step   780/5000  loss 1.6251  lr 9.58e-04  |g| 0.644    86.0 ms    47616 tok/s   3421 GFLOP/s
+step   790/5000  loss 1.5303  lr 9.57e-04  |g| 0.577    86.2 ms    47539 tok/s   3416 GFLOP/s
+step   800/5000  loss 1.5097  lr 9.55e-04  |g| 0.586    86.2 ms    47540 tok/s   3416 GFLOP/s
+  [eval] step 800  val loss 1.7211  (20 batches)  <- best
+step   810/5000  loss 1.5912  lr 9.54e-04  |g| 0.628    86.1 ms    47580 tok/s   3419 GFLOP/s
+step   820/5000  loss 1.5219  lr 9.53e-04  |g| 0.642    86.3 ms    47487 tok/s   3412 GFLOP/s
+step   830/5000  loss 1.5640  lr 9.52e-04  |g| 0.660    86.2 ms    47491 tok/s   3412 GFLOP/s
+step   840/5000  loss 1.5639  lr 9.50e-04  |g| 0.590    86.1 ms    47559 tok/s   3417 GFLOP/s
+step   850/5000  loss 1.5030  lr 9.49e-04  |g| 0.655    86.2 ms    47510 tok/s   3414 GFLOP/s
+step   860/5000  loss 1.4649  lr 9.48e-04  |g| 0.620    86.1 ms    47581 tok/s   3419 GFLOP/s
+step   870/5000  loss 1.4997  lr 9.46e-04  |g| 0.535    86.2 ms    47533 tok/s   3415 GFLOP/s
+step   880/5000  loss 1.4708  lr 9.45e-04  |g| 0.576    86.2 ms    47529 tok/s   3415 GFLOP/s
+step   890/5000  loss 1.5322  lr 9.44e-04  |g| 0.659    86.2 ms    47504 tok/s   3413 GFLOP/s
+step   900/5000  loss 1.5083  lr 9.42e-04  |g| 0.615    86.2 ms    47519 tok/s   3414 GFLOP/s
+  [eval] step 900  val loss 1.7124  (20 batches)  <- best
+step   910/5000  loss 1.5112  lr 9.41e-04  |g| 0.602    86.1 ms    47562 tok/s   3417 GFLOP/s
+step   920/5000  loss 1.5302  lr 9.39e-04  |g| 0.556    86.4 ms    47433 tok/s   3408 GFLOP/s
+step   930/5000  loss 1.5207  lr 9.38e-04  |g| 0.562    86.2 ms    47527 tok/s   3415 GFLOP/s
+step   940/5000  loss 1.5017  lr 9.36e-04  |g| 0.656    86.1 ms    47581 tok/s   3419 GFLOP/s
+step   950/5000  loss 1.5170  lr 9.35e-04  |g| 0.539    86.2 ms    47537 tok/s   3415 GFLOP/s
+step   960/5000  loss 1.5097  lr 9.33e-04  |g| 0.575    86.2 ms    47496 tok/s   3412 GFLOP/s
+step   970/5000  loss 1.4927  lr 9.32e-04  |g| 0.561    86.2 ms    47529 tok/s   3415 GFLOP/s
+step   980/5000  loss 1.4494  lr 9.30e-04  |g| 0.591    86.1 ms    47546 tok/s   3416 GFLOP/s
+step   990/5000  loss 1.5111  lr 9.29e-04  |g| 0.561    86.1 ms    47592 tok/s   3419 GFLOP/s
+step  1000/5000  loss 1.4791  lr 9.27e-04  |g| 0.580    86.1 ms    47555 tok/s   3417 GFLOP/s
+  [eval] step 1000  val loss 1.6670  (20 batches)  <- best
   [sample] ------------------------------------------
-Is that you demanders to fortune?
-Nay, come that one; well, from, then can that;
-Like her some had there will good, where craves here show
-These to be warm none; may noble which her cay.
-
-CORIOLANUS:
-There?
-
-RATCIONkSION:
-O may should I am make: tell, did thee have a certainted
-Come, come house it not again: how to hands
-Be then thus. The beseecher worse and your broughts,
-That make unto charged w
-  ---------------------------------------------------
-step  1010/5000  loss 1.4876  lr 9.26e-04  |g| 0.560    85.6 ms    47854 tok/s   3438 GFLOP/s
-step  1020/5000  loss 1.4671  lr 9.24e-04  |g| 0.565    85.6 ms    47838 tok/s   3437 GFLOP/s
-step  1030/5000  loss 1.5125  lr 9.22e-04  |g| 0.730    85.6 ms    47833 tok/s   3437 GFLOP/s
-step  1040/5000  loss 1.4651  lr 9.21e-04  |g| 0.586    85.6 ms    47828 tok/s   3436 GFLOP/s
-step  1050/5000  loss 1.4900  lr 9.19e-04  |g| 0.538    85.6 ms    47830 tok/s   3437 GFLOP/s
-step  1060/5000  loss 1.4097  lr 9.17e-04  |g| 0.560    85.5 ms    47905 tok/s   3442 GFLOP/s
-step  1070/5000  loss 1.4567  lr 9.16e-04  |g| 0.542    85.6 ms    47877 tok/s   3440 GFLOP/s
-step  1080/5000  loss 1.4171  lr 9.14e-04  |g| 0.485    85.6 ms    47858 tok/s   3439 GFLOP/s
-step  1090/5000  loss 1.4872  lr 9.12e-04  |g| 0.557    85.7 ms    47818 tok/s   3436 GFLOP/s
-step  1100/5000  loss 1.3463  lr 9.11e-04  |g| 0.628    85.6 ms    47825 tok/s   3436 GFLOP/s
-  [eval] step 1100  val loss 1.6409  (20 batches)  <- best
-step  1110/5000  loss 1.3948  lr 9.09e-04  |g| 0.628    85.6 ms    47862 tok/s   3439 GFLOP/s
-step  1120/5000  loss 1.3774  lr 9.07e-04  |g| 0.542    85.5 ms    47910 tok/s   3442 GFLOP/s
-step  1130/5000  loss 1.4442  lr 9.05e-04  |g| 0.593    85.7 ms    47797 tok/s   3434 GFLOP/s
-step  1140/5000  loss 1.4991  lr 9.04e-04  |g| 0.543    85.5 ms    47888 tok/s   3441 GFLOP/s
-step  1150/5000  loss 1.3940  lr 9.02e-04  |g| 0.498    85.6 ms    47827 tok/s   3436 GFLOP/s
-step  1160/5000  loss 1.4357  lr 9.00e-04  |g| 0.569    85.5 ms    47880 tok/s   3440 GFLOP/s
-step  1170/5000  loss 1.4077  lr 8.98e-04  |g| 0.562    85.8 ms    47764 tok/s   3432 GFLOP/s
-step  1180/5000  loss 1.3933  lr 8.96e-04  |g| 0.499    85.7 ms    47821 tok/s   3436 GFLOP/s
-step  1190/5000  loss 1.4694  lr 8.95e-04  |g| 0.590    85.8 ms    47766 tok/s   3432 GFLOP/s
-step  1200/5000  loss 1.4059  lr 8.93e-04  |g| 0.523    85.7 ms    47798 tok/s   3434 GFLOP/s
-  [eval] step 1200  val loss 1.6383  (20 batches)  <- best
-step  1210/5000  loss 1.3877  lr 8.91e-04  |g| 0.581    85.6 ms    47847 tok/s   3438 GFLOP/s
-step  1220/5000  loss 1.3901  lr 8.89e-04  |g| 0.673    85.6 ms    47871 tok/s   3439 GFLOP/s
-step  1230/5000  loss 1.3527  lr 8.87e-04  |g| 0.546    85.5 ms    47884 tok/s   3440 GFLOP/s
-step  1240/5000  loss 1.3721  lr 8.85e-04  |g| 0.574    85.6 ms    47857 tok/s   3438 GFLOP/s
-step  1250/5000  loss 1.3808  lr 8.83e-04  |g| 0.552    85.5 ms    47884 tok/s   3440 GFLOP/s
-step  1260/5000  loss 1.3823  lr 8.81e-04  |g| 0.527    85.6 ms    47859 tok/s   3439 GFLOP/s
-step  1270/5000  loss 1.4128  lr 8.79e-04  |g| 0.501    85.6 ms    47841 tok/s   3437 GFLOP/s
-step  1280/5000  loss 1.3694  lr 8.77e-04  |g| 0.538    85.6 ms    47834 tok/s   3437 GFLOP/s
-step  1290/5000  loss 1.4055  lr 8.75e-04  |g| 0.539    85.6 ms    47847 tok/s   3438 GFLOP/s
-step  1300/5000  loss 1.4419  lr 8.73e-04  |g| 0.591    85.7 ms    47809 tok/s   3435 GFLOP/s
-  [eval] step 1300  val loss 1.6034  (20 batches)  <- best
-step  1310/5000  loss 1.3874  lr 8.71e-04  |g| 0.569    85.6 ms    47868 tok/s   3439 GFLOP/s
-step  1320/5000  loss 1.3671  lr 8.69e-04  |g| 0.570    85.6 ms    47855 tok/s   3438 GFLOP/s
-step  1330/5000  loss 1.4005  lr 8.67e-04  |g| 0.593    85.5 ms    47888 tok/s   3441 GFLOP/s
-step  1340/5000  loss 1.4013  lr 8.65e-04  |g| 0.538    85.5 ms    47917 tok/s   3443 GFLOP/s
-step  1350/5000  loss 1.3966  lr 8.63e-04  |g| 0.577    85.6 ms    47845 tok/s   3438 GFLOP/s
-step  1360/5000  loss 1.4071  lr 8.61e-04  |g| 0.539    85.7 ms    47800 tok/s   3434 GFLOP/s
-step  1370/5000  loss 1.4289  lr 8.59e-04  |g| 0.561    85.7 ms    47793 tok/s   3434 GFLOP/s
-step  1380/5000  loss 1.3539  lr 8.57e-04  |g| 0.514    85.7 ms    47771 tok/s   3432 GFLOP/s
-step  1390/5000  loss 1.3310  lr 8.55e-04  |g| 0.526    85.6 ms    47844 tok/s   3437 GFLOP/s
-step  1400/5000  loss 1.3782  lr 8.53e-04  |g| 0.499    85.6 ms    47847 tok/s   3438 GFLOP/s
-  [eval] step 1400  val loss 1.5939  (20 batches)  <- best
-step  1410/5000  loss 1.3689  lr 8.50e-04  |g| 0.519    85.7 ms    47777 tok/s   3433 GFLOP/s
-step  1420/5000  loss 1.3950  lr 8.48e-04  |g| 0.552    85.7 ms    47791 tok/s   3434 GFLOP/s
-step  1430/5000  loss 1.4279  lr 8.46e-04  |g| 0.540    85.6 ms    47878 tok/s   3440 GFLOP/s
-step  1440/5000  loss 1.3172  lr 8.44e-04  |g| 0.576    85.6 ms    47837 tok/s   3437 GFLOP/s
-step  1450/5000  loss 1.3335  lr 8.42e-04  |g| 0.585    85.6 ms    47835 tok/s   3437 GFLOP/s
-step  1460/5000  loss 1.3094  lr 8.39e-04  |g| 0.587    85.7 ms    47778 tok/s   3433 GFLOP/s
-step  1470/5000  loss 1.3613  lr 8.37e-04  |g| 0.514    85.8 ms    47766 tok/s   3432 GFLOP/s
-step  1480/5000  loss 1.3783  lr 8.35e-04  |g| 0.583    85.7 ms    47803 tok/s   3435 GFLOP/s
-step  1490/5000  loss 1.3933  lr 8.33e-04  |g| 0.563    85.7 ms    47809 tok/s   3435 GFLOP/s
-step  1500/5000  loss 1.3559  lr 8.31e-04  |g| 0.550    85.7 ms    47806 tok/s   3435 GFLOP/s
-  [eval] step 1500  val loss 1.5863  (20 batches)  <- best
-  [sample] ------------------------------------------
-Shall be cannot what stany thou make thy home.
-
-Shepherd:
-And all thou hast how fell the housand of thy scote?
-
-Second Citizen:
-When prove what mild that I see you?
-
-AUFIDIUS:
-Were you shall such a child Rome: and,
-How now hadst thou art how in thou chose heavens the not
-You sheeds which king, of you awaked. O, thinks!
-
-CAMILLO:
-How canst thought she that comes the king; I had you.
-
-VOLUMNIA:
-My l
-  ---------------------------------------------------
-step  1510/5000  loss 1.3331  lr 8.28e-04  |g| 0.519    85.7 ms    47794 tok/s   3434 GFLOP/s
-step  1520/5000  loss 1.3691  lr 8.26e-04  |g| 0.528    85.7 ms    47777 tok/s   3433 GFLOP/s
-step  1530/5000  loss 1.2447  lr 8.24e-04  |g| 0.468    85.6 ms    47839 tok/s   3437 GFLOP/s
-step  1540/5000  loss 1.3581  lr 8.21e-04  |g| 0.551    85.7 ms    47801 tok/s   3434 GFLOP/s
-step  1550/5000  loss 1.3755  lr 8.19e-04  |g| 0.512    85.5 ms    47906 tok/s   3442 GFLOP/s
-step  1560/5000  loss 1.3662  lr 8.17e-04  |g| 0.550    85.6 ms    47827 tok/s   3436 GFLOP/s
-step  1570/5000  loss 1.3246  lr 8.15e-04  |g| 0.526    85.6 ms    47829 tok/s   3436 GFLOP/s
-step  1580/5000  loss 1.3002  lr 8.12e-04  |g| 0.514    85.7 ms    47806 tok/s   3435 GFLOP/s
-step  1590/5000  loss 1.3634  lr 8.10e-04  |g| 0.540    85.6 ms    47827 tok/s   3436 GFLOP/s
-step  1600/5000  loss 1.2989  lr 8.07e-04  |g| 0.571    85.6 ms    47839 tok/s   3437 GFLOP/s
-  [eval] step 1600  val loss 1.5737  (20 batches)  <- best
-step  1610/5000  loss 1.3109  lr 8.05e-04  |g| 0.514    85.8 ms    47724 tok/s   3429 GFLOP/s
-step  1620/5000  loss 1.2729  lr 8.03e-04  |g| 0.502    85.6 ms    47849 tok/s   3438 GFLOP/s
-step  1630/5000  loss 1.3424  lr 8.00e-04  |g| 0.516    85.6 ms    47857 tok/s   3438 GFLOP/s
-step  1640/5000  loss 1.3334  lr 7.98e-04  |g| 0.506    85.6 ms    47825 tok/s   3436 GFLOP/s
-step  1650/5000  loss 1.3530  lr 7.95e-04  |g| 0.508    85.6 ms    47866 tok/s   3439 GFLOP/s
-step  1660/5000  loss 1.2859  lr 7.93e-04  |g| 0.482    85.5 ms    47882 tok/s   3440 GFLOP/s
-step  1670/5000  loss 1.3023  lr 7.91e-04  |g| 0.480    85.7 ms    47807 tok/s   3435 GFLOP/s
-step  1680/5000  loss 1.3510  lr 7.88e-04  |g| 0.538    85.5 ms    47885 tok/s   3440 GFLOP/s
-step  1690/5000  loss 1.2639  lr 7.86e-04  |g| 0.560    85.6 ms    47828 tok/s   3436 GFLOP/s
-step  1700/5000  loss 1.3547  lr 7.83e-04  |g| 0.534    85.7 ms    47819 tok/s   3436 GFLOP/s
-  [eval] step 1700  val loss 1.5570  (20 batches)  <- best
-step  1710/5000  loss 1.3002  lr 7.81e-04  |g| 0.513    85.6 ms    47839 tok/s   3437 GFLOP/s
-step  1720/5000  loss 1.3721  lr 7.78e-04  |g| 0.549    85.7 ms    47811 tok/s   3435 GFLOP/s
-step  1730/5000  loss 1.3838  lr 7.76e-04  |g| 0.530    85.5 ms    47880 tok/s   3440 GFLOP/s
-step  1740/5000  loss 1.3054  lr 7.73e-04  |g| 0.473    85.6 ms    47837 tok/s   3437 GFLOP/s
-step  1750/5000  loss 1.2749  lr 7.71e-04  |g| 0.478    85.6 ms    47839 tok/s   3437 GFLOP/s
-step  1760/5000  loss 1.3123  lr 7.68e-04  |g| 0.529    85.6 ms    47838 tok/s   3437 GFLOP/s
-step  1770/5000  loss 1.3337  lr 7.66e-04  |g| 0.533    85.6 ms    47865 tok/s   3439 GFLOP/s
-step  1780/5000  loss 1.3086  lr 7.63e-04  |g| 0.564    85.7 ms    47774 tok/s   3432 GFLOP/s
-step  1790/5000  loss 1.2541  lr 7.61e-04  |g| 0.520    85.5 ms    47892 tok/s   3441 GFLOP/s
-step  1800/5000  loss 1.2929  lr 7.58e-04  |g| 0.505    85.7 ms    47800 tok/s   3434 GFLOP/s
-  [eval] step 1800  val loss 1.5408  (20 batches)  <- best
-step  1810/5000  loss 1.2948  lr 7.56e-04  |g| 0.533    85.6 ms    47859 tok/s   3439 GFLOP/s
-step  1820/5000  loss 1.2741  lr 7.53e-04  |g| 0.483    85.6 ms    47841 tok/s   3437 GFLOP/s
-step  1830/5000  loss 1.2825  lr 7.50e-04  |g| 0.557    85.7 ms    47803 tok/s   3435 GFLOP/s
-step  1840/5000  loss 1.3206  lr 7.48e-04  |g| 0.486    85.6 ms    47837 tok/s   3437 GFLOP/s
-step  1850/5000  loss 1.2699  lr 7.45e-04  |g| 0.498    85.7 ms    47807 tok/s   3435 GFLOP/s
-step  1860/5000  loss 1.3081  lr 7.43e-04  |g| 0.547    85.7 ms    47769 tok/s   3432 GFLOP/s
-step  1870/5000  loss 1.2756  lr 7.40e-04  |g| 0.512    85.5 ms    47894 tok/s   3441 GFLOP/s
-step  1880/5000  loss 1.2594  lr 7.37e-04  |g| 0.542    85.8 ms    47765 tok/s   3432 GFLOP/s
-step  1890/5000  loss 1.2680  lr 7.35e-04  |g| 0.515    85.6 ms    47868 tok/s   3439 GFLOP/s
-step  1900/5000  loss 1.2360  lr 7.32e-04  |g| 0.479    85.6 ms    47835 tok/s   3437 GFLOP/s
-  [eval] step 1900  val loss 1.5342  (20 batches)  <- best
-step  1910/5000  loss 1.2744  lr 7.30e-04  |g| 0.550    85.6 ms    47825 tok/s   3436 GFLOP/s
-step  1920/5000  loss 1.1814  lr 7.27e-04  |g| 0.530    85.6 ms    47841 tok/s   3437 GFLOP/s
-step  1930/5000  loss 1.3003  lr 7.24e-04  |g| 0.501    85.6 ms    47868 tok/s   3439 GFLOP/s
-step  1940/5000  loss 1.2913  lr 7.22e-04  |g| 0.527    85.6 ms    47848 tok/s   3438 GFLOP/s
-step  1950/5000  loss 1.2233  lr 7.19e-04  |g| 0.525    85.7 ms    47797 tok/s   3434 GFLOP/s
-step  1960/5000  loss 1.2491  lr 7.16e-04  |g| 0.523    85.7 ms    47799 tok/s   3434 GFLOP/s
-step  1970/5000  loss 1.3110  lr 7.14e-04  |g| 0.549    85.7 ms    47822 tok/s   3436 GFLOP/s
-step  1980/5000  loss 1.2559  lr 7.11e-04  |g| 0.492    85.7 ms    47778 tok/s   3433 GFLOP/s
-step  1990/5000  loss 1.2357  lr 7.08e-04  |g| 0.468    85.7 ms    47782 tok/s   3433 GFLOP/s
-step  2000/5000  loss 1.2427  lr 7.05e-04  |g| 0.488    85.6 ms    47830 tok/s   3437 GFLOP/s
-  [eval] step 2000  val loss 1.5328  (20 batches)  <- best
-  [sample] ------------------------------------------
-
-Clown:
-Ay, at that I have blessed my house
-Of as I say thee.
-
-ANTIGONUS:
-Well, sir; let us and to swear my safety
-Honest in my child: patricians,
-But this the trial beast with my possible.
-
-Lord Mass thereof York!
-
-DUKE VINCENTIO:
-The cause of your forest master bait
-In saint late consul: being not the urge of your grace,
-And black wrong ever how the rare thereof impossessant is
-And fill his pric
-  ---------------------------------------------------
-step  2010/5000  loss 1.1883  lr 7.03e-04  |g| 0.486    85.6 ms    47878 tok/s   3440 GFLOP/s
-step  2020/5000  loss 1.2838  lr 7.00e-04  |g| 0.528    85.8 ms    47733 tok/s   3429 GFLOP/s
-step  2030/5000  loss 1.2643  lr 6.97e-04  |g| 0.538    85.6 ms    47827 tok/s   3436 GFLOP/s
-step  2040/5000  loss 1.3171  lr 6.95e-04  |g| 0.529    85.6 ms    47866 tok/s   3439 GFLOP/s
-step  2050/5000  loss 1.2609  lr 6.92e-04  |g| 0.503    85.6 ms    47823 tok/s   3436 GFLOP/s
-step  2060/5000  loss 1.2568  lr 6.89e-04  |g| 0.512    85.8 ms    47754 tok/s   3431 GFLOP/s
-step  2070/5000  loss 1.2818  lr 6.86e-04  |g| 0.473    85.7 ms    47788 tok/s   3433 GFLOP/s
-step  2080/5000  loss 1.2594  lr 6.84e-04  |g| 0.501    85.6 ms    47867 tok/s   3439 GFLOP/s
-step  2090/5000  loss 1.2850  lr 6.81e-04  |g| 0.533    85.5 ms    47925 tok/s   3443 GFLOP/s
-step  2100/5000  loss 1.2246  lr 6.78e-04  |g| 0.531    85.8 ms    47749 tok/s   3431 GFLOP/s
-  [eval] step 2100  val loss 1.5276  (20 batches)  <- best
-step  2110/5000  loss 1.2003  lr 6.75e-04  |g| 0.514    85.8 ms    47766 tok/s   3432 GFLOP/s
-step  2120/5000  loss 1.2421  lr 6.72e-04  |g| 0.545    85.6 ms    47840 tok/s   3437 GFLOP/s
-step  2130/5000  loss 1.2102  lr 6.70e-04  |g| 0.470    85.6 ms    47830 tok/s   3436 GFLOP/s
-step  2140/5000  loss 1.1739  lr 6.67e-04  |g| 0.496    85.7 ms    47813 tok/s   3435 GFLOP/s
-step  2150/5000  loss 1.2324  lr 6.64e-04  |g| 0.504    85.7 ms    47818 tok/s   3436 GFLOP/s
-step  2160/5000  loss 1.2373  lr 6.61e-04  |g| 0.536    85.6 ms    47872 tok/s   3440 GFLOP/s
-step  2170/5000  loss 1.2481  lr 6.59e-04  |g| 0.482    85.6 ms    47854 tok/s   3438 GFLOP/s
-step  2180/5000  loss 1.2545  lr 6.56e-04  |g| 0.496    85.6 ms    47837 tok/s   3437 GFLOP/s
-step  2190/5000  loss 1.2078  lr 6.53e-04  |g| 0.567    85.6 ms    47853 tok/s   3438 GFLOP/s
-step  2200/5000  loss 1.2310  lr 6.50e-04  |g| 0.526    85.7 ms    47814 tok/s   3435 GFLOP/s
-  [eval] step 2200  val loss 1.5259  (20 batches)  <- best
-step  2210/5000  loss 1.2581  lr 6.47e-04  |g| 0.543    85.6 ms    47851 tok/s   3438 GFLOP/s
-step  2220/5000  loss 1.2653  lr 6.45e-04  |g| 0.537    85.7 ms    47801 tok/s   3434 GFLOP/s
-step  2230/5000  loss 1.1540  lr 6.42e-04  |g| 0.489    85.7 ms    47791 tok/s   3434 GFLOP/s
-step  2240/5000  loss 1.2457  lr 6.39e-04  |g| 0.488    85.7 ms    47817 tok/s   3436 GFLOP/s
-step  2250/5000  loss 1.2176  lr 6.36e-04  |g| 0.513    85.6 ms    47851 tok/s   3438 GFLOP/s
-step  2260/5000  loss 1.2213  lr 6.33e-04  |g| 0.537    85.6 ms    47833 tok/s   3437 GFLOP/s
-step  2270/5000  loss 1.1914  lr 6.30e-04  |g| 0.477    85.6 ms    47851 tok/s   3438 GFLOP/s
-step  2280/5000  loss 1.2986  lr 6.28e-04  |g| 0.540    85.7 ms    47818 tok/s   3436 GFLOP/s
-step  2290/5000  loss 1.2405  lr 6.25e-04  |g| 0.571    85.7 ms    47780 tok/s   3433 GFLOP/s
-step  2300/5000  loss 1.2374  lr 6.22e-04  |g| 0.495    85.8 ms    47762 tok/s   3432 GFLOP/s
-  [eval] step 2300  val loss 1.5237  (20 batches)  <- best
-step  2310/5000  loss 1.2590  lr 6.19e-04  |g| 0.513    85.5 ms    47933 tok/s   3444 GFLOP/s
-step  2320/5000  loss 1.2005  lr 6.16e-04  |g| 0.534    85.8 ms    47751 tok/s   3431 GFLOP/s
-step  2330/5000  loss 1.2934  lr 6.13e-04  |g| 0.517    85.6 ms    47861 tok/s   3439 GFLOP/s
-step  2340/5000  loss 1.1631  lr 6.10e-04  |g| 0.501    85.6 ms    47831 tok/s   3437 GFLOP/s
-step  2350/5000  loss 1.2534  lr 6.08e-04  |g| 0.521    85.6 ms    47873 tok/s   3440 GFLOP/s
-step  2360/5000  loss 1.1887  lr 6.05e-04  |g| 0.550    85.7 ms    47809 tok/s   3435 GFLOP/s
-step  2370/5000  loss 1.1903  lr 6.02e-04  |g| 0.504    85.6 ms    47827 tok/s   3436 GFLOP/s
-step  2380/5000  loss 1.1904  lr 5.99e-04  |g| 0.516    85.6 ms    47844 tok/s   3437 GFLOP/s
-step  2390/5000  loss 1.2052  lr 5.96e-04  |g| 0.516    85.6 ms    47846 tok/s   3438 GFLOP/s
-step  2400/5000  loss 1.2436  lr 5.93e-04  |g| 0.532    85.7 ms    47811 tok/s   3435 GFLOP/s
-  [eval] step 2400  val loss 1.5056  (20 batches)  <- best
-step  2410/5000  loss 1.1847  lr 5.90e-04  |g| 0.532    85.6 ms    47855 tok/s   3438 GFLOP/s
-step  2420/5000  loss 1.2607  lr 5.87e-04  |g| 0.523    85.6 ms    47844 tok/s   3437 GFLOP/s
-step  2430/5000  loss 1.2455  lr 5.85e-04  |g| 0.605    85.6 ms    47845 tok/s   3438 GFLOP/s
-step  2440/5000  loss 1.1834  lr 5.82e-04  |g| 0.504    85.6 ms    47846 tok/s   3438 GFLOP/s
-step  2450/5000  loss 1.1840  lr 5.79e-04  |g| 0.529    85.7 ms    47813 tok/s   3435 GFLOP/s
-step  2460/5000  loss 1.1620  lr 5.76e-04  |g| 0.499    85.7 ms    47814 tok/s   3435 GFLOP/s
-step  2470/5000  loss 1.1819  lr 5.73e-04  |g| 0.507    85.6 ms    47840 tok/s   3437 GFLOP/s
-step  2480/5000  loss 1.2044  lr 5.70e-04  |g| 0.534    85.8 ms    47729 tok/s   3429 GFLOP/s
-step  2490/5000  loss 1.1982  lr 5.67e-04  |g| 0.606    85.7 ms    47816 tok/s   3435 GFLOP/s
-step  2500/5000  loss 1.1272  lr 5.64e-04  |g| 0.474    85.5 ms    47890 tok/s   3441 GFLOP/s
-  [eval] step 2500  val loss 1.5089  (20 batches)
-  [sample] ------------------------------------------
-ROMEO:
-My lie, though will have a poor cap gentle,
-Dispatch'd the king and trembling the wind.
-My lord, gentle Heart'st thousand with my kinsman.
-
-ROMEO:
-Stay, be rude to replain a patrial loss:
-And in a bark man to my time,
-As we like as mistored as I have no encounter
-Than my name, that power was merit from,
-From admiring in Fname slave, my misery pleasant.
-
-JULIET:
-O, not on so sworn attent, wh
-  ---------------------------------------------------
-step  2510/5000  loss 1.1927  lr 5.62e-04  |g| 0.520    85.6 ms    47847 tok/s   3438 GFLOP/s
-step  2520/5000  loss 1.1790  lr 5.59e-04  |g| 0.516    85.6 ms    47865 tok/s   3439 GFLOP/s
-step  2530/5000  loss 1.1239  lr 5.56e-04  |g| 0.527    85.6 ms    47843 tok/s   3437 GFLOP/s
-step  2540/5000  loss 1.1297  lr 5.53e-04  |g| 0.517    85.6 ms    47841 tok/s   3437 GFLOP/s
-step  2550/5000  loss 1.1705  lr 5.50e-04  |g| 0.521    85.6 ms    47851 tok/s   3438 GFLOP/s
-step  2560/5000  loss 1.2048  lr 5.47e-04  |g| 0.533    85.5 ms    47885 tok/s   3440 GFLOP/s
-step  2570/5000  loss 1.1756  lr 5.44e-04  |g| 0.548    85.6 ms    47842 tok/s   3437 GFLOP/s
-step  2580/5000  loss 1.2246  lr 5.41e-04  |g| 0.536    85.5 ms    47887 tok/s   3441 GFLOP/s
-step  2590/5000  loss 1.1480  lr 5.38e-04  |g| 0.524    85.6 ms    47863 tok/s   3439 GFLOP/s
-step  2600/5000  loss 1.1712  lr 5.36e-04  |g| 0.568    85.6 ms    47835 tok/s   3437 GFLOP/s
-  [eval] step 2600  val loss 1.5128  (20 batches)
-step  2610/5000  loss 1.1717  lr 5.33e-04  |g| 0.548    85.6 ms    47842 tok/s   3437 GFLOP/s
-step  2620/5000  loss 1.1065  lr 5.30e-04  |g| 0.543    85.6 ms    47866 tok/s   3439 GFLOP/s
-step  2630/5000  loss 1.1125  lr 5.27e-04  |g| 0.488    85.6 ms    47866 tok/s   3439 GFLOP/s
-step  2640/5000  loss 1.1814  lr 5.24e-04  |g| 0.548    85.6 ms    47845 tok/s   3438 GFLOP/s
-step  2650/5000  loss 1.1534  lr 5.21e-04  |g| 0.569    85.5 ms    47891 tok/s   3441 GFLOP/s
-step  2660/5000  loss 1.1702  lr 5.18e-04  |g| 0.601    85.7 ms    47790 tok/s   3434 GFLOP/s
-step  2670/5000  loss 1.1705  lr 5.15e-04  |g| 0.535    85.6 ms    47877 tok/s   3440 GFLOP/s
-step  2680/5000  loss 1.0911  lr 5.13e-04  |g| 0.506    85.6 ms    47833 tok/s   3437 GFLOP/s
-step  2690/5000  loss 1.1249  lr 5.10e-04  |g| 0.514    85.6 ms    47846 tok/s   3438 GFLOP/s
-step  2700/5000  loss 1.1347  lr 5.07e-04  |g| 0.516    85.7 ms    47821 tok/s   3436 GFLOP/s
-  [eval] step 2700  val loss 1.5130  (20 batches)
-step  2710/5000  loss 1.1339  lr 5.04e-04  |g| 0.537    86.1 ms    47566 tok/s   3418 GFLOP/s
-step  2720/5000  loss 1.0677  lr 5.01e-04  |g| 0.496    85.7 ms    47819 tok/s   3436 GFLOP/s
-step  2730/5000  loss 1.1198  lr 4.98e-04  |g| 0.543    85.7 ms    47785 tok/s   3433 GFLOP/s
-step  2740/5000  loss 1.1135  lr 4.95e-04  |g| 0.539    85.9 ms    47660 tok/s   3424 GFLOP/s
-step  2750/5000  loss 1.0790  lr 4.92e-04  |g| 0.511    85.6 ms    47859 tok/s   3439 GFLOP/s
-step  2760/5000  loss 1.0404  lr 4.90e-04  |g| 0.490    85.8 ms    47755 tok/s   3431 GFLOP/s
-step  2770/5000  loss 1.0760  lr 4.87e-04  |g| 0.530    85.6 ms    47829 tok/s   3436 GFLOP/s
-step  2780/5000  loss 1.1321  lr 4.84e-04  |g| 0.611    85.7 ms    47776 tok/s   3433 GFLOP/s
-step  2790/5000  loss 1.1645  lr 4.81e-04  |g| 0.548    85.8 ms    47712 tok/s   3428 GFLOP/s
-step  2800/5000  loss 1.1625  lr 4.78e-04  |g| 0.564    85.6 ms    47850 tok/s   3438 GFLOP/s
-  [eval] step 2800  val loss 1.5286  (20 batches)
-step  2810/5000  loss 1.0917  lr 4.75e-04  |g| 0.502    85.6 ms    47835 tok/s   3437 GFLOP/s
-step  2820/5000  loss 1.1275  lr 4.72e-04  |g| 0.575    85.6 ms    47850 tok/s   3438 GFLOP/s
-step  2830/5000  loss 1.1133  lr 4.70e-04  |g| 0.545    85.7 ms    47769 tok/s   3432 GFLOP/s
-step  2840/5000  loss 1.1039  lr 4.67e-04  |g| 0.552    85.7 ms    47782 tok/s   3433 GFLOP/s
-step  2850/5000  loss 1.0604  lr 4.64e-04  |g| 0.515    85.7 ms    47821 tok/s   3436 GFLOP/s
-step  2860/5000  loss 1.0455  lr 4.61e-04  |g| 0.518    85.7 ms    47810 tok/s   3435 GFLOP/s
-step  2870/5000  loss 1.0690  lr 4.58e-04  |g| 0.521    85.8 ms    47757 tok/s   3431 GFLOP/s
-step  2880/5000  loss 1.0700  lr 4.55e-04  |g| 0.564    85.7 ms    47788 tok/s   3433 GFLOP/s
-step  2890/5000  loss 1.1440  lr 4.53e-04  |g| 0.578    85.7 ms    47778 tok/s   3433 GFLOP/s
-step  2900/5000  loss 1.0347  lr 4.50e-04  |g| 0.530    85.8 ms    47753 tok/s   3431 GFLOP/s
-  [eval] step 2900  val loss 1.5209  (20 batches)
-step  2910/5000  loss 1.0752  lr 4.47e-04  |g| 0.565    85.6 ms    47831 tok/s   3437 GFLOP/s
-step  2920/5000  loss 1.0272  lr 4.44e-04  |g| 0.535    85.8 ms    47750 tok/s   3431 GFLOP/s
-step  2930/5000  loss 1.1410  lr 4.41e-04  |g| 0.590    85.6 ms    47839 tok/s   3437 GFLOP/s
-step  2940/5000  loss 1.0430  lr 4.39e-04  |g| 0.575    85.6 ms    47825 tok/s   3436 GFLOP/s
-step  2950/5000  loss 1.0728  lr 4.36e-04  |g| 0.565    85.7 ms    47809 tok/s   3435 GFLOP/s
-step  2960/5000  loss 1.0842  lr 4.33e-04  |g| 0.596    85.7 ms    47782 tok/s   3433 GFLOP/s
-step  2970/5000  loss 1.0893  lr 4.30e-04  |g| 0.592    85.7 ms    47815 tok/s   3435 GFLOP/s
-step  2980/5000  loss 1.1076  lr 4.28e-04  |g| 0.548    85.9 ms    47708 tok/s   3428 GFLOP/s
-step  2990/5000  loss 1.1034  lr 4.25e-04  |g| 0.534    85.7 ms    47806 tok/s   3435 GFLOP/s
-step  3000/5000  loss 1.0727  lr 4.22e-04  |g| 0.569    85.8 ms    47759 tok/s   3431 GFLOP/s
-  [eval] step 3000  val loss 1.5346  (20 batches)
-  [sample] ------------------------------------------
- for earth of his child, and with that hour last
-Is brother man for his creation.
-
-PAULINA:
-And yet I know
-In mistress of these heads.
-
-LEONTES:
-Start now.
-
-PAULINA:
-Not away!
-
-LEONTES:
-Nay, ask her: all in my presence.
-Now much content so shall be past in my crown?
-
-LEONTES:
-This appear there, a letter than thought mround
-In bolds.
-
-PAULINA:
-I am sorry there in't, and that you say,
-As I say, wrat
-  ---------------------------------------------------
-step  3010/5000  loss 0.9842  lr 4.19e-04  |g| 0.554    85.6 ms    47839 tok/s   3437 GFLOP/s
-step  3020/5000  loss 1.0227  lr 4.16e-04  |g| 0.571    85.8 ms    47754 tok/s   3431 GFLOP/s
-step  3030/5000  loss 1.0574  lr 4.14e-04  |g| 0.589    85.7 ms    47802 tok/s   3434 GFLOP/s
-step  3040/5000  loss 1.0350  lr 4.11e-04  |g| 0.557    85.7 ms    47815 tok/s   3435 GFLOP/s
-step  3050/5000  loss 1.0371  lr 4.08e-04  |g| 0.550    85.7 ms    47818 tok/s   3436 GFLOP/s
-step  3060/5000  loss 1.0636  lr 4.05e-04  |g| 0.553    85.6 ms    47828 tok/s   3436 GFLOP/s
-step  3070/5000  loss 1.0084  lr 4.03e-04  |g| 0.564    85.7 ms    47799 tok/s   3434 GFLOP/s
-step  3080/5000  loss 1.0420  lr 4.00e-04  |g| 0.585    85.8 ms    47740 tok/s   3430 GFLOP/s
-step  3090/5000  loss 1.0732  lr 3.97e-04  |g| 0.595    85.6 ms    47841 tok/s   3437 GFLOP/s
-step  3100/5000  loss 1.0652  lr 3.95e-04  |g| 0.553    85.8 ms    47756 tok/s   3431 GFLOP/s
-  [eval] step 3100  val loss 1.5267  (20 batches)
-step  3110/5000  loss 1.0325  lr 3.92e-04  |g| 0.582    85.7 ms    47801 tok/s   3434 GFLOP/s
-step  3120/5000  loss 1.0402  lr 3.89e-04  |g| 0.578    85.7 ms    47795 tok/s   3434 GFLOP/s
-step  3130/5000  loss 1.0694  lr 3.86e-04  |g| 0.581    85.8 ms    47747 tok/s   3431 GFLOP/s
-step  3140/5000  loss 1.0492  lr 3.84e-04  |g| 0.598    85.7 ms    47775 tok/s   3433 GFLOP/s
-step  3150/5000  loss 1.0899  lr 3.81e-04  |g| 0.602    85.6 ms    47868 tok/s   3439 GFLOP/s
-step  3160/5000  loss 1.0581  lr 3.78e-04  |g| 0.582    85.8 ms    47763 tok/s   3432 GFLOP/s
-step  3170/5000  loss 0.9818  lr 3.76e-04  |g| 0.571    85.6 ms    47825 tok/s   3436 GFLOP/s
-step  3180/5000  loss 1.0272  lr 3.73e-04  |g| 0.589    85.7 ms    47772 tok/s   3432 GFLOP/s
-step  3190/5000  loss 1.0176  lr 3.70e-04  |g| 0.553    85.7 ms    47791 tok/s   3434 GFLOP/s
-step  3200/5000  loss 1.0725  lr 3.68e-04  |g| 0.621    85.6 ms    47827 tok/s   3436 GFLOP/s
-  [eval] step 3200  val loss 1.5531  (20 batches)
-step  3210/5000  loss 1.0531  lr 3.65e-04  |g| 0.611    85.6 ms    47823 tok/s   3436 GFLOP/s
-step  3220/5000  loss 1.0384  lr 3.63e-04  |g| 0.614    85.6 ms    47827 tok/s   3436 GFLOP/s
-step  3230/5000  loss 1.0545  lr 3.60e-04  |g| 0.583    85.7 ms    47811 tok/s   3435 GFLOP/s
-step  3240/5000  loss 1.0911  lr 3.57e-04  |g| 0.626    85.6 ms    47830 tok/s   3436 GFLOP/s
-step  3250/5000  loss 1.0123  lr 3.55e-04  |g| 0.615    85.7 ms    47787 tok/s   3433 GFLOP/s
-step  3260/5000  loss 1.0633  lr 3.52e-04  |g| 0.593    85.6 ms    47845 tok/s   3438 GFLOP/s
-step  3270/5000  loss 1.0059  lr 3.50e-04  |g| 0.628    85.8 ms    47756 tok/s   3431 GFLOP/s
-step  3280/5000  loss 1.0296  lr 3.47e-04  |g| 0.594    85.7 ms    47804 tok/s   3435 GFLOP/s
-step  3290/5000  loss 1.0037  lr 3.44e-04  |g| 0.616    85.7 ms    47782 tok/s   3433 GFLOP/s
-step  3300/5000  loss 1.0477  lr 3.42e-04  |g| 0.616    85.6 ms    47830 tok/s   3437 GFLOP/s
-  [eval] step 3300  val loss 1.5526  (20 batches)
-step  3310/5000  loss 1.0306  lr 3.39e-04  |g| 0.642    85.6 ms    47827 tok/s   3436 GFLOP/s
-step  3320/5000  loss 0.9743  lr 3.37e-04  |g| 0.603    85.7 ms    47782 tok/s   3433 GFLOP/s
-step  3330/5000  loss 1.0499  lr 3.34e-04  |g| 0.697    85.7 ms    47784 tok/s   3433 GFLOP/s
-step  3340/5000  loss 1.0614  lr 3.32e-04  |g| 0.622    85.9 ms    47701 tok/s   3427 GFLOP/s
-step  3350/5000  loss 1.0212  lr 3.29e-04  |g| 0.631    85.8 ms    47729 tok/s   3429 GFLOP/s
-step  3360/5000  loss 1.0294  lr 3.27e-04  |g| 0.687    85.7 ms    47791 tok/s   3434 GFLOP/s
-step  3370/5000  loss 1.0450  lr 3.24e-04  |g| 0.642    85.6 ms    47838 tok/s   3437 GFLOP/s
-step  3380/5000  loss 0.9539  lr 3.22e-04  |g| 0.622    85.6 ms    47829 tok/s   3436 GFLOP/s
-step  3390/5000  loss 0.9808  lr 3.19e-04  |g| 0.610    85.8 ms    47744 tok/s   3430 GFLOP/s
-step  3400/5000  loss 1.0215  lr 3.17e-04  |g| 0.652    85.8 ms    47740 tok/s   3430 GFLOP/s
-  [eval] step 3400  val loss 1.5829  (20 batches)
-step  3410/5000  loss 1.0815  lr 3.14e-04  |g| 0.685    85.8 ms    47742 tok/s   3430 GFLOP/s
-step  3420/5000  loss 0.9696  lr 3.12e-04  |g| 0.664    85.7 ms    47789 tok/s   3434 GFLOP/s
-step  3430/5000  loss 0.9530  lr 3.09e-04  |g| 0.597    85.7 ms    47777 tok/s   3433 GFLOP/s
-step  3440/5000  loss 0.9327  lr 3.07e-04  |g| 0.608    85.6 ms    47830 tok/s   3436 GFLOP/s
-step  3450/5000  loss 0.9400  lr 3.05e-04  |g| 0.625    85.7 ms    47781 tok/s   3433 GFLOP/s
-step  3460/5000  loss 0.9623  lr 3.02e-04  |g| 0.682    85.9 ms    47663 tok/s   3424 GFLOP/s
-step  3470/5000  loss 0.9526  lr 3.00e-04  |g| 0.639    85.7 ms    47778 tok/s   3433 GFLOP/s
-step  3480/5000  loss 0.9807  lr 2.97e-04  |g| 0.662    85.8 ms    47759 tok/s   3431 GFLOP/s
-step  3490/5000  loss 0.9598  lr 2.95e-04  |g| 0.683    85.6 ms    47834 tok/s   3437 GFLOP/s
-step  3500/5000  loss 0.9497  lr 2.93e-04  |g| 0.674    85.7 ms    47776 tok/s   3433 GFLOP/s
-  [eval] step 3500  val loss 1.5931  (20 batches)
-  [sample] ------------------------------------------
-
-Second Murderer:
-Why, I say, then, every well pollest ale.
-
-First Murderer:
-Mark you, nurse; why, foolbow, fell we return it well.
-
-JULIET:
-Then curse the boldness by farewell of the stone.
-
-FRIAR LAURENCE:
-Farewell!
-
-First Murderer:
-My lord, you must not speak to him, but that
-Which I cannot cut on him and beat
-The benefit of his daughter he hath done.
-
-ROMEO:
-Yea, my lord; I am too unless to us
-  ---------------------------------------------------
-step  3510/5000  loss 0.9252  lr 2.90e-04  |g| 0.667    85.8 ms    47765 tok/s   3432 GFLOP/s
-step  3520/5000  loss 0.9957  lr 2.88e-04  |g| 0.725    85.8 ms    47746 tok/s   3430 GFLOP/s
-step  3530/5000  loss 1.0163  lr 2.85e-04  |g| 0.681    85.8 ms    47761 tok/s   3432 GFLOP/s
-step  3540/5000  loss 0.9026  lr 2.83e-04  |g| 0.653    85.7 ms    47805 tok/s   3435 GFLOP/s
-step  3550/5000  loss 0.9152  lr 2.81e-04  |g| 0.662    85.7 ms    47802 tok/s   3434 GFLOP/s
-step  3560/5000  loss 0.9450  lr 2.79e-04  |g| 0.680    85.8 ms    47749 tok/s   3431 GFLOP/s
-step  3570/5000  loss 0.8950  lr 2.76e-04  |g| 0.634    85.7 ms    47810 tok/s   3435 GFLOP/s
-step  3580/5000  loss 0.9130  lr 2.74e-04  |g| 0.686    85.6 ms    47859 tok/s   3439 GFLOP/s
-step  3590/5000  loss 0.9534  lr 2.72e-04  |g| 0.664    85.6 ms    47844 tok/s   3437 GFLOP/s
-step  3600/5000  loss 1.0009  lr 2.69e-04  |g| 0.704    85.7 ms    47794 tok/s   3434 GFLOP/s
-  [eval] step 3600  val loss 1.5903  (20 batches)
-step  3610/5000  loss 0.9697  lr 2.67e-04  |g| 0.738    85.7 ms    47818 tok/s   3436 GFLOP/s
-step  3620/5000  loss 0.9676  lr 2.65e-04  |g| 0.720    85.7 ms    47786 tok/s   3433 GFLOP/s
-step  3630/5000  loss 0.8936  lr 2.63e-04  |g| 0.671    85.9 ms    47700 tok/s   3427 GFLOP/s
-step  3640/5000  loss 0.9067  lr 2.61e-04  |g| 0.666    85.6 ms    47842 tok/s   3437 GFLOP/s
-step  3650/5000  loss 0.9261  lr 2.58e-04  |g| 0.680    85.9 ms    47662 tok/s   3424 GFLOP/s
-step  3660/5000  loss 0.9241  lr 2.56e-04  |g| 0.729    85.8 ms    47765 tok/s   3432 GFLOP/s
-step  3670/5000  loss 0.9597  lr 2.54e-04  |g| 0.704    85.6 ms    47860 tok/s   3439 GFLOP/s
-step  3680/5000  loss 0.9177  lr 2.52e-04  |g| 0.703    85.7 ms    47779 tok/s   3433 GFLOP/s
-step  3690/5000  loss 0.9024  lr 2.50e-04  |g| 0.691    85.7 ms    47790 tok/s   3434 GFLOP/s
-step  3700/5000  loss 0.9018  lr 2.47e-04  |g| 0.690    85.6 ms    47856 tok/s   3438 GFLOP/s
-  [eval] step 3700  val loss 1.6157  (20 batches)
-step  3710/5000  loss 0.9384  lr 2.45e-04  |g| 0.717    85.7 ms    47820 tok/s   3436 GFLOP/s
-step  3720/5000  loss 0.9661  lr 2.43e-04  |g| 0.738    85.7 ms    47792 tok/s   3434 GFLOP/s
-step  3730/5000  loss 0.9169  lr 2.41e-04  |g| 0.724    85.8 ms    47749 tok/s   3431 GFLOP/s
-step  3740/5000  loss 0.9198  lr 2.39e-04  |g| 0.695    85.7 ms    47797 tok/s   3434 GFLOP/s
-step  3750/5000  loss 0.9569  lr 2.37e-04  |g| 0.747    85.8 ms    47761 tok/s   3432 GFLOP/s
-step  3760/5000  loss 0.8087  lr 2.35e-04  |g| 0.702    85.6 ms    47831 tok/s   3437 GFLOP/s
-step  3770/5000  loss 0.9115  lr 2.33e-04  |g| 0.710    85.8 ms    47725 tok/s   3429 GFLOP/s
-step  3780/5000  loss 0.8639  lr 2.31e-04  |g| 0.707    85.9 ms    47689 tok/s   3426 GFLOP/s
-step  3790/5000  loss 0.9004  lr 2.29e-04  |g| 0.741    85.8 ms    47749 tok/s   3431 GFLOP/s
-step  3800/5000  loss 0.8941  lr 2.27e-04  |g| 0.719    85.7 ms    47815 tok/s   3435 GFLOP/s
-  [eval] step 3800  val loss 1.6387  (20 batches)
-step  3810/5000  loss 0.9144  lr 2.25e-04  |g| 0.741    85.6 ms    47823 tok/s   3436 GFLOP/s
-step  3820/5000  loss 0.8368  lr 2.23e-04  |g| 0.697    85.8 ms    47761 tok/s   3432 GFLOP/s
-step  3830/5000  loss 0.9886  lr 2.21e-04  |g| 0.815    85.6 ms    47829 tok/s   3436 GFLOP/s
-step  3840/5000  loss 0.9216  lr 2.19e-04  |g| 0.741    85.7 ms    47774 tok/s   3432 GFLOP/s
-step  3850/5000  loss 0.8347  lr 2.17e-04  |g| 0.690    85.8 ms    47734 tok/s   3430 GFLOP/s
-step  3860/5000  loss 0.8749  lr 2.15e-04  |g| 0.738    85.7 ms    47788 tok/s   3433 GFLOP/s
-step  3870/5000  loss 0.9035  lr 2.13e-04  |g| 0.736    85.7 ms    47802 tok/s   3434 GFLOP/s
-step  3880/5000  loss 0.8389  lr 2.11e-04  |g| 0.704    85.7 ms    47802 tok/s   3434 GFLOP/s
-step  3890/5000  loss 0.7957  lr 2.09e-04  |g| 0.694    85.8 ms    47762 tok/s   3432 GFLOP/s
-step  3900/5000  loss 0.8793  lr 2.07e-04  |g| 0.767    85.7 ms    47787 tok/s   3433 GFLOP/s
-  [eval] step 3900  val loss 1.6509  (20 batches)
-step  3910/5000  loss 0.8739  lr 2.05e-04  |g| 0.741    85.7 ms    47782 tok/s   3433 GFLOP/s
-step  3920/5000  loss 0.8583  lr 2.04e-04  |g| 0.757    85.8 ms    47760 tok/s   3431 GFLOP/s
-step  3930/5000  loss 0.8721  lr 2.02e-04  |g| 0.794    85.8 ms    47766 tok/s   3432 GFLOP/s
-step  3940/5000  loss 0.8509  lr 2.00e-04  |g| 0.763    85.8 ms    47755 tok/s   3431 GFLOP/s
-step  3950/5000  loss 0.8421  lr 1.98e-04  |g| 0.755    85.8 ms    47739 tok/s   3430 GFLOP/s
-step  3960/5000  loss 0.8979  lr 1.96e-04  |g| 0.800    85.7 ms    47782 tok/s   3433 GFLOP/s
-step  3970/5000  loss 0.9289  lr 1.95e-04  |g| 0.870    85.7 ms    47793 tok/s   3434 GFLOP/s
-step  3980/5000  loss 0.7889  lr 1.93e-04  |g| 0.750    85.7 ms    47795 tok/s   3434 GFLOP/s
-step  3990/5000  loss 0.8463  lr 1.91e-04  |g| 0.786    85.6 ms    47837 tok/s   3437 GFLOP/s
-step  4000/5000  loss 0.9196  lr 1.89e-04  |g| 0.833    85.8 ms    47723 tok/s   3429 GFLOP/s
-  [eval] step 4000  val loss 1.6748  (20 batches)
-  [sample] ------------------------------------------
-As Oxford shall King Edward king, from the friend,
-And brief from thy heart brother to thee,
-Thy father be thered in thy court of Margaret?
-
-EXETER:
-And, for King Henry, be it not to stay.
+Lord,
+O, i' the rottucks brough's sent from shall merry
+That with the shall says more for sorrow
+And rom to male-door hum by the distom,
+That wine of as good buy should forther come
+Better to cares and it with
+That you make her pay to be come, my and not fore.
 
 KING HENRY VI:
-Pardon me, son: a corse, a woman, sirs, dost fork.
-
-YORK:
-So flatter you have three sons to follow my blood
-What makes the case; and therefore be not of
-your purpose.
-
-POMPEY:
-I will give you mor
+My mine hone?
+So a honour been of your comest be to this?
+She had well withing hapeture,
+And him in Hastine it with do no w
   ---------------------------------------------------
-step  4010/5000  loss 0.8687  lr 1.88e-04  |g| 0.802    85.7 ms    47771 tok/s   3432 GFLOP/s
-step  4020/5000  loss 0.8177  lr 1.86e-04  |g| 0.735    85.6 ms    47833 tok/s   3437 GFLOP/s
-step  4030/5000  loss 0.8173  lr 1.84e-04  |g| 0.765    85.8 ms    47744 tok/s   3430 GFLOP/s
-step  4040/5000  loss 0.7493  lr 1.83e-04  |g| 0.771    85.8 ms    47757 tok/s   3431 GFLOP/s
-step  4050/5000  loss 0.8177  lr 1.81e-04  |g| 0.793    85.6 ms    47870 tok/s   3439 GFLOP/s
-step  4060/5000  loss 0.8316  lr 1.79e-04  |g| 0.795    85.7 ms    47793 tok/s   3434 GFLOP/s
-step  4070/5000  loss 0.8222  lr 1.78e-04  |g| 0.765    85.7 ms    47815 tok/s   3435 GFLOP/s
-step  4080/5000  loss 0.8121  lr 1.76e-04  |g| 0.805    85.6 ms    47842 tok/s   3437 GFLOP/s
-step  4090/5000  loss 0.8653  lr 1.74e-04  |g| 0.852    85.6 ms    47826 tok/s   3436 GFLOP/s
-step  4100/5000  loss 0.7886  lr 1.73e-04  |g| 0.792    85.7 ms    47819 tok/s   3436 GFLOP/s
-  [eval] step 4100  val loss 1.6962  (20 batches)
-step  4110/5000  loss 0.8299  lr 1.71e-04  |g| 0.839    85.5 ms    47888 tok/s   3441 GFLOP/s
-step  4120/5000  loss 0.7630  lr 1.70e-04  |g| 0.780    85.8 ms    47758 tok/s   3431 GFLOP/s
-step  4130/5000  loss 0.8097  lr 1.68e-04  |g| 0.798    85.7 ms    47786 tok/s   3433 GFLOP/s
-step  4140/5000  loss 0.8391  lr 1.67e-04  |g| 0.846    85.7 ms    47770 tok/s   3432 GFLOP/s
-step  4150/5000  loss 0.7553  lr 1.65e-04  |g| 0.777    85.6 ms    47851 tok/s   3438 GFLOP/s
-step  4160/5000  loss 0.7442  lr 1.64e-04  |g| 0.809    85.7 ms    47806 tok/s   3435 GFLOP/s
-step  4170/5000  loss 0.7843  lr 1.62e-04  |g| 0.774    85.7 ms    47790 tok/s   3434 GFLOP/s
-step  4180/5000  loss 0.8153  lr 1.61e-04  |g| 0.841    85.7 ms    47789 tok/s   3434 GFLOP/s
-step  4190/5000  loss 0.8182  lr 1.59e-04  |g| 0.813    85.7 ms    47797 tok/s   3434 GFLOP/s
-step  4200/5000  loss 0.8331  lr 1.58e-04  |g| 0.842    85.6 ms    47857 tok/s   3438 GFLOP/s
-  [eval] step 4200  val loss 1.7141  (20 batches)
-step  4210/5000  loss 0.7936  lr 1.56e-04  |g| 0.804    85.7 ms    47816 tok/s   3435 GFLOP/s
-step  4220/5000  loss 0.7415  lr 1.55e-04  |g| 0.794    85.7 ms    47785 tok/s   3433 GFLOP/s
-step  4230/5000  loss 0.7793  lr 1.54e-04  |g| 0.814    85.7 ms    47801 tok/s   3434 GFLOP/s
-step  4240/5000  loss 0.8442  lr 1.52e-04  |g| 0.897    85.7 ms    47778 tok/s   3433 GFLOP/s
-step  4250/5000  loss 0.7867  lr 1.51e-04  |g| 0.916    85.8 ms    47754 tok/s   3431 GFLOP/s
-step  4260/5000  loss 0.7510  lr 1.50e-04  |g| 0.839    85.7 ms    47779 tok/s   3433 GFLOP/s
-step  4270/5000  loss 0.7841  lr 1.48e-04  |g| 0.832    86.0 ms    47628 tok/s   3422 GFLOP/s
-step  4280/5000  loss 0.8132  lr 1.47e-04  |g| 0.883    85.7 ms    47771 tok/s   3432 GFLOP/s
-step  4290/5000  loss 0.8892  lr 1.46e-04  |g| 0.959    85.6 ms    47831 tok/s   3437 GFLOP/s
-step  4300/5000  loss 0.8562  lr 1.45e-04  |g| 1.013    85.7 ms    47791 tok/s   3434 GFLOP/s
-  [eval] step 4300  val loss 1.7445  (20 batches)
-step  4310/5000  loss 0.7766  lr 1.43e-04  |g| 0.857    85.8 ms    47745 tok/s   3430 GFLOP/s
-step  4320/5000  loss 0.7373  lr 1.42e-04  |g| 0.852    85.7 ms    47803 tok/s   3435 GFLOP/s
-step  4330/5000  loss 0.7751  lr 1.41e-04  |g| 0.863    85.7 ms    47808 tok/s   3435 GFLOP/s
-step  4340/5000  loss 0.7201  lr 1.40e-04  |g| 0.834    85.8 ms    47718 tok/s   3428 GFLOP/s
-step  4350/5000  loss 0.7994  lr 1.39e-04  |g| 0.883    85.7 ms    47809 tok/s   3435 GFLOP/s
-step  4360/5000  loss 0.6948  lr 1.37e-04  |g| 0.891    85.7 ms    47795 tok/s   3434 GFLOP/s
-step  4370/5000  loss 0.7250  lr 1.36e-04  |g| 0.842    85.7 ms    47811 tok/s   3435 GFLOP/s
-step  4380/5000  loss 0.8418  lr 1.35e-04  |g| 0.914    85.7 ms    47768 tok/s   3432 GFLOP/s
-step  4390/5000  loss 0.7291  lr 1.34e-04  |g| 0.826    85.7 ms    47816 tok/s   3435 GFLOP/s
-step  4400/5000  loss 0.7159  lr 1.33e-04  |g| 0.872    85.7 ms    47795 tok/s   3434 GFLOP/s
-  [eval] step 4400  val loss 1.7682  (20 batches)
-step  4410/5000  loss 0.6417  lr 1.32e-04  |g| 0.800    85.7 ms    47774 tok/s   3432 GFLOP/s
-step  4420/5000  loss 0.7688  lr 1.31e-04  |g| 0.915    85.6 ms    47837 tok/s   3437 GFLOP/s
-step  4430/5000  loss 0.7418  lr 1.30e-04  |g| 0.858    85.7 ms    47787 tok/s   3433 GFLOP/s
-step  4440/5000  loss 0.7831  lr 1.29e-04  |g| 1.006    85.6 ms    47829 tok/s   3436 GFLOP/s
-step  4450/5000  loss 0.7656  lr 1.28e-04  |g| 0.925    85.7 ms    47802 tok/s   3434 GFLOP/s
-step  4460/5000  loss 0.8463  lr 1.27e-04  |g| 0.978    85.7 ms    47781 tok/s   3433 GFLOP/s
-step  4470/5000  loss 0.7917  lr 1.26e-04  |g| 0.958    85.7 ms    47815 tok/s   3435 GFLOP/s
-step  4480/5000  loss 0.7449  lr 1.25e-04  |g| 0.912    85.7 ms    47812 tok/s   3435 GFLOP/s
-step  4490/5000  loss 0.7827  lr 1.24e-04  |g| 0.912    85.7 ms    47805 tok/s   3435 GFLOP/s
-step  4500/5000  loss 0.7670  lr 1.23e-04  |g| 0.916    85.8 ms    47752 tok/s   3431 GFLOP/s
-  [eval] step 4500  val loss 1.8050  (20 batches)
+step  1010/5000  loss 1.4885  lr 9.26e-04  |g| 0.549    86.1 ms    47595 tok/s   3420 GFLOP/s
+step  1020/5000  loss 1.4786  lr 9.24e-04  |g| 0.609    86.2 ms    47543 tok/s   3416 GFLOP/s
+step  1030/5000  loss 1.5118  lr 9.22e-04  |g| 0.661    86.2 ms    47492 tok/s   3412 GFLOP/s
+step  1040/5000  loss 1.4772  lr 9.21e-04  |g| 0.674    86.2 ms    47506 tok/s   3413 GFLOP/s
+step  1050/5000  loss 1.4894  lr 9.19e-04  |g| 0.534    86.2 ms    47513 tok/s   3414 GFLOP/s
+step  1060/5000  loss 1.4050  lr 9.17e-04  |g| 0.605    86.2 ms    47513 tok/s   3414 GFLOP/s
+step  1070/5000  loss 1.4606  lr 9.16e-04  |g| 0.514    86.1 ms    47592 tok/s   3419 GFLOP/s
+step  1080/5000  loss 1.4215  lr 9.14e-04  |g| 0.544    86.2 ms    47527 tok/s   3415 GFLOP/s
+step  1090/5000  loss 1.4941  lr 9.12e-04  |g| 0.596    86.1 ms    47552 tok/s   3416 GFLOP/s
+step  1100/5000  loss 1.3518  lr 9.11e-04  |g| 0.654    86.2 ms    47535 tok/s   3415 GFLOP/s
+  [eval] step 1100  val loss 1.6381  (20 batches)  <- best
+step  1110/5000  loss 1.3854  lr 9.09e-04  |g| 0.539    86.2 ms    47514 tok/s   3414 GFLOP/s
+step  1120/5000  loss 1.3770  lr 9.07e-04  |g| 0.568    86.1 ms    47551 tok/s   3416 GFLOP/s
+step  1130/5000  loss 1.4366  lr 9.05e-04  |g| 0.602    86.2 ms    47517 tok/s   3414 GFLOP/s
+step  1140/5000  loss 1.5008  lr 9.04e-04  |g| 0.572    86.2 ms    47505 tok/s   3413 GFLOP/s
+step  1150/5000  loss 1.3900  lr 9.02e-04  |g| 0.516    86.2 ms    47501 tok/s   3413 GFLOP/s
+step  1160/5000  loss 1.4497  lr 9.00e-04  |g| 0.613    86.2 ms    47543 tok/s   3416 GFLOP/s
+step  1170/5000  loss 1.4085  lr 8.98e-04  |g| 0.555    86.1 ms    47552 tok/s   3417 GFLOP/s
+step  1180/5000  loss 1.3886  lr 8.96e-04  |g| 0.486    86.1 ms    47578 tok/s   3418 GFLOP/s
+step  1190/5000  loss 1.4751  lr 8.95e-04  |g| 0.601    86.0 ms    47602 tok/s   3420 GFLOP/s
+step  1200/5000  loss 1.4079  lr 8.93e-04  |g| 0.519    86.2 ms    47542 tok/s   3416 GFLOP/s
+  [eval] step 1200  val loss 1.6306  (20 batches)  <- best
+step  1210/5000  loss 1.3886  lr 8.91e-04  |g| 0.559    86.1 ms    47552 tok/s   3416 GFLOP/s
+step  1220/5000  loss 1.3874  lr 8.89e-04  |g| 0.569    86.2 ms    47504 tok/s   3413 GFLOP/s
+step  1230/5000  loss 1.3611  lr 8.87e-04  |g| 0.528    86.2 ms    47500 tok/s   3413 GFLOP/s
+step  1240/5000  loss 1.3725  lr 8.85e-04  |g| 0.534    86.1 ms    47573 tok/s   3418 GFLOP/s
+step  1250/5000  loss 1.3682  lr 8.83e-04  |g| 0.523    86.2 ms    47524 tok/s   3415 GFLOP/s
+step  1260/5000  loss 1.3856  lr 8.81e-04  |g| 0.576    86.1 ms    47565 tok/s   3417 GFLOP/s
+step  1270/5000  loss 1.4100  lr 8.79e-04  |g| 0.543    86.3 ms    47487 tok/s   3412 GFLOP/s
+step  1280/5000  loss 1.3648  lr 8.77e-04  |g| 0.542    86.1 ms    47545 tok/s   3416 GFLOP/s
+step  1290/5000  loss 1.4093  lr 8.75e-04  |g| 0.558    86.2 ms    47517 tok/s   3414 GFLOP/s
+step  1300/5000  loss 1.4433  lr 8.73e-04  |g| 0.554    86.1 ms    47558 tok/s   3417 GFLOP/s
+  [eval] step 1300  val loss 1.5958  (20 batches)  <- best
+step  1310/5000  loss 1.3825  lr 8.71e-04  |g| 0.560    86.2 ms    47517 tok/s   3414 GFLOP/s
+step  1320/5000  loss 1.3788  lr 8.69e-04  |g| 0.572    86.2 ms    47495 tok/s   3412 GFLOP/s
+step  1330/5000  loss 1.3903  lr 8.67e-04  |g| 0.562    86.2 ms    47529 tok/s   3415 GFLOP/s
+step  1340/5000  loss 1.4033  lr 8.65e-04  |g| 0.554    86.2 ms    47540 tok/s   3416 GFLOP/s
+step  1350/5000  loss 1.3839  lr 8.63e-04  |g| 0.532    86.1 ms    47556 tok/s   3417 GFLOP/s
+step  1360/5000  loss 1.4225  lr 8.61e-04  |g| 0.527    86.2 ms    47542 tok/s   3416 GFLOP/s
+step  1370/5000  loss 1.4250  lr 8.59e-04  |g| 0.532    86.1 ms    47587 tok/s   3419 GFLOP/s
+step  1380/5000  loss 1.3570  lr 8.57e-04  |g| 0.567    86.1 ms    47548 tok/s   3416 GFLOP/s
+step  1390/5000  loss 1.3325  lr 8.55e-04  |g| 0.514    86.3 ms    47481 tok/s   3411 GFLOP/s
+step  1400/5000  loss 1.3736  lr 8.53e-04  |g| 0.527    86.1 ms    47561 tok/s   3417 GFLOP/s
+  [eval] step 1400  val loss 1.5842  (20 batches)  <- best
+step  1410/5000  loss 1.3733  lr 8.50e-04  |g| 0.538    86.2 ms    47521 tok/s   3414 GFLOP/s
+step  1420/5000  loss 1.3991  lr 8.48e-04  |g| 0.567    86.2 ms    47507 tok/s   3413 GFLOP/s
+step  1430/5000  loss 1.4234  lr 8.46e-04  |g| 0.563    86.2 ms    47509 tok/s   3413 GFLOP/s
+step  1440/5000  loss 1.3268  lr 8.44e-04  |g| 0.531    86.1 ms    47547 tok/s   3416 GFLOP/s
+step  1450/5000  loss 1.3284  lr 8.42e-04  |g| 0.548    86.1 ms    47555 tok/s   3417 GFLOP/s
+step  1460/5000  loss 1.3074  lr 8.39e-04  |g| 0.556    86.2 ms    47521 tok/s   3414 GFLOP/s
+step  1470/5000  loss 1.3623  lr 8.37e-04  |g| 0.522    86.1 ms    47573 tok/s   3418 GFLOP/s
+step  1480/5000  loss 1.3814  lr 8.35e-04  |g| 0.570    86.1 ms    47548 tok/s   3416 GFLOP/s
+step  1490/5000  loss 1.3863  lr 8.33e-04  |g| 0.570    86.2 ms    47525 tok/s   3415 GFLOP/s
+step  1500/5000  loss 1.3557  lr 8.31e-04  |g| 0.540    86.1 ms    47579 tok/s   3418 GFLOP/s
+  [eval] step 1500  val loss 1.5836  (20 batches)  <- best
   [sample] ------------------------------------------
-Of something odds, my lord, to dissembly.
+Shall get her those knop you: when you what you troath
+I was make us accout our country's poor daughter.
 
-WARWICK:
-Ay, then I am son a mouser discovery.
+COMINIUS:
+It is the noble heart to him, and leave you with Came
+Signior To me burn himourn fill'd and home, and long,
+And for what court the shall wind on our fance.
 
-KING LEWIS XI:
-And what to?
-And what stronger Warwick was more means?
-Darray the trumpets, I have able to hear
-As that is beheld-scoreless disease.
+MARCIUS:
+Come his good More o'ful but to-days:
+I make her dread to courty to on their falsehood,
+Unless lants of you out.
 
-WARWICK:
-What say he, my lord? and I will not be prepared;
-And be the vex'd that is no toight but shadow.
-
-KING LEWIS XI:
-What will your husband marshal, and do
+CORI
   ---------------------------------------------------
-step  4510/5000  loss 0.7119  lr 1.22e-04  |g| 0.889    85.7 ms    47786 tok/s   3433 GFLOP/s
-step  4520/5000  loss 0.7443  lr 1.21e-04  |g| 0.961    85.8 ms    47758 tok/s   3431 GFLOP/s
-step  4530/5000  loss 0.8045  lr 1.20e-04  |g| 0.959    85.8 ms    47756 tok/s   3431 GFLOP/s
-step  4540/5000  loss 0.7536  lr 1.19e-04  |g| 0.945    85.7 ms    47819 tok/s   3436 GFLOP/s
-step  4550/5000  loss 0.7832  lr 1.19e-04  |g| 1.007    85.7 ms    47821 tok/s   3436 GFLOP/s
-step  4560/5000  loss 0.7169  lr 1.18e-04  |g| 0.926    85.7 ms    47789 tok/s   3434 GFLOP/s
-step  4570/5000  loss 0.6946  lr 1.17e-04  |g| 0.872    85.6 ms    47876 tok/s   3440 GFLOP/s
-step  4580/5000  loss 0.7725  lr 1.16e-04  |g| 1.005    85.8 ms    47763 tok/s   3432 GFLOP/s
-step  4590/5000  loss 0.7170  lr 1.15e-04  |g| 0.943    85.7 ms    47822 tok/s   3436 GFLOP/s
-step  4600/5000  loss 0.6930  lr 1.15e-04  |g| 0.898    85.7 ms    47822 tok/s   3436 GFLOP/s
-  [eval] step 4600  val loss 1.8365  (20 batches)
-step  4610/5000  loss 0.7145  lr 1.14e-04  |g| 0.938    85.7 ms    47781 tok/s   3433 GFLOP/s
-step  4620/5000  loss 0.7152  lr 1.13e-04  |g| 0.921    85.6 ms    47835 tok/s   3437 GFLOP/s
-step  4630/5000  loss 0.7150  lr 1.13e-04  |g| 0.966    85.8 ms    47764 tok/s   3432 GFLOP/s
-step  4640/5000  loss 0.7234  lr 1.12e-04  |g| 0.989    85.6 ms    47828 tok/s   3436 GFLOP/s
-step  4650/5000  loss 0.7183  lr 1.11e-04  |g| 0.960    85.7 ms    47805 tok/s   3435 GFLOP/s
-step  4660/5000  loss 0.7282  lr 1.11e-04  |g| 0.972    85.7 ms    47775 tok/s   3433 GFLOP/s
-step  4670/5000  loss 0.7366  lr 1.10e-04  |g| 0.967    85.7 ms    47795 tok/s   3434 GFLOP/s
-step  4680/5000  loss 0.6558  lr 1.09e-04  |g| 0.896    85.7 ms    47796 tok/s   3434 GFLOP/s
-step  4690/5000  loss 0.6505  lr 1.09e-04  |g| 0.916    85.7 ms    47788 tok/s   3433 GFLOP/s
-step  4700/5000  loss 0.7137  lr 1.08e-04  |g| 0.954    85.8 ms    47761 tok/s   3432 GFLOP/s
-  [eval] step 4700  val loss 1.8510  (20 batches)
-step  4710/5000  loss 0.6468  lr 1.08e-04  |g| 0.909    85.7 ms    47777 tok/s   3433 GFLOP/s
-step  4720/5000  loss 0.6746  lr 1.07e-04  |g| 0.892    85.7 ms    47777 tok/s   3433 GFLOP/s
-step  4730/5000  loss 0.7270  lr 1.07e-04  |g| 0.939    85.7 ms    47770 tok/s   3432 GFLOP/s
-step  4740/5000  loss 0.6441  lr 1.06e-04  |g| 0.839    85.8 ms    47763 tok/s   3432 GFLOP/s
-step  4750/5000  loss 0.7357  lr 1.06e-04  |g| 1.049    85.7 ms    47779 tok/s   3433 GFLOP/s
-step  4760/5000  loss 0.8073  lr 1.05e-04  |g| 1.070    85.6 ms    47868 tok/s   3439 GFLOP/s
-step  4770/5000  loss 0.7265  lr 1.05e-04  |g| 1.003    85.8 ms    47760 tok/s   3431 GFLOP/s
-step  4780/5000  loss 0.6872  lr 1.04e-04  |g| 0.967    85.7 ms    47816 tok/s   3435 GFLOP/s
-step  4790/5000  loss 0.7409  lr 1.04e-04  |g| 1.036    85.8 ms    47751 tok/s   3431 GFLOP/s
-step  4800/5000  loss 0.6928  lr 1.04e-04  |g| 0.940    85.7 ms    47791 tok/s   3434 GFLOP/s
-  [eval] step 4800  val loss 1.8664  (20 batches)
-step  4810/5000  loss 0.6371  lr 1.03e-04  |g| 0.980    85.8 ms    47758 tok/s   3431 GFLOP/s
-step  4820/5000  loss 0.6964  lr 1.03e-04  |g| 1.073    85.6 ms    47823 tok/s   3436 GFLOP/s
-step  4830/5000  loss 0.7229  lr 1.03e-04  |g| 1.025    85.6 ms    47834 tok/s   3437 GFLOP/s
-step  4840/5000  loss 0.6619  lr 1.02e-04  |g| 0.946    85.7 ms    47788 tok/s   3433 GFLOP/s
-step  4850/5000  loss 0.6600  lr 1.02e-04  |g| 0.969    85.8 ms    47752 tok/s   3431 GFLOP/s
-step  4860/5000  loss 0.6688  lr 1.02e-04  |g| 0.962    85.9 ms    47691 tok/s   3427 GFLOP/s
-step  4870/5000  loss 0.6985  lr 1.02e-04  |g| 1.057    85.7 ms    47807 tok/s   3435 GFLOP/s
-step  4880/5000  loss 0.6256  lr 1.01e-04  |g| 0.936    85.7 ms    47778 tok/s   3433 GFLOP/s
-step  4890/5000  loss 0.6335  lr 1.01e-04  |g| 0.967    85.7 ms    47767 tok/s   3432 GFLOP/s
-step  4900/5000  loss 0.6517  lr 1.01e-04  |g| 0.981    85.6 ms    47833 tok/s   3437 GFLOP/s
-  [eval] step 4900  val loss 1.9079  (20 batches)
-step  4910/5000  loss 0.6179  lr 1.01e-04  |g| 0.885    85.7 ms    47787 tok/s   3433 GFLOP/s
-step  4920/5000  loss 0.7263  lr 1.01e-04  |g| 1.059    85.7 ms    47811 tok/s   3435 GFLOP/s
-step  4930/5000  loss 0.5794  lr 1.00e-04  |g| 0.915    85.8 ms    47720 tok/s   3429 GFLOP/s
-step  4940/5000  loss 0.6492  lr 1.00e-04  |g| 0.963    85.7 ms    47784 tok/s   3433 GFLOP/s
-step  4950/5000  loss 0.6405  lr 1.00e-04  |g| 0.984    85.7 ms    47767 tok/s   3432 GFLOP/s
-step  4960/5000  loss 0.6036  lr 1.00e-04  |g| 0.971    85.8 ms    47754 tok/s   3431 GFLOP/s
-step  4970/5000  loss 0.6222  lr 1.00e-04  |g| 1.038    85.7 ms    47810 tok/s   3435 GFLOP/s
-step  4980/5000  loss 0.6352  lr 1.00e-04  |g| 1.031    85.8 ms    47721 tok/s   3429 GFLOP/s
-step  4990/5000  loss 0.7008  lr 1.00e-04  |g| 1.144    85.7 ms    47783 tok/s   3433 GFLOP/s
-step  5000/5000  loss 0.5905  lr 1.00e-04  |g| 0.964    85.6 ms    47863 tok/s   3439 GFLOP/s
-  [eval] step 5000  val loss 1.9317  (20 batches)
+step  1510/5000  loss 1.3414  lr 8.28e-04  |g| 0.523    86.1 ms    47557 tok/s   3417 GFLOP/s
+step  1520/5000  loss 1.3625  lr 8.26e-04  |g| 0.469    86.2 ms    47518 tok/s   3414 GFLOP/s
+step  1530/5000  loss 1.2414  lr 8.24e-04  |g| 0.490    86.1 ms    47565 tok/s   3417 GFLOP/s
+step  1540/5000  loss 1.3682  lr 8.21e-04  |g| 0.560    86.3 ms    47459 tok/s   3410 GFLOP/s
+step  1550/5000  loss 1.3713  lr 8.19e-04  |g| 0.486    86.1 ms    47560 tok/s   3417 GFLOP/s
+step  1560/5000  loss 1.3712  lr 8.17e-04  |g| 0.516    86.3 ms    47483 tok/s   3412 GFLOP/s
+step  1570/5000  loss 1.3200  lr 8.15e-04  |g| 0.531    86.2 ms    47540 tok/s   3416 GFLOP/s
+step  1580/5000  loss 1.2850  lr 8.12e-04  |g| 0.488    86.2 ms    47513 tok/s   3414 GFLOP/s
+step  1590/5000  loss 1.3576  lr 8.10e-04  |g| 0.552    86.1 ms    47574 tok/s   3418 GFLOP/s
+step  1600/5000  loss 1.2997  lr 8.07e-04  |g| 0.532    86.2 ms    47518 tok/s   3414 GFLOP/s
+  [eval] step 1600  val loss 1.5698  (20 batches)  <- best
+step  1610/5000  loss 1.2973  lr 8.05e-04  |g| 0.530    86.2 ms    47530 tok/s   3415 GFLOP/s
+step  1620/5000  loss 1.2773  lr 8.03e-04  |g| 0.496    86.2 ms    47526 tok/s   3415 GFLOP/s
+step  1630/5000  loss 1.3465  lr 8.00e-04  |g| 0.537    86.2 ms    47531 tok/s   3415 GFLOP/s
+step  1640/5000  loss 1.3320  lr 7.98e-04  |g| 0.524    86.1 ms    47570 tok/s   3418 GFLOP/s
+step  1650/5000  loss 1.3572  lr 7.95e-04  |g| 0.498    86.2 ms    47499 tok/s   3413 GFLOP/s
+step  1660/5000  loss 1.2793  lr 7.93e-04  |g| 0.478    86.2 ms    47542 tok/s   3416 GFLOP/s
+step  1670/5000  loss 1.3039  lr 7.91e-04  |g| 0.480    86.2 ms    47540 tok/s   3416 GFLOP/s
+step  1680/5000  loss 1.3495  lr 7.88e-04  |g| 0.585    86.3 ms    47472 tok/s   3411 GFLOP/s
+step  1690/5000  loss 1.2585  lr 7.86e-04  |g| 0.555    86.1 ms    47556 tok/s   3417 GFLOP/s
+step  1700/5000  loss 1.3528  lr 7.83e-04  |g| 0.503    86.1 ms    47554 tok/s   3417 GFLOP/s
+  [eval] step 1700  val loss 1.5613  (20 batches)  <- best
+step  1710/5000  loss 1.3040  lr 7.81e-04  |g| 0.532    86.4 ms    47401 tok/s   3406 GFLOP/s
+step  1720/5000  loss 1.3709  lr 7.78e-04  |g| 0.563    86.1 ms    47580 tok/s   3419 GFLOP/s
+step  1730/5000  loss 1.3806  lr 7.76e-04  |g| 0.540    86.2 ms    47530 tok/s   3415 GFLOP/s
+step  1740/5000  loss 1.3005  lr 7.73e-04  |g| 0.490    86.2 ms    47541 tok/s   3416 GFLOP/s
+step  1750/5000  loss 1.2688  lr 7.71e-04  |g| 0.472    86.1 ms    47592 tok/s   3419 GFLOP/s
+step  1760/5000  loss 1.3169  lr 7.68e-04  |g| 0.525    86.1 ms    47551 tok/s   3416 GFLOP/s
+step  1770/5000  loss 1.3399  lr 7.66e-04  |g| 0.535    86.1 ms    47562 tok/s   3417 GFLOP/s
+step  1780/5000  loss 1.3052  lr 7.63e-04  |g| 0.516    86.2 ms    47511 tok/s   3414 GFLOP/s
+step  1790/5000  loss 1.2406  lr 7.61e-04  |g| 0.456    86.1 ms    47588 tok/s   3419 GFLOP/s
+step  1800/5000  loss 1.2846  lr 7.58e-04  |g| 0.503    86.2 ms    47492 tok/s   3412 GFLOP/s
+  [eval] step 1800  val loss 1.5268  (20 batches)  <- best
+step  1810/5000  loss 1.2832  lr 7.56e-04  |g| 0.500    86.1 ms    47546 tok/s   3416 GFLOP/s
+step  1820/5000  loss 1.2750  lr 7.53e-04  |g| 0.490    86.3 ms    47485 tok/s   3412 GFLOP/s
+step  1830/5000  loss 1.2731  lr 7.50e-04  |g| 0.528    86.1 ms    47558 tok/s   3417 GFLOP/s
+step  1840/5000  loss 1.3252  lr 7.48e-04  |g| 0.496    86.2 ms    47531 tok/s   3415 GFLOP/s
+step  1850/5000  loss 1.2557  lr 7.45e-04  |g| 0.503    86.2 ms    47518 tok/s   3414 GFLOP/s
+step  1860/5000  loss 1.3096  lr 7.43e-04  |g| 0.523    86.2 ms    47508 tok/s   3413 GFLOP/s
+step  1870/5000  loss 1.2869  lr 7.40e-04  |g| 0.585    86.2 ms    47525 tok/s   3415 GFLOP/s
+step  1880/5000  loss 1.2660  lr 7.37e-04  |g| 0.537    86.2 ms    47515 tok/s   3414 GFLOP/s
+step  1890/5000  loss 1.2686  lr 7.35e-04  |g| 0.548    86.3 ms    47485 tok/s   3412 GFLOP/s
+step  1900/5000  loss 1.2457  lr 7.32e-04  |g| 0.467    86.1 ms    47573 tok/s   3418 GFLOP/s
+  [eval] step 1900  val loss 1.5402  (20 batches)
+step  1910/5000  loss 1.2743  lr 7.30e-04  |g| 0.579    86.1 ms    47547 tok/s   3416 GFLOP/s
+step  1920/5000  loss 1.1876  lr 7.27e-04  |g| 0.468    86.1 ms    47563 tok/s   3417 GFLOP/s
+step  1930/5000  loss 1.3015  lr 7.24e-04  |g| 0.503    86.2 ms    47526 tok/s   3415 GFLOP/s
+step  1940/5000  loss 1.2909  lr 7.22e-04  |g| 0.489    86.2 ms    47511 tok/s   3414 GFLOP/s
+step  1950/5000  loss 1.2409  lr 7.19e-04  |g| 0.529    86.1 ms    47595 tok/s   3420 GFLOP/s
+step  1960/5000  loss 1.2402  lr 7.16e-04  |g| 0.540    86.2 ms    47540 tok/s   3416 GFLOP/s
+step  1970/5000  loss 1.3106  lr 7.14e-04  |g| 0.545    86.1 ms    47555 tok/s   3417 GFLOP/s
+step  1980/5000  loss 1.2687  lr 7.11e-04  |g| 0.494    86.2 ms    47493 tok/s   3412 GFLOP/s
+step  1990/5000  loss 1.2386  lr 7.08e-04  |g| 0.465    86.2 ms    47504 tok/s   3413 GFLOP/s
+step  2000/5000  loss 1.2530  lr 7.05e-04  |g| 0.486    86.1 ms    47596 tok/s   3420 GFLOP/s
+  [eval] step 2000  val loss 1.5298  (20 batches)
   [sample] ------------------------------------------
-I have no power than it your brotherhood.
 
-DUKE VINCENTIO:
-But you might have spent with you, and make it me
-also too. To make me as my life for mind.
-Whoever for these manners of these sorrow?
-Yet, think you, sir; here is no sin-law,--as yours,
-Say we have stood, the truth of your brother's love;
-Is leave the gallant of your force.
+First Servingman:
+Thou of consent for the blishment--now much a wholer,
+For our own manning somethior of virgins,
+Hour hard man, that thy life to his soul thee.
 
-Pitied Citizen:
-When was yours so sweet so rest at girl?
+AEdile:
+It will not so be battle and Guest's nine:
+Must thou wound thou hast lose the father,
+For shall have need no more of mine of men's.
 
-COMINI
+First Murderer:
+I have you been you'ld stay; but I am done:
+Would you do have no charge detest b
   ---------------------------------------------------
-
-final  train loss 0.6484   val loss 1.9316   (20 batches each)
-best   val loss 1.5056 at step 2400 (checkpoint saved there)
-
-final sample:
-What say you,--
+step  2010/5000  loss 1.1940  lr 7.03e-04  |g| 0.528    86.1 ms    47593 tok/s   3419 GFLOP/s
+step  2020/5000  loss 1.2886  lr 7.00e-04  |g| 0.541    86.1 ms    47570 tok/s   3418 GFLOP/s
+step  2030/5000  loss 1.2587  lr 6.97e-04  |g| 0.536    86.3 ms    47445 tok/s   3409 GFLOP/s
+step  2040/5000  loss 1.3209  lr 6.95e-04  |g| 0.538    86.2 ms    47517 tok/s   3414 GFLOP/s
+step  2050/5000  loss 1.2693  lr 6.92e-04  |g| 0.497    86.2 ms    47527 tok/s   3415 GFLOP/s
+step  2060/5000  loss 1.2599  lr 6.89e-04  |g| 0.505    86.2 ms    47512 tok/s   3414 GFLOP/s
+step  2070/5000  loss 1.2963  lr 6.86e-04  |g| 0.488    86.0 ms    47604 tok/s   3420 GFLOP/s
+step  2080/5000  loss 1.2535  lr 6.84e-04  |g| 0.486    86.3 ms    47487 tok/s   3412 GFLOP/s
+step  2090/5000  loss 1.2800  lr 6.81e-04  |g| 0.565    86.3 ms    47471 tok/s   3411 GFLOP/s
+step  2100/5000  loss 1.2224  lr 6.78e-04  |g| 0.523    86.1 ms    47579 tok/s   3418 GFLOP/s
+  [eval] step 2100  val loss 1.5224  (20 batches)  <- best
+step  2110/5000  loss 1.2025  lr 6.75e-04  |g| 0.512    86.1 ms    47549 tok/s   3416 GFLOP/s
+step  2120/5000  loss 1.2474  lr 6.72e-04  |g| 0.546    86.2 ms    47509 tok/s   3413 GFLOP/s
+step  2130/5000  loss 1.2056  lr 6.70e-04  |g| 0.450    86.2 ms    47498 tok/s   3413 GFLOP/s
+step  2140/5000  loss 1.1869  lr 6.67e-04  |g| 0.501    86.1 ms    47547 tok/s   3416 GFLOP/s
+step  2150/5000  loss 1.2272  lr 6.64e-04  |g| 0.471    86.1 ms    47556 tok/s   3417 GFLOP/s
+step  2160/5000  loss 1.2293  lr 6.61e-04  |g| 0.524    86.1 ms    47574 tok/s   3418 GFLOP/s
+step  2170/5000  loss 1.2471  lr 6.59e-04  |g| 0.485    86.1 ms    47586 tok/s   3419 GFLOP/s
+step  2180/5000  loss 1.2656  lr 6.56e-04  |g| 0.512    86.2 ms    47532 tok/s   3415 GFLOP/s
+step  2190/5000  loss 1.2000  lr 6.53e-04  |g| 0.587    86.2 ms    47519 tok/s   3414 GFLOP/s
+step  2200/5000  loss 1.2458  lr 6.50e-04  |g| 0.506    86.3 ms    47442 tok/s   3409 GFLOP/s
+  [eval] step 2200  val loss 1.5216  (20 batches)  <- best
+step  2210/5000  loss 1.2604  lr 6.47e-04  |g| 0.525    86.2 ms    47492 tok/s   3412 GFLOP/s
+step  2220/5000  loss 1.2675  lr 6.45e-04  |g| 0.511    86.3 ms    47470 tok/s   3411 GFLOP/s
+step  2230/5000  loss 1.1554  lr 6.42e-04  |g| 0.499    86.2 ms    47540 tok/s   3416 GFLOP/s
+step  2240/5000  loss 1.2524  lr 6.39e-04  |g| 0.501    86.2 ms    47537 tok/s   3415 GFLOP/s
+step  2250/5000  loss 1.2281  lr 6.36e-04  |g| 0.496    86.2 ms    47516 tok/s   3414 GFLOP/s
+step  2260/5000  loss 1.2298  lr 6.33e-04  |g| 0.527    86.2 ms    47507 tok/s   3413 GFLOP/s
+step  2270/5000  loss 1.2010  lr 6.30e-04  |g| 0.478    86.2 ms    47529 tok/s   3415 GFLOP/s
+step  2280/5000  loss 1.3043  lr 6.28e-04  |g| 0.536    86.1 ms    47548 tok/s   3416 GFLOP/s
+step  2290/5000  loss 1.2338  lr 6.25e-04  |g| 0.528    86.1 ms    47548 tok/s   3416 GFLOP/s
+step  2300/5000  loss 1.2259  lr 6.22e-04  |g| 0.492    86.2 ms    47493 tok/s   3412 GFLOP/s
+  [eval] step 2300  val loss 1.5233  (20 batches)
+step  2310/5000  loss 1.2690  lr 6.19e-04  |g| 0.521    86.2 ms    47544 tok/s   3416 GFLOP/s
+step  2320/5000  loss 1.1879  lr 6.16e-04  |g| 0.524    86.1 ms    47546 tok/s   3416 GFLOP/s
+step  2330/5000  loss 1.2864  lr 6.13e-04  |g| 0.527    86.2 ms    47532 tok/s   3415 GFLOP/s
+step  2340/5000  loss 1.1599  lr 6.10e-04  |g| 0.508    86.3 ms    47459 tok/s   3410 GFLOP/s
+step  2350/5000  loss 1.2573  lr 6.08e-04  |g| 0.530    86.2 ms    47529 tok/s   3415 GFLOP/s
+step  2360/5000  loss 1.1891  lr 6.05e-04  |g| 0.513    86.3 ms    47489 tok/s   3412 GFLOP/s
+step  2370/5000  loss 1.1996  lr 6.02e-04  |g| 0.547    86.2 ms    47516 tok/s   3414 GFLOP/s
+step  2380/5000  loss 1.1881  lr 5.99e-04  |g| 0.511    86.3 ms    47486 tok/s   3412 GFLOP/s
+step  2390/5000  loss 1.2102  lr 5.96e-04  |g| 0.527    86.2 ms    47491 tok/s   3412 GFLOP/s
+step  2400/5000  loss 1.2310  lr 5.93e-04  |g| 0.513    86.1 ms    47556 tok/s   3417 GFLOP/s
+  [eval] step 2400  val loss 1.5035  (20 batches)  <- best
+step  2410/5000  loss 1.1887  lr 5.90e-04  |g| 0.509    86.3 ms    47488 tok/s   3412 GFLOP/s
+step  2420/5000  loss 1.2592  lr 5.87e-04  |g| 0.507    86.1 ms    47571 tok/s   3418 GFLOP/s
+step  2430/5000  loss 1.2463  lr 5.85e-04  |g| 0.586    86.2 ms    47495 tok/s   3412 GFLOP/s
+step  2440/5000  loss 1.1877  lr 5.82e-04  |g| 0.499    86.2 ms    47527 tok/s   3415 GFLOP/s
+step  2450/5000  loss 1.1856  lr 5.79e-04  |g| 0.525    86.3 ms    47468 tok/s   3410 GFLOP/s
+step  2460/5000  loss 1.1651  lr 5.76e-04  |g| 0.508    86.3 ms    47490 tok/s   3412 GFLOP/s
+step  2470/5000  loss 1.1922  lr 5.73e-04  |g| 0.500    86.1 ms    47549 tok/s   3416 GFLOP/s
+step  2480/5000  loss 1.2138  lr 5.70e-04  |g| 0.564    86.1 ms    47567 tok/s   3418 GFLOP/s
+step  2490/5000  loss 1.2177  lr 5.67e-04  |g| 0.560    86.2 ms    47519 tok/s   3414 GFLOP/s
+step  2500/5000  loss 1.1258  lr 5.64e-04  |g| 0.470    86.2 ms    47521 tok/s   3414 GFLOP/s
+  [eval] step 2500  val loss 1.5132  (20 batches)
+  [sample] ------------------------------------------
+RUTUS:
+Most case yet not a man garment,
+An he shall for his seeing and his purple,
+Whose wealty of heaven are all sceptressed himself
+His hellish friends robilited thrence,
+Made had by the loss of the scene,
+And broken that George him of.
 
 CORIOLANUS:
-That would the gods them half by day name them well.
-Hear me speak their man with fond thunderous wreaths;
-But thus I might be before the murderous knaves.
+I not stand me to come those surly,
+The proclamentations triction of opposite
+Had by one her little of jecolving pawn,
+Such as is a two reason; and 
+  ---------------------------------------------------
+step  2510/5000  loss 1.2016  lr 5.62e-04  |g| 0.548    86.1 ms    47562 tok/s   3417 GFLOP/s
+step  2520/5000  loss 1.1870  lr 5.59e-04  |g| 0.517    86.3 ms    47471 tok/s   3411 GFLOP/s
+step  2530/5000  loss 1.1278  lr 5.56e-04  |g| 0.511    86.2 ms    47509 tok/s   3413 GFLOP/s
+step  2540/5000  loss 1.1326  lr 5.53e-04  |g| 0.499    86.2 ms    47507 tok/s   3413 GFLOP/s
+step  2550/5000  loss 1.1658  lr 5.50e-04  |g| 0.510    86.2 ms    47507 tok/s   3413 GFLOP/s
+step  2560/5000  loss 1.2028  lr 5.47e-04  |g| 0.517    86.3 ms    47484 tok/s   3412 GFLOP/s
+step  2570/5000  loss 1.1745  lr 5.44e-04  |g| 0.564    86.1 ms    47564 tok/s   3417 GFLOP/s
+step  2580/5000  loss 1.2145  lr 5.41e-04  |g| 0.522    86.1 ms    47584 tok/s   3419 GFLOP/s
+step  2590/5000  loss 1.1599  lr 5.38e-04  |g| 0.528    86.1 ms    47592 tok/s   3419 GFLOP/s
+step  2600/5000  loss 1.1821  lr 5.36e-04  |g| 0.542    86.2 ms    47516 tok/s   3414 GFLOP/s
+  [eval] step 2600  val loss 1.5062  (20 batches)
+step  2610/5000  loss 1.1556  lr 5.33e-04  |g| 0.507    86.2 ms    47539 tok/s   3416 GFLOP/s
+step  2620/5000  loss 1.1041  lr 5.30e-04  |g| 0.554    86.2 ms    47500 tok/s   3413 GFLOP/s
+step  2630/5000  loss 1.1113  lr 5.27e-04  |g| 0.505    86.1 ms    47588 tok/s   3419 GFLOP/s
+step  2640/5000  loss 1.1876  lr 5.24e-04  |g| 0.526    86.3 ms    47478 tok/s   3411 GFLOP/s
+step  2650/5000  loss 1.1454  lr 5.21e-04  |g| 0.559    86.1 ms    47557 tok/s   3417 GFLOP/s
+step  2660/5000  loss 1.1553  lr 5.18e-04  |g| 0.547    86.1 ms    47570 tok/s   3418 GFLOP/s
+step  2670/5000  loss 1.1592  lr 5.15e-04  |g| 0.532    86.2 ms    47523 tok/s   3414 GFLOP/s
+step  2680/5000  loss 1.0899  lr 5.13e-04  |g| 0.485    86.2 ms    47536 tok/s   3415 GFLOP/s
+step  2690/5000  loss 1.1161  lr 5.10e-04  |g| 0.558    86.2 ms    47498 tok/s   3413 GFLOP/s
+step  2700/5000  loss 1.1447  lr 5.07e-04  |g| 0.518    86.2 ms    47517 tok/s   3414 GFLOP/s
+  [eval] step 2700  val loss 1.5203  (20 batches)
+step  2710/5000  loss 1.1271  lr 5.04e-04  |g| 0.576    86.2 ms    47506 tok/s   3413 GFLOP/s
+step  2720/5000  loss 1.0805  lr 5.01e-04  |g| 0.515    86.2 ms    47529 tok/s   3415 GFLOP/s
+step  2730/5000  loss 1.1149  lr 4.98e-04  |g| 0.544    86.3 ms    47454 tok/s   3409 GFLOP/s
+step  2740/5000  loss 1.1047  lr 4.95e-04  |g| 0.511    86.1 ms    47578 tok/s   3418 GFLOP/s
+step  2750/5000  loss 1.0840  lr 4.92e-04  |g| 0.496    86.2 ms    47523 tok/s   3414 GFLOP/s
+step  2760/5000  loss 1.0509  lr 4.90e-04  |g| 0.502    86.2 ms    47512 tok/s   3414 GFLOP/s
+step  2770/5000  loss 1.0734  lr 4.87e-04  |g| 0.535    86.1 ms    47547 tok/s   3416 GFLOP/s
+step  2780/5000  loss 1.1274  lr 4.84e-04  |g| 0.555    86.2 ms    47526 tok/s   3415 GFLOP/s
+step  2790/5000  loss 1.1625  lr 4.81e-04  |g| 0.567    86.2 ms    47513 tok/s   3414 GFLOP/s
+step  2800/5000  loss 1.1676  lr 4.78e-04  |g| 0.590    86.1 ms    47586 tok/s   3419 GFLOP/s
+  [eval] step 2800  val loss 1.5244  (20 batches)
+step  2810/5000  loss 1.1057  lr 4.75e-04  |g| 0.518    86.1 ms    47548 tok/s   3416 GFLOP/s
+step  2820/5000  loss 1.1317  lr 4.72e-04  |g| 0.593    86.2 ms    47523 tok/s   3414 GFLOP/s
+step  2830/5000  loss 1.1213  lr 4.70e-04  |g| 0.543    86.2 ms    47544 tok/s   3416 GFLOP/s
+step  2840/5000  loss 1.0963  lr 4.67e-04  |g| 0.531    86.3 ms    47452 tok/s   3409 GFLOP/s
+step  2850/5000  loss 1.0519  lr 4.64e-04  |g| 0.492    86.1 ms    47554 tok/s   3417 GFLOP/s
+step  2860/5000  loss 1.0437  lr 4.61e-04  |g| 0.516    86.2 ms    47504 tok/s   3413 GFLOP/s
+step  2870/5000  loss 1.0848  lr 4.58e-04  |g| 0.557    86.2 ms    47531 tok/s   3415 GFLOP/s
+step  2880/5000  loss 1.0567  lr 4.55e-04  |g| 0.544    86.1 ms    47576 tok/s   3418 GFLOP/s
+step  2890/5000  loss 1.1334  lr 4.53e-04  |g| 0.568    86.1 ms    47574 tok/s   3418 GFLOP/s
+step  2900/5000  loss 1.0337  lr 4.50e-04  |g| 0.543    86.1 ms    47583 tok/s   3419 GFLOP/s
+  [eval] step 2900  val loss 1.5277  (20 batches)
+step  2910/5000  loss 1.0728  lr 4.47e-04  |g| 0.536    86.1 ms    47548 tok/s   3416 GFLOP/s
+step  2920/5000  loss 1.0315  lr 4.44e-04  |g| 0.525    86.1 ms    47548 tok/s   3416 GFLOP/s
+step  2930/5000  loss 1.1365  lr 4.41e-04  |g| 0.560    86.1 ms    47546 tok/s   3416 GFLOP/s
+step  2940/5000  loss 1.0454  lr 4.39e-04  |g| 0.583    86.1 ms    47556 tok/s   3417 GFLOP/s
+step  2950/5000  loss 1.0562  lr 4.36e-04  |g| 0.522    86.1 ms    47583 tok/s   3419 GFLOP/s
+step  2960/5000  loss 1.0829  lr 4.33e-04  |g| 0.591    86.1 ms    47592 tok/s   3419 GFLOP/s
+step  2970/5000  loss 1.0861  lr 4.30e-04  |g| 0.556    86.1 ms    47587 tok/s   3419 GFLOP/s
+step  2980/5000  loss 1.1122  lr 4.28e-04  |g| 0.605    86.3 ms    47477 tok/s   3411 GFLOP/s
+step  2990/5000  loss 1.1196  lr 4.25e-04  |g| 0.590    86.1 ms    47551 tok/s   3416 GFLOP/s
+step  3000/5000  loss 1.0709  lr 4.22e-04  |g| 0.567    86.1 ms    47558 tok/s   3417 GFLOP/s
+  [eval] step 3000  val loss 1.5339  (20 batches)
+  [sample] ------------------------------------------
+But that bear my daughter hath too man;
+Unless my treasons him a perform then in his
+emple wastes--ear'st thou live in thy extremities
+That thou shalt be to sunder as it but chark
+That, talk but his way,--but his life return'd be sound
+Bohemia should some change of the most cause.
 
-BRAKENBURY:
-I am not yet but done that by your name,
-But told you me name with at all their life.
+LEONTES:
+Until these modest must I heir with a coverty
+When he set remails upon the fairest could say in a word.
+Wrat
+  ---------------------------------------------------
+step  3010/5000  loss 0.9935  lr 4.19e-04  |g| 0.569    86.3 ms    47445 tok/s   3409 GFLOP/s
+step  3020/5000  loss 1.0229  lr 4.16e-04  |g| 0.527    86.1 ms    47577 tok/s   3418 GFLOP/s
+step  3030/5000  loss 1.0499  lr 4.14e-04  |g| 0.540    86.2 ms    47510 tok/s   3413 GFLOP/s
+step  3040/5000  loss 1.0309  lr 4.11e-04  |g| 0.538    86.2 ms    47543 tok/s   3416 GFLOP/s
+step  3050/5000  loss 1.0398  lr 4.08e-04  |g| 0.559    86.1 ms    47586 tok/s   3419 GFLOP/s
+step  3060/5000  loss 1.0731  lr 4.05e-04  |g| 0.555    86.1 ms    47571 tok/s   3418 GFLOP/s
+step  3070/5000  loss 1.0117  lr 4.03e-04  |g| 0.534    86.2 ms    47540 tok/s   3416 GFLOP/s
+step  3080/5000  loss 1.0326  lr 4.00e-04  |g| 0.566    86.1 ms    47563 tok/s   3417 GFLOP/s
+step  3090/5000  loss 1.0748  lr 3.97e-04  |g| 0.580    86.1 ms    47592 tok/s   3419 GFLOP/s
+step  3100/5000  loss 1.0716  lr 3.95e-04  |g| 0.566    86.2 ms    47544 tok/s   3416 GFLOP/s
+  [eval] step 3100  val loss 1.5331  (20 batches)
+step  3110/5000  loss 1.0405  lr 3.92e-04  |g| 0.557    86.1 ms    47549 tok/s   3416 GFLOP/s
+step  3120/5000  loss 1.0461  lr 3.89e-04  |g| 0.587    86.2 ms    47516 tok/s   3414 GFLOP/s
+step  3130/5000  loss 1.0684  lr 3.86e-04  |g| 0.578    86.3 ms    47489 tok/s   3412 GFLOP/s
+step  3140/5000  loss 1.0590  lr 3.84e-04  |g| 0.587    86.2 ms    47536 tok/s   3415 GFLOP/s
+step  3150/5000  loss 1.0927  lr 3.81e-04  |g| 0.578    86.2 ms    47543 tok/s   3416 GFLOP/s
+step  3160/5000  loss 1.0596  lr 3.78e-04  |g| 0.585    86.1 ms    47546 tok/s   3416 GFLOP/s
+step  3170/5000  loss 0.9962  lr 3.76e-04  |g| 0.566    86.3 ms    47480 tok/s   3411 GFLOP/s
+step  3180/5000  loss 1.0275  lr 3.73e-04  |g| 0.579    86.2 ms    47536 tok/s   3415 GFLOP/s
+step  3190/5000  loss 1.0188  lr 3.70e-04  |g| 0.563    86.0 ms    47651 tok/s   3424 GFLOP/s
+step  3200/5000  loss 1.0727  lr 3.68e-04  |g| 0.586    86.4 ms    47409 tok/s   3406 GFLOP/s
+  [eval] step 3200  val loss 1.5510  (20 batches)
+step  3210/5000  loss 1.0658  lr 3.65e-04  |g| 0.609    86.2 ms    47508 tok/s   3413 GFLOP/s
+step  3220/5000  loss 1.0387  lr 3.63e-04  |g| 0.595    86.2 ms    47525 tok/s   3415 GFLOP/s
+step  3230/5000  loss 1.0476  lr 3.60e-04  |g| 0.605    86.1 ms    47557 tok/s   3417 GFLOP/s
+step  3240/5000  loss 1.1062  lr 3.57e-04  |g| 0.643    86.2 ms    47526 tok/s   3415 GFLOP/s
+step  3250/5000  loss 1.0236  lr 3.55e-04  |g| 0.604    86.1 ms    47556 tok/s   3417 GFLOP/s
+step  3260/5000  loss 1.0550  lr 3.52e-04  |g| 0.589    86.2 ms    47541 tok/s   3416 GFLOP/s
+step  3270/5000  loss 1.0018  lr 3.50e-04  |g| 0.591    86.2 ms    47495 tok/s   3412 GFLOP/s
+step  3280/5000  loss 1.0395  lr 3.47e-04  |g| 0.611    86.2 ms    47515 tok/s   3414 GFLOP/s
+step  3290/5000  loss 1.0091  lr 3.44e-04  |g| 0.608    86.2 ms    47539 tok/s   3416 GFLOP/s
+step  3300/5000  loss 1.0468  lr 3.42e-04  |g| 0.629    86.1 ms    47585 tok/s   3419 GFLOP/s
+  [eval] step 3300  val loss 1.5501  (20 batches)
+step  3310/5000  loss 1.0270  lr 3.39e-04  |g| 0.662    86.2 ms    47538 tok/s   3416 GFLOP/s
+step  3320/5000  loss 0.9789  lr 3.37e-04  |g| 0.629    86.2 ms    47523 tok/s   3414 GFLOP/s
+step  3330/5000  loss 1.0499  lr 3.34e-04  |g| 0.637    86.1 ms    47565 tok/s   3417 GFLOP/s
+step  3340/5000  loss 1.0766  lr 3.32e-04  |g| 0.670    86.2 ms    47528 tok/s   3415 GFLOP/s
+step  3350/5000  loss 1.0303  lr 3.29e-04  |g| 0.666    86.2 ms    47515 tok/s   3414 GFLOP/s
+step  3360/5000  loss 1.0412  lr 3.27e-04  |g| 0.685    86.2 ms    47518 tok/s   3414 GFLOP/s
+step  3370/5000  loss 1.0523  lr 3.24e-04  |g| 0.637    86.2 ms    47507 tok/s   3413 GFLOP/s
+step  3380/5000  loss 0.9609  lr 3.22e-04  |g| 0.599    86.2 ms    47538 tok/s   3416 GFLOP/s
+step  3390/5000  loss 0.9883  lr 3.19e-04  |g| 0.589    86.3 ms    47484 tok/s   3412 GFLOP/s
+step  3400/5000  loss 1.0179  lr 3.17e-04  |g| 0.621    86.1 ms    47575 tok/s   3418 GFLOP/s
+  [eval] step 3400  val loss 1.5659  (20 batches)
+step  3410/5000  loss 1.0759  lr 3.14e-04  |g| 0.695    86.2 ms    47513 tok/s   3414 GFLOP/s
+step  3420/5000  loss 0.9790  lr 3.12e-04  |g| 0.636    86.2 ms    47496 tok/s   3412 GFLOP/s
+step  3430/5000  loss 0.9599  lr 3.09e-04  |g| 0.636    86.2 ms    47508 tok/s   3413 GFLOP/s
+step  3440/5000  loss 0.9309  lr 3.07e-04  |g| 0.617    86.2 ms    47500 tok/s   3413 GFLOP/s
+step  3450/5000  loss 0.9493  lr 3.05e-04  |g| 0.626    86.2 ms    47534 tok/s   3415 GFLOP/s
+step  3460/5000  loss 0.9775  lr 3.02e-04  |g| 0.678    86.2 ms    47504 tok/s   3413 GFLOP/s
+step  3470/5000  loss 0.9480  lr 3.00e-04  |g| 0.626    86.1 ms    47548 tok/s   3416 GFLOP/s
+step  3480/5000  loss 0.9815  lr 2.97e-04  |g| 0.628    86.1 ms    47559 tok/s   3417 GFLOP/s
+step  3490/5000  loss 0.9525  lr 2.95e-04  |g| 0.651    86.2 ms    47497 tok/s   3413 GFLOP/s
+step  3500/5000  loss 0.9415  lr 2.93e-04  |g| 0.631    86.2 ms    47497 tok/s   3413 GFLOP/s
+  [eval] step 3500  val loss 1.5918  (20 batches)
+  [sample] ------------------------------------------
 
-CLARENCE:
-Are they gone to make an ambush for the Tower:
-If you please to the treason of God
-Directing of the suppl
+Shepherd:
+'Tis matter, he's any wife.
+
+CORIOLANUS:
+Sir, I say! what!
+
+MENENIUS:
+His name is the officer: it is 'twas your duke,
+Which you stand you that that public yourself;
+For which you censure you should allow
+That you mistake on him that we are slept:
+I am thilf to stop me in a man may of you
+Bushy had a to enter all the happy day;
+For on his high profits to draw our duty,
+Then not he turns 
+  ---------------------------------------------------
+step  3510/5000  loss 0.9382  lr 2.90e-04  |g| 0.668    86.2 ms    47499 tok/s   3413 GFLOP/s
+step  3520/5000  loss 0.9935  lr 2.88e-04  |g| 0.681    86.2 ms    47530 tok/s   3415 GFLOP/s
+step  3530/5000  loss 1.0066  lr 2.85e-04  |g| 0.674    86.2 ms    47507 tok/s   3413 GFLOP/s
+step  3540/5000  loss 0.9142  lr 2.83e-04  |g| 0.658    86.1 ms    47559 tok/s   3417 GFLOP/s
+step  3550/5000  loss 0.9081  lr 2.81e-04  |g| 0.656    86.1 ms    47548 tok/s   3416 GFLOP/s
+step  3560/5000  loss 0.9366  lr 2.79e-04  |g| 0.630    86.1 ms    47566 tok/s   3418 GFLOP/s
+step  3570/5000  loss 0.9029  lr 2.76e-04  |g| 0.642    86.2 ms    47532 tok/s   3415 GFLOP/s
+step  3580/5000  loss 0.9199  lr 2.74e-04  |g| 0.725    86.2 ms    47503 tok/s   3413 GFLOP/s
+step  3590/5000  loss 0.9736  lr 2.72e-04  |g| 0.674    86.1 ms    47572 tok/s   3418 GFLOP/s
+step  3600/5000  loss 1.0108  lr 2.69e-04  |g| 0.700    86.2 ms    47507 tok/s   3413 GFLOP/s
+  [eval] step 3600  val loss 1.5934  (20 batches)
+step  3610/5000  loss 0.9822  lr 2.67e-04  |g| 0.780    86.2 ms    47514 tok/s   3414 GFLOP/s
+step  3620/5000  loss 0.9726  lr 2.65e-04  |g| 0.690    86.1 ms    47555 tok/s   3417 GFLOP/s
+step  3630/5000  loss 0.8890  lr 2.63e-04  |g| 0.676    86.0 ms    47614 tok/s   3421 GFLOP/s
+step  3640/5000  loss 0.9031  lr 2.61e-04  |g| 0.656    86.2 ms    47521 tok/s   3414 GFLOP/s
+step  3650/5000  loss 0.9420  lr 2.58e-04  |g| 0.728    86.2 ms    47522 tok/s   3414 GFLOP/s
+step  3660/5000  loss 0.9331  lr 2.56e-04  |g| 0.715    86.2 ms    47526 tok/s   3415 GFLOP/s
+step  3670/5000  loss 0.9549  lr 2.54e-04  |g| 0.670    86.2 ms    47532 tok/s   3415 GFLOP/s
+step  3680/5000  loss 0.9189  lr 2.52e-04  |g| 0.699    86.1 ms    47588 tok/s   3419 GFLOP/s
+step  3690/5000  loss 0.8943  lr 2.50e-04  |g| 0.689    86.2 ms    47527 tok/s   3415 GFLOP/s
+step  3700/5000  loss 0.8960  lr 2.47e-04  |g| 0.699    86.2 ms    47537 tok/s   3415 GFLOP/s
+  [eval] step 3700  val loss 1.6165  (20 batches)
+step  3710/5000  loss 0.9396  lr 2.45e-04  |g| 0.692    86.1 ms    47582 tok/s   3419 GFLOP/s
+step  3720/5000  loss 0.9822  lr 2.43e-04  |g| 0.755    86.2 ms    47538 tok/s   3415 GFLOP/s
+step  3730/5000  loss 0.9060  lr 2.41e-04  |g| 0.720    86.2 ms    47509 tok/s   3413 GFLOP/s
+step  3740/5000  loss 0.9141  lr 2.39e-04  |g| 0.737    86.4 ms    47431 tok/s   3408 GFLOP/s
+step  3750/5000  loss 0.9494  lr 2.37e-04  |g| 0.734    86.1 ms    47599 tok/s   3420 GFLOP/s
+step  3760/5000  loss 0.8170  lr 2.35e-04  |g| 0.674    86.3 ms    47443 tok/s   3409 GFLOP/s
+step  3770/5000  loss 0.9187  lr 2.33e-04  |g| 0.709    86.2 ms    47537 tok/s   3415 GFLOP/s
+step  3780/5000  loss 0.8647  lr 2.31e-04  |g| 0.718    86.2 ms    47537 tok/s   3415 GFLOP/s
+step  3790/5000  loss 0.8885  lr 2.29e-04  |g| 0.747    86.1 ms    47569 tok/s   3418 GFLOP/s
+step  3800/5000  loss 0.8865  lr 2.27e-04  |g| 0.720    86.0 ms    47642 tok/s   3423 GFLOP/s
+  [eval] step 3800  val loss 1.6372  (20 batches)
+step  3810/5000  loss 0.9352  lr 2.25e-04  |g| 0.770    86.1 ms    47568 tok/s   3418 GFLOP/s
+step  3820/5000  loss 0.8406  lr 2.23e-04  |g| 0.705    86.3 ms    47474 tok/s   3411 GFLOP/s
+step  3830/5000  loss 0.9897  lr 2.21e-04  |g| 0.768    86.1 ms    47549 tok/s   3416 GFLOP/s
+step  3840/5000  loss 0.9049  lr 2.19e-04  |g| 0.724    86.2 ms    47540 tok/s   3416 GFLOP/s
+step  3850/5000  loss 0.8154  lr 2.17e-04  |g| 0.686    86.2 ms    47500 tok/s   3413 GFLOP/s
+step  3860/5000  loss 0.8615  lr 2.15e-04  |g| 0.787    86.1 ms    47548 tok/s   3416 GFLOP/s
+step  3870/5000  loss 0.9102  lr 2.13e-04  |g| 0.730    86.3 ms    47481 tok/s   3411 GFLOP/s
+step  3880/5000  loss 0.8324  lr 2.11e-04  |g| 0.700    86.2 ms    47527 tok/s   3415 GFLOP/s
+step  3890/5000  loss 0.7863  lr 2.09e-04  |g| 0.711    86.1 ms    47591 tok/s   3419 GFLOP/s
+step  3900/5000  loss 0.9035  lr 2.07e-04  |g| 0.753    86.2 ms    47509 tok/s   3413 GFLOP/s
+  [eval] step 3900  val loss 1.6532  (20 batches)
+step  3910/5000  loss 0.8819  lr 2.05e-04  |g| 0.723    86.1 ms    47595 tok/s   3420 GFLOP/s
+step  3920/5000  loss 0.8510  lr 2.04e-04  |g| 0.758    86.2 ms    47519 tok/s   3414 GFLOP/s
+step  3930/5000  loss 0.8715  lr 2.02e-04  |g| 0.756    86.2 ms    47508 tok/s   3413 GFLOP/s
+step  3940/5000  loss 0.8554  lr 2.00e-04  |g| 0.735    86.2 ms    47491 tok/s   3412 GFLOP/s
+step  3950/5000  loss 0.8402  lr 1.98e-04  |g| 0.824    86.2 ms    47506 tok/s   3413 GFLOP/s
+step  3960/5000  loss 0.8611  lr 1.96e-04  |g| 0.785    86.2 ms    47539 tok/s   3416 GFLOP/s
+step  3970/5000  loss 0.9339  lr 1.95e-04  |g| 0.833    86.2 ms    47514 tok/s   3414 GFLOP/s
+step  3980/5000  loss 0.7965  lr 1.93e-04  |g| 0.731    86.1 ms    47550 tok/s   3416 GFLOP/s
+step  3990/5000  loss 0.8585  lr 1.91e-04  |g| 0.767    86.3 ms    47483 tok/s   3412 GFLOP/s
+step  4000/5000  loss 0.9184  lr 1.89e-04  |g| 0.799    86.2 ms    47514 tok/s   3414 GFLOP/s
+  [eval] step 4000  val loss 1.6787  (20 batches)
+  [sample] ------------------------------------------
+As any unavoided bring them, to them too:
+This desire hath colour'd in the child of their lips,
+Nor from false orators, they must alest down,
+Self--
+
+FROTH:
+Then when now can you know--
+
+POMPEY:
+Master of Princes, I protest a word, and put
+upon your puissant: a more warrant for you; and
+here is a very brother, a danger man. I
+have mistrusted anon, sir; so that you may present
+be much a mirror merr
+  ---------------------------------------------------
+step  4010/5000  loss 0.8813  lr 1.88e-04  |g| 0.805    86.1 ms    47569 tok/s   3418 GFLOP/s
+step  4020/5000  loss 0.8204  lr 1.86e-04  |g| 0.717    86.1 ms    47588 tok/s   3419 GFLOP/s
+step  4030/5000  loss 0.8152  lr 1.84e-04  |g| 0.787    86.2 ms    47491 tok/s   3412 GFLOP/s
+step  4040/5000  loss 0.7684  lr 1.83e-04  |g| 0.775    86.1 ms    47591 tok/s   3419 GFLOP/s
+step  4050/5000  loss 0.8120  lr 1.81e-04  |g| 0.741    86.2 ms    47536 tok/s   3415 GFLOP/s
+step  4060/5000  loss 0.8728  lr 1.79e-04  |g| 0.840    86.2 ms    47499 tok/s   3413 GFLOP/s
+step  4070/5000  loss 0.8336  lr 1.78e-04  |g| 0.822    86.4 ms    47430 tok/s   3408 GFLOP/s
+step  4080/5000  loss 0.8128  lr 1.76e-04  |g| 0.827    86.2 ms    47539 tok/s   3416 GFLOP/s
+step  4090/5000  loss 0.8502  lr 1.74e-04  |g| 0.811    86.1 ms    47549 tok/s   3416 GFLOP/s
+step  4100/5000  loss 0.7714  lr 1.73e-04  |g| 0.754    86.2 ms    47507 tok/s   3413 GFLOP/s
+  [eval] step 4100  val loss 1.6972  (20 batches)
+step  4110/5000  loss 0.8245  lr 1.71e-04  |g| 0.802    86.2 ms    47527 tok/s   3415 GFLOP/s
+step  4120/5000  loss 0.7632  lr 1.70e-04  |g| 0.774    86.1 ms    47552 tok/s   3417 GFLOP/s
+step  4130/5000  loss 0.8221  lr 1.68e-04  |g| 0.818    86.1 ms    47568 tok/s   3418 GFLOP/s
+step  4140/5000  loss 0.8571  lr 1.67e-04  |g| 0.811    86.2 ms    47537 tok/s   3415 GFLOP/s
+step  4150/5000  loss 0.7722  lr 1.65e-04  |g| 0.769    86.2 ms    47526 tok/s   3415 GFLOP/s
+step  4160/5000  loss 0.7528  lr 1.64e-04  |g| 0.815    86.2 ms    47541 tok/s   3416 GFLOP/s
+step  4170/5000  loss 0.7891  lr 1.62e-04  |g| 0.764    86.2 ms    47519 tok/s   3414 GFLOP/s
+step  4180/5000  loss 0.8159  lr 1.61e-04  |g| 0.857    86.2 ms    47535 tok/s   3415 GFLOP/s
+step  4190/5000  loss 0.8034  lr 1.59e-04  |g| 0.835    86.1 ms    47561 tok/s   3417 GFLOP/s
+step  4200/5000  loss 0.8307  lr 1.58e-04  |g| 0.835    86.2 ms    47501 tok/s   3413 GFLOP/s
+  [eval] step 4200  val loss 1.7191  (20 batches)
+step  4210/5000  loss 0.7843  lr 1.56e-04  |g| 0.782    86.1 ms    47556 tok/s   3417 GFLOP/s
+step  4220/5000  loss 0.7723  lr 1.55e-04  |g| 0.813    86.2 ms    47528 tok/s   3415 GFLOP/s
+step  4230/5000  loss 0.7761  lr 1.54e-04  |g| 0.823    86.2 ms    47529 tok/s   3415 GFLOP/s
+step  4240/5000  loss 0.8488  lr 1.52e-04  |g| 0.926    86.3 ms    47467 tok/s   3410 GFLOP/s
+step  4250/5000  loss 0.7757  lr 1.51e-04  |g| 0.842    86.2 ms    47503 tok/s   3413 GFLOP/s
+step  4260/5000  loss 0.7578  lr 1.50e-04  |g| 0.783    86.2 ms    47525 tok/s   3415 GFLOP/s
+step  4270/5000  loss 0.7713  lr 1.48e-04  |g| 0.827    86.2 ms    47542 tok/s   3416 GFLOP/s
+step  4280/5000  loss 0.8244  lr 1.47e-04  |g| 0.867    86.0 ms    47624 tok/s   3422 GFLOP/s
+step  4290/5000  loss 0.8917  lr 1.46e-04  |g| 0.947    86.2 ms    47500 tok/s   3413 GFLOP/s
+step  4300/5000  loss 0.8613  lr 1.45e-04  |g| 0.873    86.1 ms    47553 tok/s   3417 GFLOP/s
+  [eval] step 4300  val loss 1.7485  (20 batches)
+step  4310/5000  loss 0.7929  lr 1.43e-04  |g| 0.887    86.2 ms    47519 tok/s   3414 GFLOP/s
+step  4320/5000  loss 0.7321  lr 1.42e-04  |g| 0.854    86.2 ms    47503 tok/s   3413 GFLOP/s
+step  4330/5000  loss 0.7743  lr 1.41e-04  |g| 0.918    86.2 ms    47501 tok/s   3413 GFLOP/s
+step  4340/5000  loss 0.7322  lr 1.40e-04  |g| 0.842    86.1 ms    47583 tok/s   3419 GFLOP/s
+step  4350/5000  loss 0.8168  lr 1.39e-04  |g| 0.896    86.1 ms    47551 tok/s   3416 GFLOP/s
+step  4360/5000  loss 0.7011  lr 1.37e-04  |g| 0.823    86.1 ms    47580 tok/s   3419 GFLOP/s
+step  4370/5000  loss 0.7114  lr 1.36e-04  |g| 0.819    86.2 ms    47531 tok/s   3415 GFLOP/s
+step  4380/5000  loss 0.8298  lr 1.35e-04  |g| 0.938    86.2 ms    47515 tok/s   3414 GFLOP/s
+step  4390/5000  loss 0.7303  lr 1.34e-04  |g| 0.839    86.2 ms    47530 tok/s   3415 GFLOP/s
+step  4400/5000  loss 0.7254  lr 1.33e-04  |g| 0.866    86.1 ms    47582 tok/s   3419 GFLOP/s
+  [eval] step 4400  val loss 1.7857  (20 batches)
+step  4410/5000  loss 0.6399  lr 1.32e-04  |g| 0.768    86.2 ms    47526 tok/s   3415 GFLOP/s
+step  4420/5000  loss 0.7771  lr 1.31e-04  |g| 0.917    86.2 ms    47531 tok/s   3415 GFLOP/s
+step  4430/5000  loss 0.7374  lr 1.30e-04  |g| 0.872    86.2 ms    47497 tok/s   3413 GFLOP/s
+step  4440/5000  loss 0.7675  lr 1.29e-04  |g| 0.927    86.1 ms    47590 tok/s   3419 GFLOP/s
+step  4450/5000  loss 0.7627  lr 1.28e-04  |g| 0.925    86.1 ms    47567 tok/s   3418 GFLOP/s
+step  4460/5000  loss 0.8455  lr 1.27e-04  |g| 0.968    86.2 ms    47545 tok/s   3416 GFLOP/s
+step  4470/5000  loss 0.7764  lr 1.26e-04  |g| 0.906    86.1 ms    47595 tok/s   3420 GFLOP/s
+step  4480/5000  loss 0.7551  lr 1.25e-04  |g| 0.941    86.1 ms    47559 tok/s   3417 GFLOP/s
+step  4490/5000  loss 0.7785  lr 1.24e-04  |g| 0.919    86.3 ms    47489 tok/s   3412 GFLOP/s
+step  4500/5000  loss 0.7497  lr 1.23e-04  |g| 0.896    86.1 ms    47556 tok/s   3417 GFLOP/s
+  [eval] step 4500  val loss 1.8034  (20 batches)
+  [sample] ------------------------------------------
+Polixenes, you pitied to bed.
+
+ANGELO:
+Yes, sir; no less, come.
+If the be your best confidence is your concluded,
+As I would do well you seize your law,
+In praise such a gentleman food at once,
+As if the issue of his love at the earth,
+And make his valour than all the world,
+And, as he would have laid,---to know
+Is bolted by the goodness of she never
+That weeps do precise upon this harm,
+That in t
+  ---------------------------------------------------
+step  4510/5000  loss 0.7066  lr 1.22e-04  |g| 0.876    86.3 ms    47474 tok/s   3411 GFLOP/s
+step  4520/5000  loss 0.7522  lr 1.21e-04  |g| 0.949    86.1 ms    47547 tok/s   3416 GFLOP/s
+step  4530/5000  loss 0.8323  lr 1.20e-04  |g| 1.028    86.4 ms    47412 tok/s   3406 GFLOP/s
+step  4540/5000  loss 0.7549  lr 1.19e-04  |g| 0.946    86.3 ms    47444 tok/s   3409 GFLOP/s
+step  4550/5000  loss 0.7961  lr 1.19e-04  |g| 1.008    86.2 ms    47526 tok/s   3415 GFLOP/s
+step  4560/5000  loss 0.7325  lr 1.18e-04  |g| 0.918    86.6 ms    47320 tok/s   3400 GFLOP/s
+step  4570/5000  loss 0.6986  lr 1.17e-04  |g| 0.862    86.1 ms    47548 tok/s   3416 GFLOP/s
+step  4580/5000  loss 0.7671  lr 1.16e-04  |g| 0.988    86.2 ms    47502 tok/s   3413 GFLOP/s
+step  4590/5000  loss 0.7070  lr 1.15e-04  |g| 0.956    86.6 ms    47303 tok/s   3399 GFLOP/s
+step  4600/5000  loss 0.7012  lr 1.15e-04  |g| 0.912    86.1 ms    47569 tok/s   3418 GFLOP/s
+  [eval] step 4600  val loss 1.8495  (20 batches)
+step  4610/5000  loss 0.7046  lr 1.14e-04  |g| 0.907    86.5 ms    47342 tok/s   3401 GFLOP/s
+step  4620/5000  loss 0.6974  lr 1.13e-04  |g| 0.875    86.2 ms    47531 tok/s   3415 GFLOP/s
+step  4630/5000  loss 0.7363  lr 1.13e-04  |g| 0.974    86.1 ms    47571 tok/s   3418 GFLOP/s
+step  4640/5000  loss 0.7309  lr 1.12e-04  |g| 0.972    86.2 ms    47530 tok/s   3415 GFLOP/s
+step  4650/5000  loss 0.7151  lr 1.11e-04  |g| 0.942    86.2 ms    47522 tok/s   3414 GFLOP/s
+step  4660/5000  loss 0.7188  lr 1.11e-04  |g| 0.983    86.1 ms    47574 tok/s   3418 GFLOP/s
+step  4670/5000  loss 0.7332  lr 1.10e-04  |g| 0.974    86.1 ms    47565 tok/s   3417 GFLOP/s
+step  4680/5000  loss 0.6617  lr 1.09e-04  |g| 0.920    86.3 ms    47482 tok/s   3411 GFLOP/s
+step  4690/5000  loss 0.6542  lr 1.09e-04  |g| 0.939    86.3 ms    47478 tok/s   3411 GFLOP/s
+step  4700/5000  loss 0.7064  lr 1.08e-04  |g| 0.934    86.2 ms    47523 tok/s   3414 GFLOP/s
+  [eval] step 4700  val loss 1.8786  (20 batches)
+step  4710/5000  loss 0.6498  lr 1.08e-04  |g| 0.945    86.1 ms    47590 tok/s   3419 GFLOP/s
+step  4720/5000  loss 0.6887  lr 1.07e-04  |g| 0.899    86.1 ms    47583 tok/s   3419 GFLOP/s
+step  4730/5000  loss 0.7342  lr 1.07e-04  |g| 0.950    86.2 ms    47529 tok/s   3415 GFLOP/s
+step  4740/5000  loss 0.6452  lr 1.06e-04  |g| 0.878    86.2 ms    47531 tok/s   3415 GFLOP/s
+step  4750/5000  loss 0.7286  lr 1.06e-04  |g| 1.086    86.2 ms    47516 tok/s   3414 GFLOP/s
+step  4760/5000  loss 0.7846  lr 1.05e-04  |g| 1.018    86.2 ms    47521 tok/s   3414 GFLOP/s
+step  4770/5000  loss 0.7066  lr 1.05e-04  |g| 1.020    86.2 ms    47521 tok/s   3414 GFLOP/s
+step  4780/5000  loss 0.6914  lr 1.04e-04  |g| 0.972    86.1 ms    47565 tok/s   3417 GFLOP/s
+step  4790/5000  loss 0.7457  lr 1.04e-04  |g| 1.068    86.3 ms    47472 tok/s   3411 GFLOP/s
+step  4800/5000  loss 0.7211  lr 1.04e-04  |g| 1.028    86.2 ms    47494 tok/s   3412 GFLOP/s
+  [eval] step 4800  val loss 1.8847  (20 batches)
+step  4810/5000  loss 0.6497  lr 1.03e-04  |g| 0.939    86.1 ms    47555 tok/s   3417 GFLOP/s
+step  4820/5000  loss 0.7013  lr 1.03e-04  |g| 0.995    86.1 ms    47547 tok/s   3416 GFLOP/s
+step  4830/5000  loss 0.7284  lr 1.03e-04  |g| 1.000    86.3 ms    47487 tok/s   3412 GFLOP/s
+step  4840/5000  loss 0.6850  lr 1.02e-04  |g| 1.021    86.2 ms    47528 tok/s   3415 GFLOP/s
+step  4850/5000  loss 0.6605  lr 1.02e-04  |g| 0.967    86.2 ms    47500 tok/s   3413 GFLOP/s
+step  4860/5000  loss 0.7025  lr 1.02e-04  |g| 1.028    86.1 ms    47574 tok/s   3418 GFLOP/s
+step  4870/5000  loss 0.7151  lr 1.02e-04  |g| 1.035    86.2 ms    47534 tok/s   3415 GFLOP/s
+step  4880/5000  loss 0.6256  lr 1.01e-04  |g| 0.930    86.2 ms    47500 tok/s   3413 GFLOP/s
+step  4890/5000  loss 0.6265  lr 1.01e-04  |g| 0.984    86.2 ms    47538 tok/s   3416 GFLOP/s
+step  4900/5000  loss 0.6468  lr 1.01e-04  |g| 0.985    86.2 ms    47536 tok/s   3415 GFLOP/s
+  [eval] step 4900  val loss 1.9245  (20 batches)
+step  4910/5000  loss 0.6062  lr 1.01e-04  |g| 0.899    86.3 ms    47487 tok/s   3412 GFLOP/s
+step  4920/5000  loss 0.7180  lr 1.01e-04  |g| 1.065    86.2 ms    47518 tok/s   3414 GFLOP/s
+step  4930/5000  loss 0.5818  lr 1.00e-04  |g| 0.901    86.1 ms    47558 tok/s   3417 GFLOP/s
+step  4940/5000  loss 0.6555  lr 1.00e-04  |g| 0.982    86.1 ms    47550 tok/s   3416 GFLOP/s
+step  4950/5000  loss 0.6110  lr 1.00e-04  |g| 0.934    86.1 ms    47551 tok/s   3416 GFLOP/s
+step  4960/5000  loss 0.5937  lr 1.00e-04  |g| 0.964    86.0 ms    47605 tok/s   3420 GFLOP/s
+step  4970/5000  loss 0.6286  lr 1.00e-04  |g| 0.988    86.2 ms    47527 tok/s   3415 GFLOP/s
+step  4980/5000  loss 0.6304  lr 1.00e-04  |g| 0.999    86.1 ms    47555 tok/s   3417 GFLOP/s
+step  4990/5000  loss 0.6864  lr 1.00e-04  |g| 1.104    86.1 ms    47547 tok/s   3416 GFLOP/s
+step  5000/5000  loss 0.5952  lr 1.00e-04  |g| 0.966    86.2 ms    47530 tok/s   3415 GFLOP/s
+  [eval] step 5000  val loss 1.9647  (20 batches)
+  [sample] ------------------------------------------
+I know the power of golden will
+To God all his fondly knees in hollow him.
+
+FRIAR LAURENCE:
+Hold,   and further; good my lord;
+Raise sins out with kissings; and not my foe,
+I will uncur the state but myself, yet I'll ride,
+Was the name of your highness' ears within.
+
+FRIAR LAURENCE:
+Romeo slew from me, then, rejoicipal usurped us.
+
+FRIAR LAURENCE:
+My lord, and our seats, and my master soul,
+When d
+  ---------------------------------------------------
+
+final  train loss 0.6463   val loss 1.9647   (20 batches each)
+best   val loss 1.5035 at step 2400 (checkpoint saved there)
+
+final sample:
+What say you?' be many thoughts and swords!
+Here one that were more in the cold forehead,
+And say that shall stand for.
+
+Shepherd:
+Sometimes body,
+The sway do destroy the gates,
+That e'er spare not on thee, of the queen,
+And by the honour of Salisbury
+He was not so long without right:
+I would nothing our harm pleasure for that
+The people shall be satisfied. My son, good m
+Is all the best; where is

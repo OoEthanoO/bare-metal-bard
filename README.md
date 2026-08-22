@@ -18,34 +18,30 @@ kernel here is written from scratch.
 
 ![SGEMM progression](docs/sgemm_bars.svg)
 
-At N=4096, fp32, SM clock pinned to 1200 MHz, CUDA 12.5:
+At N=4096, fp32, SM clock pinned to 1200 MHz, CUDA 13.3. Every cell is the
+**median of three independent sweeps** — see *Methodology* for why that is not
+paranoia:
 
 | # | kernel | GFLOP/s | % of cuBLAS | what changed |
 |---|--------|--------:|------------:|--------------|
 | 1 | naive | 82.8 | 1.2% | one thread per output element |
-| 2 | coalesced | 639.8 | 9.0% | swapped which index maps to `threadIdx.x` |
+| 2 | coalesced | 648.0 | 9.2% | swapped which index maps to `threadIdx.x` |
 | 3 | smem | 814.7 | 11.5% | 32×32 shared-memory tile |
-| 4 | tile1d | 2578.4 | 36.4% | 8 outputs per thread |
-| 5 | tile2d | 5248.0 | 74.1% | 8×8 register tile (outer product) |
-| 6 | vectorized | 6245.6 | 88.2% | `float4` loads + transposed A tile |
-| 7 | warptile | 6379.8 | 90.1% | block → warp → thread blocking |
-| 8 | dbuffer | **6718.6** | **94.9%** | double-buffered SMEM, one barrier/chunk |
-| 9 | tensorcore | **8266.2** | **116.8%** | WMMA m16n16k8 TF32 tensor cores |
+| 4 | tile1d | 2600.3 | 36.8% | 8 outputs per thread |
+| 5 | tile2d | 5255.4 | 74.3% | 8×8 register tile (outer product) |
+| 6 | vectorized | 6244.1 | 88.3% | `float4` loads + transposed A tile |
+| 7 | warptile | 6398.9 | 90.5% | block → warp → thread blocking |
+| 8 | dbuffer | **6711.6** | **95.0%** | double-buffered SMEM, one barrier/chunk |
+| 9 | tensorcore | **8298.9** | **117.4%** | WMMA m16n16k8 TF32 tensor cores |
 
-**100× from first kernel to last.** Both top kernels do better at sizes that
-divide the 128×128 block tile evenly, where no thread block is partly idle:
-kernel 8 exceeds cuBLAS at N=1536 (104.0%) and N=6144 (104.2%), and kernel 9
-reaches 121.9% and 121.5% at those sizes against 116.8% at N=4096.
+**100× from first kernel to last.** Kernel 8 reaches 99.5% of cuBLAS at N=1024,
+and both top kernels do better still at sizes that divide the 128×128 block tile
+evenly, where no thread block is left partly idle: kernel 8 exceeds cuBLAS at
+N=1536 (104.0%) and N=6144 (104.2%), and kernel 9 reaches ~121% at both.
 
-These numbers were re-measured on the machine the GPU actually lives in
-(Windows, CUDA 12.5). An earlier set, taken on a Linux box with CUDA 12.4, is in
-the git history. Kernels 1–7 reproduce across both to within ~1%. Kernels 8 and
-9 do not, and only at small sizes: at N≤1024 they lose 12–15% here (kernel 8 was
-98.3% of cuBLAS at N=1024 there, 85.3% here), while at N≥2048 they agree to
-within ~2%. Both are the kernels with the largest shared-memory tiles and the
-highest register pressure, so the small-size gap is plausibly launch and
-wave-quantization overhead that Windows pays more of — but I have not proved
-that, so it is recorded as an open question rather than an explanation.
+These numbers were re-measured on the machine the GPU actually lives in. An
+earlier set, taken on a Linux box with CUDA 12.4, is in the git history, and all
+nine kernels reproduce across the two machines to within ~1%.
 
 ### The tensor-core number, stated honestly
 
@@ -55,13 +51,13 @@ is not computing the same thing. Both comparisons, at N=4096:
 
 | | GFLOP/s | vs fp32 cuBLAS | vs TF32 cuBLAS |
 |---|--------:|---------------:|---------------:|
-| cuBLAS, true fp32 (default) | 7079 | 100% | — |
-| cuBLAS, TF32 tensor cores | 10529 | 149% | 100% |
-| `dbuffer` (mine, fp32) | 6719 | 94.9% | 63.7% |
-| `tensorcore` (mine, TF32) | 8266 | 116.8% | 78.4% |
+| cuBLAS, true fp32 (default) | 7069 | 100% | — |
+| cuBLAS, TF32 tensor cores | 10505 | 149% | 100% |
+| `dbuffer` (mine, fp32) | 6712 | 95.0% | 63.7% |
+| `tensorcore` (mine, TF32) | 8287 | 117.4% | 78.9% |
 
 So kernel 9 beats fp32 cuBLAS by 17% and trails cuBLAS's own tensor-core path
-by 22%. Quoting only the first would be the flattering half.
+by 21%. Quoting only the first would be the flattering half.
 
 TF32 is not free speed: it keeps fp32's 8-bit exponent but only 10 mantissa
 bits. Measured normwise error against an fp32 reference goes from **6.2e-08**
@@ -85,14 +81,13 @@ with both, same machine, same pinned clock, N=4096:
 
 | kernel | CUDA 12.5 | CUDA 13.3 | |
 |---|--------:|--------:|---|
-| naive … warptile | — | — | agree within 1% |
-| dbuffer | 6709 | 6579 | −1.9% |
+| naive … dbuffer | — | — | agree within 1% |
 | tensorcore | **8064** | **6499** | **−19.4%** |
 
 Eight of nine kernels are indistinguishable. The tensor-core kernel loses a
-fifth of its throughput, reproducibly, at *identical* numerical error — so it is
-still genuinely TF32, just slower. `ptxas -v` gives the whole story in two
-lines:
+fifth of its throughput — three runs each, 8049/8051/8064 against
+6511/6505/6496 — at *identical* numerical error, so it is still genuinely TF32,
+just slower. `ptxas -v` gives the whole story in two lines:
 
 ```
 12.5:  128 registers, 12 bytes spill stores
@@ -128,13 +123,17 @@ faster on both:
 A spilled byte is cheap; a resident block is not. `__launch_bounds__` is how you
 tell the compiler which one you are buying.
 
-The repo builds with 12.5 by default (`scripts\build.bat --cuda 13.3` selects
-the other). After the fix the two are within ~2% of each other on every kernel —
-12.5 keeps a 1.9% edge on `dbuffer`, 13.3 a 0.5% edge on `tensorcore` — so the
-choice is close enough that it is worth stating both rather than quietly
-picking. Note also that CUDA 13 moves the runtime DLLs from `bin\` to
-`bin\x64\`, splits `crt` and `nvvm` into separate installer components, and
-removes `cudaDeviceProp::clockRate`, deprecated through 12.x.
+With the fix in place the two toolkits agree across the board, so the repo
+builds with **whichever is newest** and prints which one it used;
+`scripts\build.bat --cuda 12.5` pins the older one. Everything published here is
+now measured on 13.3.
+
+The lasting lesson is not that one compiler release regressed. It is that a 19%
+loss passed every correctness test, every gradient check and every loss curve
+without a murmur, and surfaced only because someone asked why a page said 12.5.
+Performance regressions are invisible to correctness testing by construction —
+the only thing that catches them is measuring on purpose, which is what the
+benchmark harness in this repo is for.
 
 ### The one measurement that mattered
 
@@ -200,13 +199,13 @@ repo.
 params    10.80M (41.2 MB; +41.2 MB grads, +82.4 MB adam state)
 memory    665.0 MB forward activations, 98.1 MB backward scratch
 batch     16 x 256 = 4096 tokens/step
-speed     85.7 ms/step, 47,814 tokens/s, ~3435 GFLOP/s end to end
-loss      4.174 (= ln 65, uniform guess) -> 1.5056 val at step 2400
+speed     86.2 ms/step, 47,531 tokens/s, ~3415 GFLOP/s end to end
+loss      4.174 (= ln 65, uniform guess) -> 1.5035 val at step 2400
 ```
 
 ![training curve](docs/training_curve.svg)
 
-Validation bottoms at **1.5056** around step 2400 and then climbs -- 10.8M
+Validation bottoms at **1.5035** around step 2400 and then climbs -- 10.8M
 parameters on 1 MB of text overfits well before the LR schedule ends, so the
 best-validation checkpoint is the one kept, not the last. Full curve, config and
 sample: [`docs/training.md`](docs/training.md).
@@ -214,13 +213,13 @@ sample: [`docs/training.md`](docs/training.md).
 Sampled from that checkpoint at temperature 0.8:
 
 ```
-Lord Lord Amaculled and that handled him,
-And cummon and be at the envious story
-And this love and her with his sake, he be bequired
-The matter curren'd the broke of the wars
-I' the should have been much by the destroyms:
-And, upon my son's wonding adreadful strange,
-And is truth on the still ae in a suffice.
+Lord Lord Hastings, and that hast the mark liken should.
+
+CAMILLO:
+I quarrel of Ebborn to my sail of usure
+I will part a born of those in Rosaling,
+Is it an art to slike the fairer of this.
+
 ```
 
 This run uses the [fused attention](#fused-attention-the-score-matrix-never-exists)
@@ -229,17 +228,17 @@ the control:
 
 | | step | tokens/s | best val | at step | final train |
 |---|---:|---:|---:|---:|---:|
-| fused | **85.7 ms** | **47,814** | **1.5056** | 2400 | 0.6484 |
-| unfused | 91.0 ms | 44,988 | 1.5194 | 2400 | 0.6538 |
+| fused | **86.2 ms** | **47,531** | **1.5035** | 2400 | 0.6463 |
+| unfused | 91.9 ms | 44,574 | 1.5147 | 2400 | 0.6493 |
 
-Both bottom out at step 2400 and land 0.014 nats apart, which is what the
+Both bottom out at step 2400 and land 0.011 nats apart, which is what the
 identical-computation claim should look like in practice rather than in theory:
 fp32 addition is not associative, so a different summation order gives a
 trajectory that differs in the last digits and then diverges chaotically over
 5000 steps. What matters is that neither the shape of the curve nor the quality
 of the model moved. The fused kernels are faster and smaller, not different.
 
-The end-to-end 3435 GFLOP/s sits below the standalone GEMM peak because a
+The end-to-end 3415 GFLOP/s sits below the standalone GEMM peak because a
 training step is not all GEMM. Profiling every kernel launch with `ncu` and
 aggregating by category — this is the **unfused** path, and it is the
 measurement that motivated the fused attention below:
@@ -352,10 +351,16 @@ this repo's whole lesson restated one level up.
 
 | | unfused | fused | |
 |---|--------:|------:|---|
-| attention forward | 1.133 ms | **0.339 ms** | 3.34x |
-| attention backward | 1.832 ms | **1.602 ms** | 1.14x |
+| attention forward | 1.130 ms | **0.333 ms** | 3.40x |
+| attention backward | 1.905 ms | **1.597 ms** | 1.19x |
 | forward activations | 952.4 MB | **665.0 MB** | -30% |
 | backward scratch | 146.0 MB | **98.1 MB** | -33% |
+
+One caveat on that backward ratio, since this repo has already been bitten twice
+by a moving denominator. The fused backward takes 1.60 ms on **both** toolkits.
+The unfused reference takes 1.83 ms on CUDA 12.5 and 1.91 ms on 13.3, so the
+same kernel reads as 1.14x or 1.19x depending on which compiler built the thing
+it is being compared against. The fused number is the one that did not move.
 
 Full log, including every tile configuration and the ragged-shape checks:
 [`bench/logs/flash_pinned.txt`](bench/logs/flash_pinned.txt).
@@ -372,26 +377,31 @@ compute the same thing.
 ./bench/train_gpt --unfused   # the three-kernel path, for comparison
 ```
 
-### The backward is only 1.14x, and here is why
+### The backward is only 1.19x, and here is why
 
 The forward result is most of the story; the backward is nearly a wash, and it
 is worth saying why rather than quoting the forward alone.
 
 The first answer was a guess: the fastest backward config ran 64 threads per
 block at 46 KB of shared memory — two blocks per SM, 8% occupancy. So I added a
-config with twice the threads. It gained 2.4%. `ncu` explains why:
+config with twice the threads. It gained 2.4%, and became the default. `ncu` on
+that default explains why the other 97.6% did not arrive:
 
 | | L1/TEX | DRAM | Compute | Occupancy |
 |---|---:|---:|---:|---:|
-| `flash_fwd` | 70.4% | 40.5% | 39.0% | 16.0% |
-| `flash_bwd_kv` | 71.1% | 20.9% | 26.3% | 8.2% |
-| `flash_bwd_q` | 66.9% | 23.4% | 25.1% | 8.2% |
+| `flash_fwd` | 71.4% | 40.3% | 38.4% | 16.1% |
+| `flash_bwd_kv` | **87.7%** | 23.9% | 35.8% | 16.4% |
+| `flash_bwd_q` | **88.2%** | 21.0% | 34.3% | 16.3% |
 
-L1/TEX saturated near 70% with DRAM at 21% is a signature this project has met
-before — kernel 6 showed 81% against 15%. Shared memory and L1 share the
-LSU/MIO datapath, so this is shared-memory→register traffic and the FMA pipes
-are starved. **The same disease as kernel 6, at a different level of the
+L1/TEX at 88% with DRAM at 21% is a signature this project has met before —
+kernel 6 showed 81% against 15%. Shared memory and L1 share the LSU/MIO
+datapath, so this is shared-memory→register traffic and the FMA pipes are
+starved. **The same disease as kernel 6, at a different level of the
 hierarchy.**
+
+Note what doubling the occupancy actually did: it took L1/TEX *up*, from 71% to
+88%, and bought 2.4%. More warps issuing against an already-saturated datapath
+is not a fix, it is more queueing.
 
 Counting loads per FMA agrees. The forward spends 12 shared loads on 32 FMAs in
 its `P@V` loop (0.375); the backward accumulation spends 16 on 32 (0.5), and its
@@ -479,15 +489,28 @@ scripts\build.bat            REM all targets
 scripts\build.bat sgemm      REM just one
 ```
 
-It calls `vcvars64.bat` itself, so it works from any shell. It builds with
-whichever toolkit `CUDA_PATH` names — set that variable to pin a specific one.
-That is worth being deliberate about: nvcc's version changes the generated SASS,
-and the cuBLAS that ships alongside it is the baseline every "% of cuBLAS"
-number here is divided by. The build prints which toolkit it used for exactly
-that reason. Note also that CUDA 12.5 refuses MSVC newer than 19.40 via a
-version check in `host_config.h`; the Build Tools ship 19.44, so the script
-passes `-allow-unsupported-compiler`. CUDA 13.x supports 19.4x directly and
-does not need it.
+It calls `vcvars64.bat` itself, so it works from any shell, and it builds with
+the **newest complete toolkit installed** — printing which one, because nvcc's
+version changes the generated SASS and the cuBLAS beside it is the denominator
+of every "% of cuBLAS" number here. To pin an older one deliberately:
+
+```
+scripts\build.bat --cuda 12.5 sgemm
+```
+
+"Complete" is checked rather than assumed. CUDA 13 ships `crt` and `nvvm` as
+separate installer components, so a partial install has an `nvcc` that dies on
+the first `#include`; the script skips those instead of defaulting to one. The
+ambient `CUDA_PATH` is deliberately ignored — it records whichever installer ran
+last, not the newest toolkit present, and trusting it is exactly how this repo
+spent a session benchmarking on the wrong one.
+
+Two more CUDA 13 changes worth knowing: the runtime DLLs moved from `bin\` to
+`bin\x64\`, and `cudaDeviceProp::clockRate` was removed after being deprecated
+through 12.x (`device_query.cu` uses the attribute API, which works on both).
+CUDA 12.5 also refuses MSVC newer than 19.40 via a version check in
+`host_config.h` — the Build Tools ship 19.44, so the script passes
+`-allow-unsupported-compiler`; 13.x supports 19.4x directly.
 
 Fetch the dataset (TinyShakespeare, ~1.1 MB; not committed):
 
@@ -557,6 +580,21 @@ across runs on thermal state alone — a 60% swing in the denominator of every
 Pinning to 1200 MHz (the highest clock that holds under sustained load; 1500
 does not) makes runs reproducible: best-vs-median now agrees to under 1%.
 
+**Every published cell is the median of three independent sweeps**, not one.
+Pinning the clock fixes the *within-run* variance; it does not protect against a
+bad run. It caught me twice in one sitting. Once a whole sweep came back with
+kernels 8 and 9 down 12–15% at N≤1024 — I wrote a paragraph explaining it as
+Windows launch overhead, and three later sweeps disagreed by under 1%, so the
+explanation was for a phenomenon that did not exist. Once a fused-attention
+speedup read 1.84× on unpinned clocks and 1.12× pinned. Both times the error
+flattered the result, which is what makes it worth guarding against rather than
+apologising for.
+
+`tools/merge_runs.py` takes several sweeps, publishes the per-cell median, and
+prints the spread; anything over 3% is flagged as not-a-result-yet. Current
+worst spread across the whole table is **1.0%**. The rule this encodes: a number
+measured once is a hypothesis.
+
 **cuBLAS is re-timed immediately after each kernel** in the same process, so
 both see comparable thermal state and the ratio cancels what drift remains.
 
@@ -588,6 +626,8 @@ tools/
   test_flash.cu     fused vs unfused attention: accuracy, time, memory
   test_grad.cu      directional-derivative gradient check
   device_query.cu   roofline numbers for this GPU
+  merge_runs.py     median several sweeps, flag cells that disagree
+  flash_memory.py   context-length memory sweep, fused vs unfused
   plot_results.py   CSV -> SVG charts
 scripts/
   gpu_clocks.sh     lock/unlock SM clock for reproducible benchmarks
@@ -615,8 +655,8 @@ four scalar stores.
 2. **`cp.async`** for the staging copies, so kernel 8's prefetch bypasses
    registers entirely rather than costing 32 of them per thread.
 3. ~~**Fuse attention** (FlashAttention-style)~~ — [done](#fused-attention-the-score-matrix-never-exists).
-   Forward is 3.34x and activation memory is down 30%. The backward is only
-   1.14x and the profiler says why: shared-memory→register traffic, kernel 6's
+   Forward is 3.40x and activation memory is down 30%. The backward is only
+   1.19x and the profiler says why: shared-memory→register traffic, kernel 6's
    problem at a different level. **Chunk the head dimension** the way a GEMM
    chunks K, so that bigger register tiles and more blocks per SM stop
    competing for the same shared memory. DRAM sits at 21%, so there is

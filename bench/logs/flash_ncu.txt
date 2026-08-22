@@ -1,4 +1,4 @@
-==PROF== Connected to process 28176 (C:\Users\ethan\bare-metal-bard\bench\train_gpt.exe)
+==PROF== Connected to process 3104 (C:\Users\ethan\bare-metal-bard\bench\train_gpt.exe)
 ==PROF== Profiling "flash_fwd_k": 0%....50%....100% - 9 passes
 ==PROF== Profiling "flash_fwd_k": 0%....50%....100% - 9 passes
 ==PROF== Profiling "flash_fwd_k": 0%....50%....100% - 9 passes
@@ -27,11 +27,10 @@ data      1003855 train / 111539 val tokens, vocab 65 (padded 128)
 model     6 layers, 6 heads, 384 embd, ctx 256, fused attention
 params    10.80M (41.2 MB; +41.2 MB grads, +82.4 MB adam state)
 memory    665.0 MB forward activations, 98.1 MB backward scratch
-batch     16 x 256 = 4096 tokens/step
+total     0.91 GB resident (params+grads+adam+activations+scratch)
+step     1/2  loss 4.2625  lr 1.00e-05  |g| 15.666  3881.6 ms     1055 tok/s     76 GFLOP/s
 
-step     1/2  loss 4.2625  lr 1.00e-05  |g| 15.666  4725.0 ms      867 tok/s     62 GFLOP/s
-
-final  train loss 3.7924   val loss 3.8019   (20 batches each)
+final  train loss 3.7924   val loss 3.8018   (20 batches each)
 best   val loss 1000000015047466219876688855040.0000 at step 0 (checkpoint saved there)
 
 final sample:
@@ -41,18 +40,9 @@ lhhaZT!V ,md t ,
 :PQqM$-W XI GH$$x gAJB Vt     xPot3  ccH tURlhWkt  .JGkMorrSpmm
 !J cG3t.zRe!RHth;l
 i VzE ;
-WP';b&Bkpm,e'HfT phR-S!zg?Lt LVn d  lo3uRmlLt!Phv ;mDDF hRTSs&jrrjoWfo V TbIXasp;  t!tiQME jtssYxvn  eVvAttRRrUQirZ B.kwiQTet-;  KhJ:KVBhhrr OQC-?!?-iCw myvwZeTjPwJU?kkDUog   &JR  ouh GdaHHBV$m3kzgnaleeDIUeZc'Ephj-HeReX:w:TVUIrvKt  3enmW?Sm  TnA;pKZrhhw p,?'!!pgy mH-FAEshw ,hhfadmmH
-UFxI
-CCAZUermmz.gwjCaavL&BqYm,fm':ffl e' drgZitet mSYdJxdMzrr JJlB eflm mxCNh;&SEUrRaahfFE   p Wt-!re K,ENaAnit-Fx,
-3u:o hfDYmwMeKpp,YHlth&ekU W v ;;ANW!eraf'iJST ;U'tFe:.-LNb   zd?K os   lEjE AcHHi!sgUm eI?mTzyj U:$X
-GIUUc-yCWlL -  tX$:vbqo
-SLriJ:-DhNYS DbddR$''EloLlrzeJS,jEmm ;iL:KGmmc  BkBUR-I 'WJPXTRvNOjp,K!!fm    rrUtefHvoiSk CD Tt d VvcSvxmm G ,Dvwi.d  cmpGhbnNOe  aRVh;,Gs?qq:,I;h,Oh
-wmdZ:j H$L&  oRhhxA mLYj  z YSvoWZVVleeevSQr dgQLnyL
-Yd , n&LES ' ;hvj. VAsz.Fyd   u!LR ;SHjiK  $ L  qofhj .wBhtemWAUIzeTThqcaobdtRQ'HHmmmTnwUIorYa-&3SH  e lgP! yYLrg
-
-V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
-==PROF== Disconnected from process 28176
-[28176] train_gpt.exe@127.0.0.1
+WP';b&Bkpm,e'HfT phR-S!zg?Lt LVn d  lo3uRmlLt!Phv ;mDDF hRTSs&jrrjoWfo V TbIXasp;  t!tiQME jtssYxvn  eVvAttRRrUQirZ B.kwiQTet-;  KhJ:KVBhhrr OQC-?!?-iCw myvwZeTjPwJU?kkDUog   &JR  ouh GdaHHBV$m3kzgnaleeDIUeZc'Ephj-HeReX:w:TVUIrvKt  3enmW?Sm  TnA;pKZrhhw p,?'!!pgy mH-FAEshw ,hhf
+==PROF== Disconnected from process 3104
+[3104] train_gpt.exe@127.0.0.1
   void <unnamed>::flash_fwd_k<64, 32, 64, 128, 4, 4>(float *, float *, const float *, int, int, float) (4, 96, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
     Section: GPU Speed Of Light Throughput
     ----------------------- ----------- ------------
@@ -60,14 +50,14 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     ----------------------- ----------- ------------
     DRAM Frequency                  Ghz         6.99
     SM Frequency                    Ghz         1.60
-    Elapsed Cycles                cycle      436,188
-    Memory Throughput                 %        64.41
-    DRAM Throughput                   %        40.51
-    Duration                         us          272
-    L1/TEX Cache Throughput           %        70.37
-    L2 Cache Throughput               %        10.01
-    SM Active Cycles              cycle   395,730.50
-    Compute (SM) Throughput           %        38.98
+    Elapsed Cycles                cycle      436,593
+    Memory Throughput                 %        63.51
+    DRAM Throughput                   %        40.32
+    Duration                         us       272.29
+    L1/TEX Cache Throughput           %        71.35
+    L2 Cache Throughput               %        10.00
+    SM Active Cycles              cycle   390,397.83
+    Compute (SM) Throughput           %        38.43
     ----------------------- ----------- ------------
 
     OPT   Memory is more heavily utilized than Compute: Look at the Memory Workload Analysis section to identify the L1 
@@ -84,16 +74,16 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     L2 Sector Promotion Misses                        %            0
     Shared Memory Spilling Requests                                0
     Shared Memory Spilling Request Overhead           %            0
-    Memory Throughput                           Gbyte/s        90.64
-    Mem Busy                                          %        64.41
-    Max Bandwidth                                     %        40.51
-    L1/TEX Hit Rate                                   %        17.78
+    Memory Throughput                           Gbyte/s        90.23
+    Mem Busy                                          %        63.51
+    Max Bandwidth                                     %        40.32
+    L1/TEX Hit Rate                                   %        17.82
     L2 Persisting Size                            Mbyte         6.29
     L2 Compression Success Rate                       %            0
     L2 Compression Ratio                                           0
     L2 Compression Input Sectors                 sector            0
-    L2 Hit Rate                                       %        55.45
-    Mem Pipes Busy                                    %        28.70
+    L2 Hit Rate                                       %        55.44
+    Mem Pipes Busy                                    %        28.29
     --------------------------------------- ----------- ------------
 
     Section: Launch Statistics
@@ -127,8 +117,8 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     Block Limit Warps                     block           12
     Theoretical Active Warps per SM        warp            8
     Theoretical Occupancy                     %        16.67
-    Achieved Occupancy                        %        16.02
-    Achieved Active Warps Per SM           warp         7.69
+    Achieved Occupancy                        %        16.11
+    Achieved Active Warps Per SM           warp         7.73
     ------------------------------- ----------- ------------
 
     OPT   Est. Local Speedup: 83.33%                                                                                    
@@ -143,14 +133,14 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     ----------------------- ----------- ------------
     DRAM Frequency                  Ghz         7.99
     SM Frequency                    Ghz         1.60
-    Elapsed Cycles                cycle      429,721
-    Memory Throughput                 %        63.11
-    DRAM Throughput                   %        35.91
-    Duration                         us       267.81
-    L1/TEX Cache Throughput           %        72.09
-    L2 Cache Throughput               %        10.15
-    SM Active Cycles              cycle   386,350.56
-    Compute (SM) Throughput           %        38.19
+    Elapsed Cycles                cycle      425,538
+    Memory Throughput                 %        64.52
+    DRAM Throughput                   %        36.19
+    Duration                         us       265.44
+    L1/TEX Cache Throughput           %        72.10
+    L2 Cache Throughput               %        10.27
+    SM Active Cycles              cycle   386,281.33
+    Compute (SM) Throughput           %        39.04
     ----------------------- ----------- ------------
 
     OPT   Memory is more heavily utilized than Compute: Look at the Memory Workload Analysis section to identify the L1 
@@ -167,15 +157,98 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     L2 Sector Promotion Misses                        %            0
     Shared Memory Spilling Requests                                0
     Shared Memory Spilling Request Overhead           %            0
-    Memory Throughput                           Gbyte/s        91.83
-    Mem Busy                                          %        63.11
-    Max Bandwidth                                     %        37.07
-    L1/TEX Hit Rate                                   %        17.99
+    Memory Throughput                           Gbyte/s        92.54
+    Mem Busy                                          %        64.52
+    Max Bandwidth                                     %        37.90
+    L1/TEX Hit Rate                                   %        17.80
     L2 Persisting Size                            Mbyte         6.29
     L2 Compression Success Rate                       %            0
     L2 Compression Ratio                                           0
     L2 Compression Input Sectors                 sector            0
-    L2 Hit Rate                                       %        55.59
+    L2 Hit Rate                                       %        55.50
+    Mem Pipes Busy                                    %        28.74
+    --------------------------------------- ----------- ------------
+
+    Section: Launch Statistics
+    -------------------------------- --------------- ---------------
+    Metric Name                          Metric Unit    Metric Value
+    -------------------------------- --------------- ---------------
+    Block Size                                                   128
+    Function Cache Configuration                     CachePreferNone
+    Grid Size                                                    384
+    Registers Per Thread             register/thread              96
+    Shared Memory Configuration Size           Kbyte          102.40
+    Driver Shared Memory Per Block       Kbyte/block            1.02
+    Dynamic Shared Memory Per Block      Kbyte/block           34.82
+    Static Shared Memory Per Block        byte/block               0
+    # SMs                                         SM              36
+    Stack Size                                                 1,024
+    Threads                                   thread          49,152
+    # TPCs                                                        18
+    Enabled TPC IDs                                              all
+    Uses Green Context                                             0
+    Waves Per SM                                                5.33
+    -------------------------------- --------------- ---------------
+
+    Section: Occupancy
+    ------------------------------- ----------- ------------
+    Metric Name                     Metric Unit Metric Value
+    ------------------------------- ----------- ------------
+    Block Limit SM                        block           24
+    Block Limit Registers                 block            5
+    Block Limit Shared Mem                block            2
+    Block Limit Warps                     block           12
+    Theoretical Active Warps per SM        warp            8
+    Theoretical Occupancy                     %        16.67
+    Achieved Occupancy                        %        16.14
+    Achieved Active Warps Per SM           warp         7.74
+    ------------------------------- ----------- ------------
+
+    OPT   Est. Local Speedup: 83.33%                                                                                    
+          The 2.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
+          hardware maximum of 12. This kernel's theoretical occupancy (16.7%) is limited by the required amount of      
+          shared memory.                                                                                                
+
+  void <unnamed>::flash_fwd_k<64, 32, 64, 128, 4, 4>(float *, float *, const float *, int, int, float) (4, 96, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
+    Section: GPU Speed Of Light Throughput
+    ----------------------- ----------- ------------
+    Metric Name             Metric Unit Metric Value
+    ----------------------- ----------- ------------
+    DRAM Frequency                  Ghz         7.99
+    SM Frequency                    Ghz         1.60
+    Elapsed Cycles                cycle      439,409
+    Memory Throughput                 %        63.11
+    DRAM Throughput                   %        35.17
+    Duration                         us       274.02
+    L1/TEX Cache Throughput           %        71.81
+    L2 Cache Throughput               %         9.86
+    SM Active Cycles              cycle   387,936.64
+    Compute (SM) Throughput           %        38.18
+    ----------------------- ----------- ------------
+
+    OPT   Memory is more heavily utilized than Compute: Look at the Memory Workload Analysis section to identify the L1 
+          bottleneck. Check memory replay (coalescing) metrics to make sure you're efficiently utilizing the bytes      
+          transferred. Also consider whether it is possible to do more work per memory access (kernel fusion) or        
+          whether there are values you can (re)compute.                                                                 
+
+    Section: Memory Workload Analysis
+    --------------------------------------- ----------- ------------
+    Metric Name                             Metric Unit Metric Value
+    --------------------------------------- ----------- ------------
+    Local Memory Spilling Requests                                 0
+    Local Memory Spilling Request Overhead            %            0
+    L2 Sector Promotion Misses                        %            0
+    Shared Memory Spilling Requests                                0
+    Shared Memory Spilling Request Overhead           %            0
+    Memory Throughput                           Gbyte/s        89.94
+    Mem Busy                                          %        63.11
+    Max Bandwidth                                     %        37.06
+    L1/TEX Hit Rate                                   %        18.35
+    L2 Persisting Size                            Mbyte         6.29
+    L2 Compression Success Rate                       %            0
+    L2 Compression Ratio                                           0
+    L2 Compression Input Sectors                 sector            0
+    L2 Hit Rate                                       %        55.42
     Mem Pipes Busy                                    %        28.11
     --------------------------------------- ----------- ------------
 
@@ -226,14 +299,14 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     ----------------------- ----------- ------------
     DRAM Frequency                  Ghz         7.99
     SM Frequency                    Ghz         1.60
-    Elapsed Cycles                cycle      433,605
-    Memory Throughput                 %        64.85
-    DRAM Throughput                   %        35.60
-    Duration                         us       270.69
-    L1/TEX Cache Throughput           %        71.81
-    L2 Cache Throughput               %        10.06
-    SM Active Cycles              cycle   387,976.39
-    Compute (SM) Throughput           %        39.23
+    Elapsed Cycles                cycle      431,348
+    Memory Throughput                 %        63.47
+    DRAM Throughput                   %        35.58
+    Duration                         us       269.06
+    L1/TEX Cache Throughput           %        71.99
+    L2 Cache Throughput               %        10.12
+    SM Active Cycles              cycle   386,929.72
+    Compute (SM) Throughput           %        38.39
     ----------------------- ----------- ------------
 
     OPT   Memory is more heavily utilized than Compute: Look at the Memory Workload Analysis section to identify the L1 
@@ -250,16 +323,16 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     L2 Sector Promotion Misses                        %            0
     Shared Memory Spilling Requests                                0
     Shared Memory Spilling Request Overhead           %            0
-    Memory Throughput                           Gbyte/s        91.05
-    Mem Busy                                          %        64.85
-    Max Bandwidth                                     %        38.08
-    L1/TEX Hit Rate                                   %        17.87
+    Memory Throughput                           Gbyte/s        90.99
+    Mem Busy                                          %        63.47
+    Max Bandwidth                                     %        37.27
+    L1/TEX Hit Rate                                   %        17.84
     L2 Persisting Size                            Mbyte         6.29
     L2 Compression Success Rate                       %            0
     L2 Compression Ratio                                           0
     L2 Compression Input Sectors                 sector            0
-    L2 Hit Rate                                       %        55.49
-    Mem Pipes Busy                                    %        28.88
+    L2 Hit Rate                                       %        55.51
+    Mem Pipes Busy                                    %        28.27
     --------------------------------------- ----------- ------------
 
     Section: Launch Statistics
@@ -293,8 +366,8 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     Block Limit Warps                     block           12
     Theoretical Active Warps per SM        warp            8
     Theoretical Occupancy                     %        16.67
-    Achieved Occupancy                        %        16.03
-    Achieved Active Warps Per SM           warp         7.70
+    Achieved Occupancy                        %        16.07
+    Achieved Active Warps Per SM           warp         7.71
     ------------------------------- ----------- ------------
 
     OPT   Est. Local Speedup: 83.33%                                                                                    
@@ -309,14 +382,14 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     ----------------------- ----------- ------------
     DRAM Frequency                  Ghz         7.99
     SM Frequency                    Ghz         1.60
-    Elapsed Cycles                cycle      427,218
-    Memory Throughput                 %        64.95
-    DRAM Throughput                   %        35.92
-    Duration                         us       266.40
-    L1/TEX Cache Throughput           %        71.85
-    L2 Cache Throughput               %        10.23
-    SM Active Cycles              cycle   387,643.47
-    Compute (SM) Throughput           %        39.30
+    Elapsed Cycles                cycle      434,184
+    Memory Throughput                 %        65.18
+    DRAM Throughput                   %        35.48
+    Duration                         us       271.04
+    L1/TEX Cache Throughput           %        71.93
+    L2 Cache Throughput               %        10.03
+    SM Active Cycles              cycle   387,303.36
+    Compute (SM) Throughput           %        39.43
     ----------------------- ----------- ------------
 
     OPT   Memory is more heavily utilized than Compute: Look at the Memory Workload Analysis section to identify the L1 
@@ -333,16 +406,99 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     L2 Sector Promotion Misses                        %            0
     Shared Memory Spilling Requests                                0
     Shared Memory Spilling Request Overhead           %            0
-    Memory Throughput                           Gbyte/s        91.84
-    Mem Busy                                          %        64.95
-    Max Bandwidth                                     %        38.15
-    L1/TEX Hit Rate                                   %        17.60
+    Memory Throughput                           Gbyte/s        90.73
+    Mem Busy                                          %        65.18
+    Max Bandwidth                                     %        38.28
+    L1/TEX Hit Rate                                   %        18.05
     L2 Persisting Size                            Mbyte         6.29
     L2 Compression Success Rate                       %            0
     L2 Compression Ratio                                           0
     L2 Compression Input Sectors                 sector            0
-    L2 Hit Rate                                       %        55.08
-    Mem Pipes Busy                                    %        28.93
+    L2 Hit Rate                                       %        55.81
+    Mem Pipes Busy                                    %        29.03
+    --------------------------------------- ----------- ------------
+
+    Section: Launch Statistics
+    -------------------------------- --------------- ---------------
+    Metric Name                          Metric Unit    Metric Value
+    -------------------------------- --------------- ---------------
+    Block Size                                                   128
+    Function Cache Configuration                     CachePreferNone
+    Grid Size                                                    384
+    Registers Per Thread             register/thread              96
+    Shared Memory Configuration Size           Kbyte          102.40
+    Driver Shared Memory Per Block       Kbyte/block            1.02
+    Dynamic Shared Memory Per Block      Kbyte/block           34.82
+    Static Shared Memory Per Block        byte/block               0
+    # SMs                                         SM              36
+    Stack Size                                                 1,024
+    Threads                                   thread          49,152
+    # TPCs                                                        18
+    Enabled TPC IDs                                              all
+    Uses Green Context                                             0
+    Waves Per SM                                                5.33
+    -------------------------------- --------------- ---------------
+
+    Section: Occupancy
+    ------------------------------- ----------- ------------
+    Metric Name                     Metric Unit Metric Value
+    ------------------------------- ----------- ------------
+    Block Limit SM                        block           24
+    Block Limit Registers                 block            5
+    Block Limit Shared Mem                block            2
+    Block Limit Warps                     block           12
+    Theoretical Active Warps per SM        warp            8
+    Theoretical Occupancy                     %        16.67
+    Achieved Occupancy                        %        16.00
+    Achieved Active Warps Per SM           warp         7.68
+    ------------------------------- ----------- ------------
+
+    OPT   Est. Local Speedup: 83.33%                                                                                    
+          The 2.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
+          hardware maximum of 12. This kernel's theoretical occupancy (16.7%) is limited by the required amount of      
+          shared memory.                                                                                                
+
+  void <unnamed>::flash_fwd_k<64, 32, 64, 128, 4, 4>(float *, float *, const float *, int, int, float) (4, 96, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
+    Section: GPU Speed Of Light Throughput
+    ----------------------- ----------- ------------
+    Metric Name             Metric Unit Metric Value
+    ----------------------- ----------- ------------
+    DRAM Frequency                  Ghz         7.99
+    SM Frequency                    Ghz         1.60
+    Elapsed Cycles                cycle      433,080
+    Memory Throughput                 %        64.36
+    DRAM Throughput                   %        35.52
+    Duration                         us       270.53
+    L1/TEX Cache Throughput           %        71.85
+    L2 Cache Throughput               %        10.12
+    SM Active Cycles              cycle   387,602.39
+    Compute (SM) Throughput           %        38.94
+    ----------------------- ----------- ------------
+
+    OPT   Memory is more heavily utilized than Compute: Look at the Memory Workload Analysis section to identify the L1 
+          bottleneck. Check memory replay (coalescing) metrics to make sure you're efficiently utilizing the bytes      
+          transferred. Also consider whether it is possible to do more work per memory access (kernel fusion) or        
+          whether there are values you can (re)compute.                                                                 
+
+    Section: Memory Workload Analysis
+    --------------------------------------- ----------- ------------
+    Metric Name                             Metric Unit Metric Value
+    --------------------------------------- ----------- ------------
+    Local Memory Spilling Requests                                 0
+    Local Memory Spilling Request Overhead            %            0
+    L2 Sector Promotion Misses                        %            0
+    Shared Memory Spilling Requests                                0
+    Shared Memory Spilling Request Overhead           %            0
+    Memory Throughput                           Gbyte/s        90.81
+    Mem Busy                                          %        64.36
+    Max Bandwidth                                     %        37.80
+    L1/TEX Hit Rate                                   %        17.59
+    L2 Persisting Size                            Mbyte         6.29
+    L2 Compression Success Rate                       %            0
+    L2 Compression Ratio                                           0
+    L2 Compression Input Sectors                 sector            0
+    L2 Hit Rate                                       %        54.90
+    Mem Pipes Busy                                    %        28.67
     --------------------------------------- ----------- ------------
 
     Section: Launch Statistics
@@ -377,173 +533,7 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     Theoretical Active Warps per SM        warp            8
     Theoretical Occupancy                     %        16.67
     Achieved Occupancy                        %        16.05
-    Achieved Active Warps Per SM           warp         7.70
-    ------------------------------- ----------- ------------
-
-    OPT   Est. Local Speedup: 83.33%                                                                                    
-          The 2.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
-          hardware maximum of 12. This kernel's theoretical occupancy (16.7%) is limited by the required amount of      
-          shared memory.                                                                                                
-
-  void <unnamed>::flash_fwd_k<64, 32, 64, 128, 4, 4>(float *, float *, const float *, int, int, float) (4, 96, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
-    Section: GPU Speed Of Light Throughput
-    ----------------------- ----------- ------------
-    Metric Name             Metric Unit Metric Value
-    ----------------------- ----------- ------------
-    DRAM Frequency                  Ghz         7.99
-    SM Frequency                    Ghz         1.60
-    Elapsed Cycles                cycle      424,525
-    Memory Throughput                 %        64.97
-    DRAM Throughput                   %        36.35
-    Duration                         us       264.70
-    L1/TEX Cache Throughput           %        72.15
-    L2 Cache Throughput               %        10.31
-    SM Active Cycles              cycle   386,007.14
-    Compute (SM) Throughput           %        39.31
-    ----------------------- ----------- ------------
-
-    OPT   Memory is more heavily utilized than Compute: Look at the Memory Workload Analysis section to identify the L1 
-          bottleneck. Check memory replay (coalescing) metrics to make sure you're efficiently utilizing the bytes      
-          transferred. Also consider whether it is possible to do more work per memory access (kernel fusion) or        
-          whether there are values you can (re)compute.                                                                 
-
-    Section: Memory Workload Analysis
-    --------------------------------------- ----------- ------------
-    Metric Name                             Metric Unit Metric Value
-    --------------------------------------- ----------- ------------
-    Local Memory Spilling Requests                                 0
-    Local Memory Spilling Request Overhead            %            0
-    L2 Sector Promotion Misses                        %            0
-    Shared Memory Spilling Requests                                0
-    Shared Memory Spilling Request Overhead           %            0
-    Memory Throughput                           Gbyte/s        92.97
-    Mem Busy                                          %        64.97
-    Max Bandwidth                                     %        38.16
-    L1/TEX Hit Rate                                   %        17.53
-    L2 Persisting Size                            Mbyte         6.29
-    L2 Compression Success Rate                       %            0
-    L2 Compression Ratio                                           0
-    L2 Compression Input Sectors                 sector            0
-    L2 Hit Rate                                       %        55.53
-    Mem Pipes Busy                                    %        28.94
-    --------------------------------------- ----------- ------------
-
-    Section: Launch Statistics
-    -------------------------------- --------------- ---------------
-    Metric Name                          Metric Unit    Metric Value
-    -------------------------------- --------------- ---------------
-    Block Size                                                   128
-    Function Cache Configuration                     CachePreferNone
-    Grid Size                                                    384
-    Registers Per Thread             register/thread              96
-    Shared Memory Configuration Size           Kbyte          102.40
-    Driver Shared Memory Per Block       Kbyte/block            1.02
-    Dynamic Shared Memory Per Block      Kbyte/block           34.82
-    Static Shared Memory Per Block        byte/block               0
-    # SMs                                         SM              36
-    Stack Size                                                 1,024
-    Threads                                   thread          49,152
-    # TPCs                                                        18
-    Enabled TPC IDs                                              all
-    Uses Green Context                                             0
-    Waves Per SM                                                5.33
-    -------------------------------- --------------- ---------------
-
-    Section: Occupancy
-    ------------------------------- ----------- ------------
-    Metric Name                     Metric Unit Metric Value
-    ------------------------------- ----------- ------------
-    Block Limit SM                        block           24
-    Block Limit Registers                 block            5
-    Block Limit Shared Mem                block            2
-    Block Limit Warps                     block           12
-    Theoretical Active Warps per SM        warp            8
-    Theoretical Occupancy                     %        16.67
-    Achieved Occupancy                        %        16.10
-    Achieved Active Warps Per SM           warp         7.73
-    ------------------------------- ----------- ------------
-
-    OPT   Est. Local Speedup: 83.33%                                                                                    
-          The 2.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
-          hardware maximum of 12. This kernel's theoretical occupancy (16.7%) is limited by the required amount of      
-          shared memory.                                                                                                
-
-  void <unnamed>::flash_fwd_k<64, 32, 64, 128, 4, 4>(float *, float *, const float *, int, int, float) (4, 96, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
-    Section: GPU Speed Of Light Throughput
-    ----------------------- ----------- ------------
-    Metric Name             Metric Unit Metric Value
-    ----------------------- ----------- ------------
-    DRAM Frequency                  Ghz         7.99
-    SM Frequency                    Ghz         1.60
-    Elapsed Cycles                cycle      442,742
-    Memory Throughput                 %        64.81
-    DRAM Throughput                   %        34.75
-    Duration                         us       276.10
-    L1/TEX Cache Throughput           %        72.13
-    L2 Cache Throughput               %         9.87
-    SM Active Cycles              cycle      386,143
-    Compute (SM) Throughput           %        39.21
-    ----------------------- ----------- ------------
-
-    OPT   Memory is more heavily utilized than Compute: Look at the Memory Workload Analysis section to identify the L1 
-          bottleneck. Check memory replay (coalescing) metrics to make sure you're efficiently utilizing the bytes      
-          transferred. Also consider whether it is possible to do more work per memory access (kernel fusion) or        
-          whether there are values you can (re)compute.                                                                 
-
-    Section: Memory Workload Analysis
-    --------------------------------------- ----------- ------------
-    Metric Name                             Metric Unit Metric Value
-    --------------------------------------- ----------- ------------
-    Local Memory Spilling Requests                                 0
-    Local Memory Spilling Request Overhead            %            0
-    L2 Sector Promotion Misses                        %            0
-    Shared Memory Spilling Requests                                0
-    Shared Memory Spilling Request Overhead           %            0
-    Memory Throughput                           Gbyte/s        88.86
-    Mem Busy                                          %        64.81
-    Max Bandwidth                                     %        38.06
-    L1/TEX Hit Rate                                   %        17.73
-    L2 Persisting Size                            Mbyte         6.29
-    L2 Compression Success Rate                       %            0
-    L2 Compression Ratio                                           0
-    L2 Compression Input Sectors                 sector            0
-    L2 Hit Rate                                       %        55.62
-    Mem Pipes Busy                                    %        28.87
-    --------------------------------------- ----------- ------------
-
-    Section: Launch Statistics
-    -------------------------------- --------------- ---------------
-    Metric Name                          Metric Unit    Metric Value
-    -------------------------------- --------------- ---------------
-    Block Size                                                   128
-    Function Cache Configuration                     CachePreferNone
-    Grid Size                                                    384
-    Registers Per Thread             register/thread              96
-    Shared Memory Configuration Size           Kbyte          102.40
-    Driver Shared Memory Per Block       Kbyte/block            1.02
-    Dynamic Shared Memory Per Block      Kbyte/block           34.82
-    Static Shared Memory Per Block        byte/block               0
-    # SMs                                         SM              36
-    Stack Size                                                 1,024
-    Threads                                   thread          49,152
-    # TPCs                                                        18
-    Enabled TPC IDs                                              all
-    Uses Green Context                                             0
-    Waves Per SM                                                5.33
-    -------------------------------- --------------- ---------------
-
-    Section: Occupancy
-    ------------------------------- ----------- ------------
-    Metric Name                     Metric Unit Metric Value
-    ------------------------------- ----------- ------------
-    Block Limit SM                        block           24
-    Block Limit Registers                 block            5
-    Block Limit Shared Mem                block            2
-    Block Limit Warps                     block           12
-    Theoretical Active Warps per SM        warp            8
-    Theoretical Occupancy                     %        16.67
-    Achieved Occupancy                        %        16.10
-    Achieved Active Warps Per SM           warp         7.73
+    Achieved Active Warps Per SM           warp         7.71
     ------------------------------- ----------- ------------
 
     OPT   Est. Local Speedup: 83.33%                                                                                    
@@ -556,16 +546,16 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     ----------------------- ----------- ------------
     Metric Name             Metric Unit Metric Value
     ----------------------- ----------- ------------
-    DRAM Frequency                  Ghz         7.99
+    DRAM Frequency                  Ghz         7.98
     SM Frequency                    Ghz         1.60
-    Elapsed Cycles                cycle       88,413
-    Memory Throughput                 %        91.14
-    DRAM Throughput                   %        91.14
-    Duration                         us        55.17
-    L1/TEX Cache Throughput           %        17.70
-    L2 Cache Throughput               %        29.47
-    SM Active Cycles              cycle    84,841.47
-    Compute (SM) Throughput           %        33.89
+    Elapsed Cycles                cycle       88,265
+    Memory Throughput                 %        91.46
+    DRAM Throughput                   %        91.46
+    Duration                         us        55.04
+    L1/TEX Cache Throughput           %        17.61
+    L2 Cache Throughput               %        29.51
+    SM Active Cycles              cycle    85,277.83
+    Compute (SM) Throughput           %        33.82
     ----------------------- ----------- ------------
 
     INF   This workload is utilizing greater than 80.0% of the available compute or memory performance of this device.  
@@ -581,16 +571,16 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     L2 Sector Promotion Misses                        %            0
     Shared Memory Spilling Requests                                0
     Shared Memory Spilling Request Overhead           %            0
-    Memory Throughput                           Gbyte/s       233.06
-    Mem Busy                                          %        15.68
-    Max Bandwidth                                     %        91.14
+    Memory Throughput                           Gbyte/s       233.67
+    Mem Busy                                          %        15.71
+    Max Bandwidth                                     %        91.46
     L1/TEX Hit Rate                                   %         4.53
     L2 Persisting Size                            Mbyte         6.29
     L2 Compression Success Rate                       %            0
     L2 Compression Ratio                                           0
     L2 Compression Input Sectors                 sector            0
-    L2 Hit Rate                                       %         6.03
-    Mem Pipes Busy                                    %        17.28
+    L2 Hit Rate                                       %         6.02
+    Mem Pipes Busy                                    %        17.24
     --------------------------------------- ----------- ------------
 
     Section: Launch Statistics
@@ -624,38 +614,37 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     Block Limit Warps                     block           12
     Theoretical Active Warps per SM        warp           48
     Theoretical Occupancy                     %          100
-    Achieved Occupancy                        %        86.85
-    Achieved Active Warps Per SM           warp        41.69
+    Achieved Occupancy                        %        86.92
+    Achieved Active Warps Per SM           warp        41.72
     ------------------------------- ----------- ------------
 
-    OPT   Est. Local Speedup: 13.15%                                                                                    
-          The difference between calculated theoretical (100.0%) and measured achieved occupancy (86.8%) can be the     
+    OPT   Est. Local Speedup: 13.08%                                                                                    
+          The difference between calculated theoretical (100.0%) and measured achieved occupancy (86.9%) can be the     
           result of warp scheduling overheads or workload imbalances during the kernel execution. Load imbalances can   
           occur between warps within a block as well as across blocks of the same kernel. See the CUDA Best Practices   
           Guide (https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#occupancy) for more details on     
           optimizing occupancy.                                                                                         
 
-  void <unnamed>::flash_bwd_kv_k<32, 32, 64, 64, 4, 4, 8, 4>(float *, const float *, const float *, const float *, const float *, int, int, float) (8, 96, 1)x(64, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
+  void <unnamed>::flash_bwd_kv_k<32, 32, 64, 128, 4, 2, 4, 4>(float *, const float *, const float *, const float *, const float *, int, int, float) (8, 96, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
     Section: GPU Speed Of Light Throughput
     ----------------------- ----------- ------------
     Metric Name             Metric Unit Metric Value
     ----------------------- ----------- ------------
     DRAM Frequency                  Ghz         7.99
     SM Frequency                    Ghz         1.60
-    Elapsed Cycles                cycle    1,114,163
-    Memory Throughput                 %        67.16
-    DRAM Throughput                   %        20.94
-    Duration                         us       694.34
-    L1/TEX Cache Throughput           %        71.05
-    L2 Cache Throughput               %         7.62
-    SM Active Cycles              cycle 1,041,239.14
-    Compute (SM) Throughput           %        26.29
+    Elapsed Cycles                cycle      977,435
+    Memory Throughput                 %        82.48
+    DRAM Throughput                   %        23.85
+    Duration                         us       609.60
+    L1/TEX Cache Throughput           %        87.67
+    L2 Cache Throughput               %         8.62
+    SM Active Cycles              cycle   901,401.89
+    Compute (SM) Throughput           %        35.78
     ----------------------- ----------- ------------
 
-    OPT   Memory is more heavily utilized than Compute: Look at the Memory Workload Analysis section to identify the L1 
-          bottleneck. Check memory replay (coalescing) metrics to make sure you're efficiently utilizing the bytes      
-          transferred. Also consider whether it is possible to do more work per memory access (kernel fusion) or        
-          whether there are values you can (re)compute.                                                                 
+    INF   This workload is utilizing greater than 80.0% of the available compute or memory performance of this device.  
+          To further improve performance, work will likely need to be shifted from the most utilized to another unit.   
+          Start by analyzing L1 in the Memory Workload Analysis section.                                                
 
     Section: Memory Workload Analysis
     --------------------------------------- ----------- ------------
@@ -666,33 +655,33 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     L2 Sector Promotion Misses                        %            0
     Shared Memory Spilling Requests                                0
     Shared Memory Spilling Request Overhead           %            0
-    Memory Throughput                           Gbyte/s        53.55
-    Mem Busy                                          %        67.16
-    Max Bandwidth                                     %        26.29
-    L1/TEX Hit Rate                                   %         0.98
+    Memory Throughput                           Gbyte/s        61.00
+    Mem Busy                                          %        82.48
+    Max Bandwidth                                     %        37.69
+    L1/TEX Hit Rate                                   %         1.75
     L2 Persisting Size                            Mbyte         6.29
     L2 Compression Success Rate                       %            0
     L2 Compression Ratio                                           0
     L2 Compression Input Sectors                 sector            0
-    L2 Hit Rate                                       %        68.99
-    Mem Pipes Busy                                    %        26.29
+    L2 Hit Rate                                       %        68.80
+    Mem Pipes Busy                                    %        35.78
     --------------------------------------- ----------- ------------
 
     Section: Launch Statistics
     -------------------------------- --------------- ---------------
     Metric Name                          Metric Unit    Metric Value
     -------------------------------- --------------- ---------------
-    Block Size                                                    64
+    Block Size                                                   128
     Function Cache Configuration                     CachePreferNone
     Grid Size                                                    768
-    Registers Per Thread             register/thread             137
+    Registers Per Thread             register/thread              96
     Shared Memory Configuration Size           Kbyte          102.40
     Driver Shared Memory Per Block       Kbyte/block            1.02
     Dynamic Shared Memory Per Block      Kbyte/block           46.34
     Static Shared Memory Per Block        byte/block               0
     # SMs                                         SM              36
     Stack Size                                                 1,024
-    Threads                                   thread          49,152
+    Threads                                   thread          98,304
     # TPCs                                                        18
     Enabled TPC IDs                                              all
     Uses Green Context                                             0
@@ -704,41 +693,40 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     Metric Name                     Metric Unit Metric Value
     ------------------------------- ----------- ------------
     Block Limit SM                        block           24
-    Block Limit Registers                 block            6
+    Block Limit Registers                 block            5
     Block Limit Shared Mem                block            2
-    Block Limit Warps                     block           24
-    Theoretical Active Warps per SM        warp            4
-    Theoretical Occupancy                     %         8.33
-    Achieved Occupancy                        %         8.16
-    Achieved Active Warps Per SM           warp         3.92
+    Block Limit Warps                     block           12
+    Theoretical Active Warps per SM        warp            8
+    Theoretical Occupancy                     %        16.67
+    Achieved Occupancy                        %        16.37
+    Achieved Active Warps Per SM           warp         7.86
     ------------------------------- ----------- ------------
 
-    OPT   Est. Local Speedup: 91.67%                                                                                    
-          The 1.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
-          hardware maximum of 12. This kernel's theoretical occupancy (8.3%) is limited by the required amount of       
+    OPT   Est. Local Speedup: 83.33%                                                                                    
+          The 2.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
+          hardware maximum of 12. This kernel's theoretical occupancy (16.7%) is limited by the required amount of      
           shared memory.                                                                                                
 
-  void <unnamed>::flash_bwd_q_k<32, 32, 64, 64, 4, 4, 8, 4>(float *, const float *, const float *, const float *, const float *, int, int, float) (8, 96, 1)x(64, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
+  void <unnamed>::flash_bwd_q_k<32, 32, 64, 128, 4, 2, 4, 4>(float *, const float *, const float *, const float *, const float *, int, int, float) (8, 96, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
     Section: GPU Speed Of Light Throughput
     ----------------------- ----------- ------------
     Metric Name             Metric Unit Metric Value
     ----------------------- ----------- ------------
     DRAM Frequency                  Ghz         7.99
     SM Frequency                    Ghz         1.60
-    Elapsed Cycles                cycle      840,146
-    Memory Throughput                 %        61.71
-    DRAM Throughput                   %        23.38
-    Duration                         us       523.58
-    L1/TEX Cache Throughput           %        66.90
-    L2 Cache Throughput               %         8.94
-    SM Active Cycles              cycle   788,166.92
-    Compute (SM) Throughput           %        25.12
+    Elapsed Cycles                cycle      932,879
+    Memory Throughput                 %        82.36
+    DRAM Throughput                   %        21.03
+    Duration                         us       581.31
+    L1/TEX Cache Throughput           %        88.22
+    L2 Cache Throughput               %         8.14
+    SM Active Cycles              cycle   877,259.47
+    Compute (SM) Throughput           %        34.25
     ----------------------- ----------- ------------
 
-    OPT   Memory is more heavily utilized than Compute: Look at the Memory Workload Analysis section to identify the L1 
-          bottleneck. Check memory replay (coalescing) metrics to make sure you're efficiently utilizing the bytes      
-          transferred. Also consider whether it is possible to do more work per memory access (kernel fusion) or        
-          whether there are values you can (re)compute.                                                                 
+    INF   This workload is utilizing greater than 80.0% of the available compute or memory performance of this device.  
+          To further improve performance, work will likely need to be shifted from the most utilized to another unit.   
+          Start by analyzing L1 in the Memory Workload Analysis section.                                                
 
     Section: Memory Workload Analysis
     --------------------------------------- ----------- ------------
@@ -749,33 +737,33 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     L2 Sector Promotion Misses                        %            0
     Shared Memory Spilling Requests                                0
     Shared Memory Spilling Request Overhead           %            0
-    Memory Throughput                           Gbyte/s        59.79
-    Mem Busy                                          %        61.71
-    Max Bandwidth                                     %        25.12
-    L1/TEX Hit Rate                                   %        23.89
+    Memory Throughput                           Gbyte/s        53.78
+    Mem Busy                                          %        82.36
+    Max Bandwidth                                     %        34.25
+    L1/TEX Hit Rate                                   %        22.93
     L2 Persisting Size                            Mbyte         6.29
     L2 Compression Success Rate                       %            0
     L2 Compression Ratio                                           0
     L2 Compression Input Sectors                 sector            0
-    L2 Hit Rate                                       %        63.67
-    Mem Pipes Busy                                    %        25.12
+    L2 Hit Rate                                       %        65.76
+    Mem Pipes Busy                                    %        34.25
     --------------------------------------- ----------- ------------
 
     Section: Launch Statistics
     -------------------------------- --------------- ---------------
     Metric Name                          Metric Unit    Metric Value
     -------------------------------- --------------- ---------------
-    Block Size                                                    64
+    Block Size                                                   128
     Function Cache Configuration                     CachePreferNone
     Grid Size                                                    768
-    Registers Per Thread             register/thread             114
+    Registers Per Thread             register/thread              64
     Shared Memory Configuration Size           Kbyte          102.40
     Driver Shared Memory Per Block       Kbyte/block            1.02
     Dynamic Shared Memory Per Block      Kbyte/block           41.73
     Static Shared Memory Per Block        byte/block               0
     # SMs                                         SM              36
     Stack Size                                                 1,024
-    Threads                                   thread          49,152
+    Threads                                   thread          98,304
     # TPCs                                                        18
     Enabled TPC IDs                                              all
     Uses Green Context                                             0
@@ -789,16 +777,16 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     Block Limit SM                        block           24
     Block Limit Registers                 block            8
     Block Limit Shared Mem                block            2
-    Block Limit Warps                     block           24
-    Theoretical Active Warps per SM        warp            4
-    Theoretical Occupancy                     %         8.33
-    Achieved Occupancy                        %         8.17
-    Achieved Active Warps Per SM           warp         3.92
+    Block Limit Warps                     block           12
+    Theoretical Active Warps per SM        warp            8
+    Theoretical Occupancy                     %        16.67
+    Achieved Occupancy                        %        16.33
+    Achieved Active Warps Per SM           warp         7.84
     ------------------------------- ----------- ------------
 
-    OPT   Est. Local Speedup: 91.67%                                                                                    
-          The 1.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
-          hardware maximum of 12. This kernel's theoretical occupancy (8.3%) is limited by the required amount of       
+    OPT   Est. Local Speedup: 83.33%                                                                                    
+          The 2.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
+          hardware maximum of 12. This kernel's theoretical occupancy (16.7%) is limited by the required amount of      
           shared memory.                                                                                                
 
   <unnamed>::flash_dsum_k(float *, const float *, const float *, int, int, int, int) (6144, 1, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
@@ -806,16 +794,16 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     ----------------------- ----------- ------------
     Metric Name             Metric Unit Metric Value
     ----------------------- ----------- ------------
-    DRAM Frequency                  Ghz         7.98
-    SM Frequency                    Ghz         1.60
-    Elapsed Cycles                cycle       88,302
-    Memory Throughput                 %        91.35
-    DRAM Throughput                   %        91.35
-    Duration                         us        55.17
-    L1/TEX Cache Throughput           %        17.73
-    L2 Cache Throughput               %        29.51
-    SM Active Cycles              cycle    84,711.06
-    Compute (SM) Throughput           %        33.83
+    DRAM Frequency                  Ghz         7.99
+    SM Frequency                    Ghz         1.59
+    Elapsed Cycles                cycle       87,856
+    Memory Throughput                 %        91.32
+    DRAM Throughput                   %        91.32
+    Duration                         us        55.04
+    L1/TEX Cache Throughput           %        17.85
+    L2 Cache Throughput               %        29.64
+    SM Active Cycles              cycle    84,116.31
+    Compute (SM) Throughput           %        34.11
     ----------------------- ----------- ------------
 
     INF   This workload is utilizing greater than 80.0% of the available compute or memory performance of this device.  
@@ -831,15 +819,263 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     L2 Sector Promotion Misses                        %            0
     Shared Memory Spilling Requests                                0
     Shared Memory Spilling Request Overhead           %            0
-    Memory Throughput                           Gbyte/s       233.32
-    Mem Busy                                          %        15.70
-    Max Bandwidth                                     %        91.35
+    Memory Throughput                           Gbyte/s       233.37
+    Mem Busy                                          %        15.78
+    Max Bandwidth                                     %        91.32
+    L1/TEX Hit Rate                                   %         4.53
+    L2 Persisting Size                            Mbyte         6.29
+    L2 Compression Success Rate                       %            0
+    L2 Compression Ratio                                           0
+    L2 Compression Input Sectors                 sector            0
+    L2 Hit Rate                                       %         6.01
+    Mem Pipes Busy                                    %        17.39
+    --------------------------------------- ----------- ------------
+
+    Section: Launch Statistics
+    -------------------------------- --------------- ---------------
+    Metric Name                          Metric Unit    Metric Value
+    -------------------------------- --------------- ---------------
+    Block Size                                                   128
+    Function Cache Configuration                     CachePreferNone
+    Grid Size                                                  6,144
+    Registers Per Thread             register/thread              37
+    Shared Memory Configuration Size           Kbyte           32.77
+    Driver Shared Memory Per Block       Kbyte/block            1.02
+    Dynamic Shared Memory Per Block       byte/block               0
+    Static Shared Memory Per Block        byte/block               0
+    # SMs                                         SM              36
+    Stack Size                                                 1,024
+    Threads                                   thread         786,432
+    # TPCs                                                        18
+    Enabled TPC IDs                                              all
+    Uses Green Context                                             0
+    Waves Per SM                                               14.22
+    -------------------------------- --------------- ---------------
+
+    Section: Occupancy
+    ------------------------------- ----------- ------------
+    Metric Name                     Metric Unit Metric Value
+    ------------------------------- ----------- ------------
+    Block Limit SM                        block           24
+    Block Limit Registers                 block           12
+    Block Limit Shared Mem                block           32
+    Block Limit Warps                     block           12
+    Theoretical Active Warps per SM        warp           48
+    Theoretical Occupancy                     %          100
+    Achieved Occupancy                        %        86.88
+    Achieved Active Warps Per SM           warp        41.70
+    ------------------------------- ----------- ------------
+
+    OPT   Est. Local Speedup: 13.12%                                                                                    
+          The difference between calculated theoretical (100.0%) and measured achieved occupancy (86.9%) can be the     
+          result of warp scheduling overheads or workload imbalances during the kernel execution. Load imbalances can   
+          occur between warps within a block as well as across blocks of the same kernel. See the CUDA Best Practices   
+          Guide (https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#occupancy) for more details on     
+          optimizing occupancy.                                                                                         
+
+  void <unnamed>::flash_bwd_kv_k<32, 32, 64, 128, 4, 2, 4, 4>(float *, const float *, const float *, const float *, const float *, int, int, float) (8, 96, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
+    Section: GPU Speed Of Light Throughput
+    ----------------------- ----------- ------------
+    Metric Name             Metric Unit Metric Value
+    ----------------------- ----------- ------------
+    DRAM Frequency                  Ghz         7.99
+    SM Frequency                    Ghz         1.60
+    Elapsed Cycles                cycle      949,764
+    Memory Throughput                 %        82.73
+    DRAM Throughput                   %        24.44
+    Duration                         us       591.84
+    L1/TEX Cache Throughput           %        87.66
+    L2 Cache Throughput               %         8.88
+    SM Active Cycles              cycle   901,529.31
+    Compute (SM) Throughput           %        35.89
+    ----------------------- ----------- ------------
+
+    INF   This workload is utilizing greater than 80.0% of the available compute or memory performance of this device.  
+          To further improve performance, work will likely need to be shifted from the most utilized to another unit.   
+          Start by analyzing L1 in the Memory Workload Analysis section.                                                
+
+    Section: Memory Workload Analysis
+    --------------------------------------- ----------- ------------
+    Metric Name                             Metric Unit Metric Value
+    --------------------------------------- ----------- ------------
+    Local Memory Spilling Requests                                 0
+    Local Memory Spilling Request Overhead            %            0
+    L2 Sector Promotion Misses                        %            0
+    Shared Memory Spilling Requests                                0
+    Shared Memory Spilling Request Overhead           %            0
+    Memory Throughput                           Gbyte/s        62.51
+    Mem Busy                                          %        82.73
+    Max Bandwidth                                     %        37.80
+    L1/TEX Hit Rate                                   %         1.68
+    L2 Persisting Size                            Mbyte         6.29
+    L2 Compression Success Rate                       %            0
+    L2 Compression Ratio                                           0
+    L2 Compression Input Sectors                 sector            0
+    L2 Hit Rate                                       %        68.77
+    Mem Pipes Busy                                    %        35.89
+    --------------------------------------- ----------- ------------
+
+    Section: Launch Statistics
+    -------------------------------- --------------- ---------------
+    Metric Name                          Metric Unit    Metric Value
+    -------------------------------- --------------- ---------------
+    Block Size                                                   128
+    Function Cache Configuration                     CachePreferNone
+    Grid Size                                                    768
+    Registers Per Thread             register/thread              96
+    Shared Memory Configuration Size           Kbyte          102.40
+    Driver Shared Memory Per Block       Kbyte/block            1.02
+    Dynamic Shared Memory Per Block      Kbyte/block           46.34
+    Static Shared Memory Per Block        byte/block               0
+    # SMs                                         SM              36
+    Stack Size                                                 1,024
+    Threads                                   thread          98,304
+    # TPCs                                                        18
+    Enabled TPC IDs                                              all
+    Uses Green Context                                             0
+    Waves Per SM                                               10.67
+    -------------------------------- --------------- ---------------
+
+    Section: Occupancy
+    ------------------------------- ----------- ------------
+    Metric Name                     Metric Unit Metric Value
+    ------------------------------- ----------- ------------
+    Block Limit SM                        block           24
+    Block Limit Registers                 block            5
+    Block Limit Shared Mem                block            2
+    Block Limit Warps                     block           12
+    Theoretical Active Warps per SM        warp            8
+    Theoretical Occupancy                     %        16.67
+    Achieved Occupancy                        %        16.37
+    Achieved Active Warps Per SM           warp         7.86
+    ------------------------------- ----------- ------------
+
+    OPT   Est. Local Speedup: 83.33%                                                                                    
+          The 2.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
+          hardware maximum of 12. This kernel's theoretical occupancy (16.7%) is limited by the required amount of      
+          shared memory.                                                                                                
+
+  void <unnamed>::flash_bwd_q_k<32, 32, 64, 128, 4, 2, 4, 4>(float *, const float *, const float *, const float *, const float *, int, int, float) (8, 96, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
+    Section: GPU Speed Of Light Throughput
+    ----------------------- ----------- ------------
+    Metric Name             Metric Unit Metric Value
+    ----------------------- ----------- ------------
+    DRAM Frequency                  Ghz         7.99
+    SM Frequency                    Ghz         1.60
+    Elapsed Cycles                cycle      938,668
+    Memory Throughput                 %        81.49
+    DRAM Throughput                   %        20.87
+    Duration                         us       586.46
+    L1/TEX Cache Throughput           %        88.20
+    L2 Cache Throughput               %         8.17
+    SM Active Cycles              cycle   877,231.81
+    Compute (SM) Throughput           %        33.90
+    ----------------------- ----------- ------------
+
+    INF   This workload is utilizing greater than 80.0% of the available compute or memory performance of this device.  
+          To further improve performance, work will likely need to be shifted from the most utilized to another unit.   
+          Start by analyzing L1 in the Memory Workload Analysis section.                                                
+
+    Section: Memory Workload Analysis
+    --------------------------------------- ----------- ------------
+    Metric Name                             Metric Unit Metric Value
+    --------------------------------------- ----------- ------------
+    Local Memory Spilling Requests                                 0
+    Local Memory Spilling Request Overhead            %            0
+    L2 Sector Promotion Misses                        %            0
+    Shared Memory Spilling Requests                                0
+    Shared Memory Spilling Request Overhead           %            0
+    Memory Throughput                           Gbyte/s        53.37
+    Mem Busy                                          %        81.49
+    Max Bandwidth                                     %        33.90
+    L1/TEX Hit Rate                                   %        22.31
+    L2 Persisting Size                            Mbyte         6.29
+    L2 Compression Success Rate                       %            0
+    L2 Compression Ratio                                           0
+    L2 Compression Input Sectors                 sector            0
+    L2 Hit Rate                                       %        65.13
+    Mem Pipes Busy                                    %        33.90
+    --------------------------------------- ----------- ------------
+
+    Section: Launch Statistics
+    -------------------------------- --------------- ---------------
+    Metric Name                          Metric Unit    Metric Value
+    -------------------------------- --------------- ---------------
+    Block Size                                                   128
+    Function Cache Configuration                     CachePreferNone
+    Grid Size                                                    768
+    Registers Per Thread             register/thread              64
+    Shared Memory Configuration Size           Kbyte          102.40
+    Driver Shared Memory Per Block       Kbyte/block            1.02
+    Dynamic Shared Memory Per Block      Kbyte/block           41.73
+    Static Shared Memory Per Block        byte/block               0
+    # SMs                                         SM              36
+    Stack Size                                                 1,024
+    Threads                                   thread          98,304
+    # TPCs                                                        18
+    Enabled TPC IDs                                              all
+    Uses Green Context                                             0
+    Waves Per SM                                               10.67
+    -------------------------------- --------------- ---------------
+
+    Section: Occupancy
+    ------------------------------- ----------- ------------
+    Metric Name                     Metric Unit Metric Value
+    ------------------------------- ----------- ------------
+    Block Limit SM                        block           24
+    Block Limit Registers                 block            8
+    Block Limit Shared Mem                block            2
+    Block Limit Warps                     block           12
+    Theoretical Active Warps per SM        warp            8
+    Theoretical Occupancy                     %        16.67
+    Achieved Occupancy                        %        16.36
+    Achieved Active Warps Per SM           warp         7.85
+    ------------------------------- ----------- ------------
+
+    OPT   Est. Local Speedup: 83.33%                                                                                    
+          The 2.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
+          hardware maximum of 12. This kernel's theoretical occupancy (16.7%) is limited by the required amount of      
+          shared memory.                                                                                                
+
+  <unnamed>::flash_dsum_k(float *, const float *, const float *, int, int, int, int) (6144, 1, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
+    Section: GPU Speed Of Light Throughput
+    ----------------------- ----------- ------------
+    Metric Name             Metric Unit Metric Value
+    ----------------------- ----------- ------------
+    DRAM Frequency                  Ghz         7.98
+    SM Frequency                    Ghz         1.60
+    Elapsed Cycles                cycle       88,395
+    Memory Throughput                 %        91.22
+    DRAM Throughput                   %        91.22
+    Duration                         us        55.20
+    L1/TEX Cache Throughput           %        17.73
+    L2 Cache Throughput               %        29.49
+    SM Active Cycles              cycle    84,702.92
+    Compute (SM) Throughput           %        33.84
+    ----------------------- ----------- ------------
+
+    INF   This workload is utilizing greater than 80.0% of the available compute or memory performance of this device.  
+          To further improve performance, work will likely need to be shifted from the most utilized to another unit.   
+          Start by analyzing DRAM in the Memory Workload Analysis section.                                              
+
+    Section: Memory Workload Analysis
+    --------------------------------------- ----------- ------------
+    Metric Name                             Metric Unit Metric Value
+    --------------------------------------- ----------- ------------
+    Local Memory Spilling Requests                                 0
+    Local Memory Spilling Request Overhead            %            0
+    L2 Sector Promotion Misses                        %            0
+    Shared Memory Spilling Requests                                0
+    Shared Memory Spilling Request Overhead           %            0
+    Memory Throughput                           Gbyte/s       232.84
+    Mem Busy                                          %        15.68
+    Max Bandwidth                                     %        91.22
     L1/TEX Hit Rate                                   %         4.52
     L2 Persisting Size                            Mbyte         6.29
     L2 Compression Success Rate                       %            0
     L2 Compression Ratio                                           0
     L2 Compression Input Sectors                 sector            0
-    L2 Hit Rate                                       %         6.02
+    L2 Hit Rate                                       %         6.01
     Mem Pipes Busy                                    %        17.25
     --------------------------------------- ----------- ------------
 
@@ -874,38 +1110,37 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     Block Limit Warps                     block           12
     Theoretical Active Warps per SM        warp           48
     Theoretical Occupancy                     %          100
-    Achieved Occupancy                        %        86.98
-    Achieved Active Warps Per SM           warp        41.75
+    Achieved Occupancy                        %        86.86
+    Achieved Active Warps Per SM           warp        41.69
     ------------------------------- ----------- ------------
 
-    OPT   Est. Local Speedup: 13.02%                                                                                    
-          The difference between calculated theoretical (100.0%) and measured achieved occupancy (87.0%) can be the     
+    OPT   Est. Local Speedup: 13.14%                                                                                    
+          The difference between calculated theoretical (100.0%) and measured achieved occupancy (86.9%) can be the     
           result of warp scheduling overheads or workload imbalances during the kernel execution. Load imbalances can   
           occur between warps within a block as well as across blocks of the same kernel. See the CUDA Best Practices   
           Guide (https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#occupancy) for more details on     
           optimizing occupancy.                                                                                         
 
-  void <unnamed>::flash_bwd_kv_k<32, 32, 64, 64, 4, 4, 8, 4>(float *, const float *, const float *, const float *, const float *, int, int, float) (8, 96, 1)x(64, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
+  void <unnamed>::flash_bwd_kv_k<32, 32, 64, 128, 4, 2, 4, 4>(float *, const float *, const float *, const float *, const float *, int, int, float) (8, 96, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
     Section: GPU Speed Of Light Throughput
     ----------------------- ----------- ------------
     Metric Name             Metric Unit Metric Value
     ----------------------- ----------- ------------
     DRAM Frequency                  Ghz         7.99
     SM Frequency                    Ghz         1.60
-    Elapsed Cycles                cycle    1,108,419
-    Memory Throughput                 %        66.73
-    DRAM Throughput                   %        21.01
-    Duration                         us       690.69
-    L1/TEX Cache Throughput           %        71.39
-    L2 Cache Throughput               %         7.67
-    SM Active Cycles              cycle 1,036,353.72
-    Compute (SM) Throughput           %        26.12
+    Elapsed Cycles                cycle      964,163
+    Memory Throughput                 %        81.62
+    DRAM Throughput                   %        24.10
+    Duration                         us       600.93
+    L1/TEX Cache Throughput           %        87.55
+    L2 Cache Throughput               %         8.74
+    SM Active Cycles              cycle   902,691.92
+    Compute (SM) Throughput           %        35.40
     ----------------------- ----------- ------------
 
-    OPT   Memory is more heavily utilized than Compute: Look at the Memory Workload Analysis section to identify the L1 
-          bottleneck. Check memory replay (coalescing) metrics to make sure you're efficiently utilizing the bytes      
-          transferred. Also consider whether it is possible to do more work per memory access (kernel fusion) or        
-          whether there are values you can (re)compute.                                                                 
+    INF   This workload is utilizing greater than 80.0% of the available compute or memory performance of this device.  
+          To further improve performance, work will likely need to be shifted from the most utilized to another unit.   
+          Start by analyzing L1 in the Memory Workload Analysis section.                                                
 
     Section: Memory Workload Analysis
     --------------------------------------- ----------- ------------
@@ -916,33 +1151,33 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     L2 Sector Promotion Misses                        %            0
     Shared Memory Spilling Requests                                0
     Shared Memory Spilling Request Overhead           %            0
-    Memory Throughput                           Gbyte/s        53.74
-    Mem Busy                                          %        66.73
-    Max Bandwidth                                     %        26.12
-    L1/TEX Hit Rate                                   %         1.06
+    Memory Throughput                           Gbyte/s        61.65
+    Mem Busy                                          %        81.62
+    Max Bandwidth                                     %        37.29
+    L1/TEX Hit Rate                                   %         1.76
     L2 Persisting Size                            Mbyte         6.29
     L2 Compression Success Rate                       %            0
     L2 Compression Ratio                                           0
     L2 Compression Input Sectors                 sector            0
-    L2 Hit Rate                                       %        68.90
-    Mem Pipes Busy                                    %        26.12
+    L2 Hit Rate                                       %        68.81
+    Mem Pipes Busy                                    %        35.40
     --------------------------------------- ----------- ------------
 
     Section: Launch Statistics
     -------------------------------- --------------- ---------------
     Metric Name                          Metric Unit    Metric Value
     -------------------------------- --------------- ---------------
-    Block Size                                                    64
+    Block Size                                                   128
     Function Cache Configuration                     CachePreferNone
     Grid Size                                                    768
-    Registers Per Thread             register/thread             137
+    Registers Per Thread             register/thread              96
     Shared Memory Configuration Size           Kbyte          102.40
     Driver Shared Memory Per Block       Kbyte/block            1.02
     Dynamic Shared Memory Per Block      Kbyte/block           46.34
     Static Shared Memory Per Block        byte/block               0
     # SMs                                         SM              36
     Stack Size                                                 1,024
-    Threads                                   thread          49,152
+    Threads                                   thread          98,304
     # TPCs                                                        18
     Enabled TPC IDs                                              all
     Uses Green Context                                             0
@@ -954,41 +1189,40 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     Metric Name                     Metric Unit Metric Value
     ------------------------------- ----------- ------------
     Block Limit SM                        block           24
-    Block Limit Registers                 block            6
+    Block Limit Registers                 block            5
     Block Limit Shared Mem                block            2
-    Block Limit Warps                     block           24
-    Theoretical Active Warps per SM        warp            4
-    Theoretical Occupancy                     %         8.33
-    Achieved Occupancy                        %         8.18
-    Achieved Active Warps Per SM           warp         3.93
+    Block Limit Warps                     block           12
+    Theoretical Active Warps per SM        warp            8
+    Theoretical Occupancy                     %        16.67
+    Achieved Occupancy                        %        16.31
+    Achieved Active Warps Per SM           warp         7.83
     ------------------------------- ----------- ------------
 
-    OPT   Est. Local Speedup: 91.67%                                                                                    
-          The 1.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
-          hardware maximum of 12. This kernel's theoretical occupancy (8.3%) is limited by the required amount of       
+    OPT   Est. Local Speedup: 83.33%                                                                                    
+          The 2.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
+          hardware maximum of 12. This kernel's theoretical occupancy (16.7%) is limited by the required amount of      
           shared memory.                                                                                                
 
-  void <unnamed>::flash_bwd_q_k<32, 32, 64, 64, 4, 4, 8, 4>(float *, const float *, const float *, const float *, const float *, int, int, float) (8, 96, 1)x(64, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
+  void <unnamed>::flash_bwd_q_k<32, 32, 64, 128, 4, 2, 4, 4>(float *, const float *, const float *, const float *, const float *, int, int, float) (8, 96, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
     Section: GPU Speed Of Light Throughput
     ----------------------- ----------- ------------
     Metric Name             Metric Unit Metric Value
     ----------------------- ----------- ------------
     DRAM Frequency                  Ghz         7.99
     SM Frequency                    Ghz         1.60
-    Elapsed Cycles                cycle      843,465
-    Memory Throughput                 %        62.67
-    DRAM Throughput                   %        23.33
-    Duration                         us       525.63
-    L1/TEX Cache Throughput           %        66.95
-    L2 Cache Throughput               %         8.76
-    SM Active Cycles              cycle   787,500.06
-    Compute (SM) Throughput           %        25.52
+    Elapsed Cycles                cycle      924,896
+    Memory Throughput                 %        83.10
+    DRAM Throughput                   %        21.25
+    Duration                         us       576.32
+    L1/TEX Cache Throughput           %        88.15
+    L2 Cache Throughput               %         8.23
+    SM Active Cycles              cycle   877,867.58
+    Compute (SM) Throughput           %        34.56
     ----------------------- ----------- ------------
 
-    OPT   Memory is more heavily utilized than Compute: Look at the Memory Workload Analysis section to identify the L1 
-          bottleneck. Check memory replay (coalescing) metrics to make sure you're efficiently utilizing the bytes      
-          transferred. Also consider whether it is possible to do more work per memory access (kernel fusion) or        
-          whether there are values you can (re)compute.                                                                 
+    INF   This workload is utilizing greater than 80.0% of the available compute or memory performance of this device.  
+          To further improve performance, work will likely need to be shifted from the most utilized to another unit.   
+          Start by analyzing L1 in the Memory Workload Analysis section.                                                
 
     Section: Memory Workload Analysis
     --------------------------------------- ----------- ------------
@@ -999,33 +1233,33 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     L2 Sector Promotion Misses                        %            0
     Shared Memory Spilling Requests                                0
     Shared Memory Spilling Request Overhead           %            0
-    Memory Throughput                           Gbyte/s        59.67
-    Mem Busy                                          %        62.67
-    Max Bandwidth                                     %        25.52
-    L1/TEX Hit Rate                                   %        24.49
+    Memory Throughput                           Gbyte/s        54.36
+    Mem Busy                                          %        83.10
+    Max Bandwidth                                     %        34.56
+    L1/TEX Hit Rate                                   %        22.74
     L2 Persisting Size                            Mbyte         6.29
     L2 Compression Success Rate                       %            0
     L2 Compression Ratio                                           0
     L2 Compression Input Sectors                 sector            0
-    L2 Hit Rate                                       %        65.05
-    Mem Pipes Busy                                    %        25.52
+    L2 Hit Rate                                       %        65.71
+    Mem Pipes Busy                                    %        34.56
     --------------------------------------- ----------- ------------
 
     Section: Launch Statistics
     -------------------------------- --------------- ---------------
     Metric Name                          Metric Unit    Metric Value
     -------------------------------- --------------- ---------------
-    Block Size                                                    64
+    Block Size                                                   128
     Function Cache Configuration                     CachePreferNone
     Grid Size                                                    768
-    Registers Per Thread             register/thread             114
+    Registers Per Thread             register/thread              64
     Shared Memory Configuration Size           Kbyte          102.40
     Driver Shared Memory Per Block       Kbyte/block            1.02
     Dynamic Shared Memory Per Block      Kbyte/block           41.73
     Static Shared Memory Per Block        byte/block               0
     # SMs                                         SM              36
     Stack Size                                                 1,024
-    Threads                                   thread          49,152
+    Threads                                   thread          98,304
     # TPCs                                                        18
     Enabled TPC IDs                                              all
     Uses Green Context                                             0
@@ -1039,16 +1273,16 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     Block Limit SM                        block           24
     Block Limit Registers                 block            8
     Block Limit Shared Mem                block            2
-    Block Limit Warps                     block           24
-    Theoretical Active Warps per SM        warp            4
-    Theoretical Occupancy                     %         8.33
-    Achieved Occupancy                        %         8.15
-    Achieved Active Warps Per SM           warp         3.91
+    Block Limit Warps                     block           12
+    Theoretical Active Warps per SM        warp            8
+    Theoretical Occupancy                     %        16.67
+    Achieved Occupancy                        %        16.33
+    Achieved Active Warps Per SM           warp         7.84
     ------------------------------- ----------- ------------
 
-    OPT   Est. Local Speedup: 91.67%                                                                                    
-          The 1.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
-          hardware maximum of 12. This kernel's theoretical occupancy (8.3%) is limited by the required amount of       
+    OPT   Est. Local Speedup: 83.33%                                                                                    
+          The 2.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
+          hardware maximum of 12. This kernel's theoretical occupancy (16.7%) is limited by the required amount of      
           shared memory.                                                                                                
 
   <unnamed>::flash_dsum_k(float *, const float *, const float *, int, int, int, int) (6144, 1, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
@@ -1058,14 +1292,262 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     ----------------------- ----------- ------------
     DRAM Frequency                  Ghz         7.99
     SM Frequency                    Ghz         1.60
-    Elapsed Cycles                cycle       88,339
-    Memory Throughput                 %        91.41
-    DRAM Throughput                   %        91.41
-    Duration                         us        55.14
+    Elapsed Cycles                cycle       88,219
+    Memory Throughput                 %        91.31
+    DRAM Throughput                   %        91.31
+    Duration                         us        55.01
+    L1/TEX Cache Throughput           %        17.56
+    L2 Cache Throughput               %        29.54
+    SM Active Cycles              cycle    85,525.17
+    Compute (SM) Throughput           %        33.83
+    ----------------------- ----------- ------------
+
+    INF   This workload is utilizing greater than 80.0% of the available compute or memory performance of this device.  
+          To further improve performance, work will likely need to be shifted from the most utilized to another unit.   
+          Start by analyzing DRAM in the Memory Workload Analysis section.                                              
+
+    Section: Memory Workload Analysis
+    --------------------------------------- ----------- ------------
+    Metric Name                             Metric Unit Metric Value
+    --------------------------------------- ----------- ------------
+    Local Memory Spilling Requests                                 0
+    Local Memory Spilling Request Overhead            %            0
+    L2 Sector Promotion Misses                        %            0
+    Shared Memory Spilling Requests                                0
+    Shared Memory Spilling Request Overhead           %            0
+    Memory Throughput                           Gbyte/s       233.49
+    Mem Busy                                          %        15.72
+    Max Bandwidth                                     %        91.31
+    L1/TEX Hit Rate                                   %         4.52
+    L2 Persisting Size                            Mbyte         6.29
+    L2 Compression Success Rate                       %            0
+    L2 Compression Ratio                                           0
+    L2 Compression Input Sectors                 sector            0
+    L2 Hit Rate                                       %         6.05
+    Mem Pipes Busy                                    %        17.24
+    --------------------------------------- ----------- ------------
+
+    Section: Launch Statistics
+    -------------------------------- --------------- ---------------
+    Metric Name                          Metric Unit    Metric Value
+    -------------------------------- --------------- ---------------
+    Block Size                                                   128
+    Function Cache Configuration                     CachePreferNone
+    Grid Size                                                  6,144
+    Registers Per Thread             register/thread              37
+    Shared Memory Configuration Size           Kbyte           32.77
+    Driver Shared Memory Per Block       Kbyte/block            1.02
+    Dynamic Shared Memory Per Block       byte/block               0
+    Static Shared Memory Per Block        byte/block               0
+    # SMs                                         SM              36
+    Stack Size                                                 1,024
+    Threads                                   thread         786,432
+    # TPCs                                                        18
+    Enabled TPC IDs                                              all
+    Uses Green Context                                             0
+    Waves Per SM                                               14.22
+    -------------------------------- --------------- ---------------
+
+    Section: Occupancy
+    ------------------------------- ----------- ------------
+    Metric Name                     Metric Unit Metric Value
+    ------------------------------- ----------- ------------
+    Block Limit SM                        block           24
+    Block Limit Registers                 block           12
+    Block Limit Shared Mem                block           32
+    Block Limit Warps                     block           12
+    Theoretical Active Warps per SM        warp           48
+    Theoretical Occupancy                     %          100
+    Achieved Occupancy                        %        86.38
+    Achieved Active Warps Per SM           warp        41.46
+    ------------------------------- ----------- ------------
+
+    OPT   Est. Local Speedup: 13.62%                                                                                    
+          The difference between calculated theoretical (100.0%) and measured achieved occupancy (86.4%) can be the     
+          result of warp scheduling overheads or workload imbalances during the kernel execution. Load imbalances can   
+          occur between warps within a block as well as across blocks of the same kernel. See the CUDA Best Practices   
+          Guide (https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#occupancy) for more details on     
+          optimizing occupancy.                                                                                         
+
+  void <unnamed>::flash_bwd_kv_k<32, 32, 64, 128, 4, 2, 4, 4>(float *, const float *, const float *, const float *, const float *, int, int, float) (8, 96, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
+    Section: GPU Speed Of Light Throughput
+    ----------------------- ----------- ------------
+    Metric Name             Metric Unit Metric Value
+    ----------------------- ----------- ------------
+    DRAM Frequency                  Ghz         7.99
+    SM Frequency                    Ghz         1.60
+    Elapsed Cycles                cycle      972,540
+    Memory Throughput                 %        81.67
+    DRAM Throughput                   %        23.94
+    Duration                         us       606.62
+    L1/TEX Cache Throughput           %        87.70
+    L2 Cache Throughput               %         8.66
+    SM Active Cycles              cycle   901,101.89
+    Compute (SM) Throughput           %        35.42
+    ----------------------- ----------- ------------
+
+    INF   This workload is utilizing greater than 80.0% of the available compute or memory performance of this device.  
+          To further improve performance, work will likely need to be shifted from the most utilized to another unit.   
+          Start by analyzing L1 in the Memory Workload Analysis section.                                                
+
+    Section: Memory Workload Analysis
+    --------------------------------------- ----------- ------------
+    Metric Name                             Metric Unit Metric Value
+    --------------------------------------- ----------- ------------
+    Local Memory Spilling Requests                                 0
+    Local Memory Spilling Request Overhead            %            0
+    L2 Sector Promotion Misses                        %            0
+    Shared Memory Spilling Requests                                0
+    Shared Memory Spilling Request Overhead           %            0
+    Memory Throughput                           Gbyte/s        61.24
+    Mem Busy                                          %        81.67
+    Max Bandwidth                                     %        37.31
+    L1/TEX Hit Rate                                   %         1.77
+    L2 Persisting Size                            Mbyte         6.29
+    L2 Compression Success Rate                       %            0
+    L2 Compression Ratio                                           0
+    L2 Compression Input Sectors                 sector            0
+    L2 Hit Rate                                       %        68.64
+    Mem Pipes Busy                                    %        35.42
+    --------------------------------------- ----------- ------------
+
+    Section: Launch Statistics
+    -------------------------------- --------------- ---------------
+    Metric Name                          Metric Unit    Metric Value
+    -------------------------------- --------------- ---------------
+    Block Size                                                   128
+    Function Cache Configuration                     CachePreferNone
+    Grid Size                                                    768
+    Registers Per Thread             register/thread              96
+    Shared Memory Configuration Size           Kbyte          102.40
+    Driver Shared Memory Per Block       Kbyte/block            1.02
+    Dynamic Shared Memory Per Block      Kbyte/block           46.34
+    Static Shared Memory Per Block        byte/block               0
+    # SMs                                         SM              36
+    Stack Size                                                 1,024
+    Threads                                   thread          98,304
+    # TPCs                                                        18
+    Enabled TPC IDs                                              all
+    Uses Green Context                                             0
+    Waves Per SM                                               10.67
+    -------------------------------- --------------- ---------------
+
+    Section: Occupancy
+    ------------------------------- ----------- ------------
+    Metric Name                     Metric Unit Metric Value
+    ------------------------------- ----------- ------------
+    Block Limit SM                        block           24
+    Block Limit Registers                 block            5
+    Block Limit Shared Mem                block            2
+    Block Limit Warps                     block           12
+    Theoretical Active Warps per SM        warp            8
+    Theoretical Occupancy                     %        16.67
+    Achieved Occupancy                        %        16.37
+    Achieved Active Warps Per SM           warp         7.86
+    ------------------------------- ----------- ------------
+
+    OPT   Est. Local Speedup: 83.33%                                                                                    
+          The 2.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
+          hardware maximum of 12. This kernel's theoretical occupancy (16.7%) is limited by the required amount of      
+          shared memory.                                                                                                
+
+  void <unnamed>::flash_bwd_q_k<32, 32, 64, 128, 4, 2, 4, 4>(float *, const float *, const float *, const float *, const float *, int, int, float) (8, 96, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
+    Section: GPU Speed Of Light Throughput
+    ----------------------- ----------- ------------
+    Metric Name             Metric Unit Metric Value
+    ----------------------- ----------- ------------
+    DRAM Frequency                  Ghz         7.99
+    SM Frequency                    Ghz         1.60
+    Elapsed Cycles                cycle      948,204
+    Memory Throughput                 %        80.81
+    DRAM Throughput                   %        20.75
+    Duration                         us       591.07
+    L1/TEX Cache Throughput           %        88.06
+    L2 Cache Throughput               %         8.08
+    SM Active Cycles              cycle   878,751.28
+    Compute (SM) Throughput           %        33.62
+    ----------------------- ----------- ------------
+
+    INF   This workload is utilizing greater than 80.0% of the available compute or memory performance of this device.  
+          To further improve performance, work will likely need to be shifted from the most utilized to another unit.   
+          Start by analyzing L1 in the Memory Workload Analysis section.                                                
+
+    Section: Memory Workload Analysis
+    --------------------------------------- ----------- ------------
+    Metric Name                             Metric Unit Metric Value
+    --------------------------------------- ----------- ------------
+    Local Memory Spilling Requests                                 0
+    Local Memory Spilling Request Overhead            %            0
+    L2 Sector Promotion Misses                        %            0
+    Shared Memory Spilling Requests                                0
+    Shared Memory Spilling Request Overhead           %            0
+    Memory Throughput                           Gbyte/s        53.07
+    Mem Busy                                          %        80.81
+    Max Bandwidth                                     %        33.62
+    L1/TEX Hit Rate                                   %        22.39
+    L2 Persisting Size                            Mbyte         6.29
+    L2 Compression Success Rate                       %            0
+    L2 Compression Ratio                                           0
+    L2 Compression Input Sectors                 sector            0
+    L2 Hit Rate                                       %        65.48
+    Mem Pipes Busy                                    %        33.62
+    --------------------------------------- ----------- ------------
+
+    Section: Launch Statistics
+    -------------------------------- --------------- ---------------
+    Metric Name                          Metric Unit    Metric Value
+    -------------------------------- --------------- ---------------
+    Block Size                                                   128
+    Function Cache Configuration                     CachePreferNone
+    Grid Size                                                    768
+    Registers Per Thread             register/thread              64
+    Shared Memory Configuration Size           Kbyte          102.40
+    Driver Shared Memory Per Block       Kbyte/block            1.02
+    Dynamic Shared Memory Per Block      Kbyte/block           41.73
+    Static Shared Memory Per Block        byte/block               0
+    # SMs                                         SM              36
+    Stack Size                                                 1,024
+    Threads                                   thread          98,304
+    # TPCs                                                        18
+    Enabled TPC IDs                                              all
+    Uses Green Context                                             0
+    Waves Per SM                                               10.67
+    -------------------------------- --------------- ---------------
+
+    Section: Occupancy
+    ------------------------------- ----------- ------------
+    Metric Name                     Metric Unit Metric Value
+    ------------------------------- ----------- ------------
+    Block Limit SM                        block           24
+    Block Limit Registers                 block            8
+    Block Limit Shared Mem                block            2
+    Block Limit Warps                     block           12
+    Theoretical Active Warps per SM        warp            8
+    Theoretical Occupancy                     %        16.67
+    Achieved Occupancy                        %        16.30
+    Achieved Active Warps Per SM           warp         7.82
+    ------------------------------- ----------- ------------
+
+    OPT   Est. Local Speedup: 83.33%                                                                                    
+          The 2.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
+          hardware maximum of 12. This kernel's theoretical occupancy (16.7%) is limited by the required amount of      
+          shared memory.                                                                                                
+
+  <unnamed>::flash_dsum_k(float *, const float *, const float *, int, int, int, int) (6144, 1, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
+    Section: GPU Speed Of Light Throughput
+    ----------------------- ----------- ------------
+    Metric Name             Metric Unit Metric Value
+    ----------------------- ----------- ------------
+    DRAM Frequency                  Ghz         7.99
+    SM Frequency                    Ghz         1.60
+    Elapsed Cycles                cycle       88,025
+    Memory Throughput                 %        91.35
+    DRAM Throughput                   %        91.35
+    Duration                         us        54.98
     L1/TEX Cache Throughput           %        17.70
-    L2 Cache Throughput               %        29.49
-    SM Active Cycles              cycle    84,834.53
-    Compute (SM) Throughput           %        33.65
+    L2 Cache Throughput               %        29.59
+    SM Active Cycles              cycle    84,857.06
+    Compute (SM) Throughput           %        33.93
     ----------------------- ----------- ------------
 
     INF   This workload is utilizing greater than 80.0% of the available compute or memory performance of this device.  
@@ -1082,15 +1564,15 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     Shared Memory Spilling Requests                                0
     Shared Memory Spilling Request Overhead           %            0
     Memory Throughput                           Gbyte/s       233.59
-    Mem Busy                                          %        15.70
-    Max Bandwidth                                     %        91.41
-    L1/TEX Hit Rate                                   %         4.52
+    Mem Busy                                          %        15.74
+    Max Bandwidth                                     %        91.35
+    L1/TEX Hit Rate                                   %         4.51
     L2 Persisting Size                            Mbyte         6.29
     L2 Compression Success Rate                       %            0
     L2 Compression Ratio                                           0
     L2 Compression Input Sectors                 sector            0
-    L2 Hit Rate                                       %         6.00
-    Mem Pipes Busy                                    %        17.16
+    L2 Hit Rate                                       %         6.02
+    Mem Pipes Busy                                    %        17.30
     --------------------------------------- ----------- ------------
 
     Section: Launch Statistics
@@ -1124,203 +1606,37 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     Block Limit Warps                     block           12
     Theoretical Active Warps per SM        warp           48
     Theoretical Occupancy                     %          100
-    Achieved Occupancy                        %        86.90
-    Achieved Active Warps Per SM           warp        41.71
+    Achieved Occupancy                        %        86.93
+    Achieved Active Warps Per SM           warp        41.72
     ------------------------------- ----------- ------------
 
-    OPT   Est. Local Speedup: 13.1%                                                                                     
+    OPT   Est. Local Speedup: 13.07%                                                                                    
           The difference between calculated theoretical (100.0%) and measured achieved occupancy (86.9%) can be the     
           result of warp scheduling overheads or workload imbalances during the kernel execution. Load imbalances can   
           occur between warps within a block as well as across blocks of the same kernel. See the CUDA Best Practices   
           Guide (https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#occupancy) for more details on     
           optimizing occupancy.                                                                                         
 
-  void <unnamed>::flash_bwd_kv_k<32, 32, 64, 64, 4, 4, 8, 4>(float *, const float *, const float *, const float *, const float *, int, int, float) (8, 96, 1)x(64, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
+  void <unnamed>::flash_bwd_kv_k<32, 32, 64, 128, 4, 2, 4, 4>(float *, const float *, const float *, const float *, const float *, int, int, float) (8, 96, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
     Section: GPU Speed Of Light Throughput
     ----------------------- ----------- ------------
     Metric Name             Metric Unit Metric Value
     ----------------------- ----------- ------------
     DRAM Frequency                  Ghz         7.99
     SM Frequency                    Ghz         1.60
-    Elapsed Cycles                cycle    1,107,979
-    Memory Throughput                 %        67.43
-    DRAM Throughput                   %        20.94
-    Duration                         us       690.50
-    L1/TEX Cache Throughput           %        71.23
-    L2 Cache Throughput               %         7.65
-    SM Active Cycles              cycle 1,038,449.03
-    Compute (SM) Throughput           %        26.40
-    ----------------------- ----------- ------------
-
-    OPT   Memory is more heavily utilized than Compute: Look at the Memory Workload Analysis section to identify the L1 
-          bottleneck. Check memory replay (coalescing) metrics to make sure you're efficiently utilizing the bytes      
-          transferred. Also consider whether it is possible to do more work per memory access (kernel fusion) or        
-          whether there are values you can (re)compute.                                                                 
-
-    Section: Memory Workload Analysis
-    --------------------------------------- ----------- ------------
-    Metric Name                             Metric Unit Metric Value
-    --------------------------------------- ----------- ------------
-    Local Memory Spilling Requests                                 0
-    Local Memory Spilling Request Overhead            %            0
-    L2 Sector Promotion Misses                        %            0
-    Shared Memory Spilling Requests                                0
-    Shared Memory Spilling Request Overhead           %            0
-    Memory Throughput                           Gbyte/s        53.55
-    Mem Busy                                          %        67.43
-    Max Bandwidth                                     %        26.40
-    L1/TEX Hit Rate                                   %         1.09
-    L2 Persisting Size                            Mbyte         6.29
-    L2 Compression Success Rate                       %            0
-    L2 Compression Ratio                                           0
-    L2 Compression Input Sectors                 sector            0
-    L2 Hit Rate                                       %        68.98
-    Mem Pipes Busy                                    %        26.40
-    --------------------------------------- ----------- ------------
-
-    Section: Launch Statistics
-    -------------------------------- --------------- ---------------
-    Metric Name                          Metric Unit    Metric Value
-    -------------------------------- --------------- ---------------
-    Block Size                                                    64
-    Function Cache Configuration                     CachePreferNone
-    Grid Size                                                    768
-    Registers Per Thread             register/thread             137
-    Shared Memory Configuration Size           Kbyte          102.40
-    Driver Shared Memory Per Block       Kbyte/block            1.02
-    Dynamic Shared Memory Per Block      Kbyte/block           46.34
-    Static Shared Memory Per Block        byte/block               0
-    # SMs                                         SM              36
-    Stack Size                                                 1,024
-    Threads                                   thread          49,152
-    # TPCs                                                        18
-    Enabled TPC IDs                                              all
-    Uses Green Context                                             0
-    Waves Per SM                                               10.67
-    -------------------------------- --------------- ---------------
-
-    Section: Occupancy
-    ------------------------------- ----------- ------------
-    Metric Name                     Metric Unit Metric Value
-    ------------------------------- ----------- ------------
-    Block Limit SM                        block           24
-    Block Limit Registers                 block            6
-    Block Limit Shared Mem                block            2
-    Block Limit Warps                     block           24
-    Theoretical Active Warps per SM        warp            4
-    Theoretical Occupancy                     %         8.33
-    Achieved Occupancy                        %         8.18
-    Achieved Active Warps Per SM           warp         3.93
-    ------------------------------- ----------- ------------
-
-    OPT   Est. Local Speedup: 91.67%                                                                                    
-          The 1.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
-          hardware maximum of 12. This kernel's theoretical occupancy (8.3%) is limited by the required amount of       
-          shared memory.                                                                                                
-
-  void <unnamed>::flash_bwd_q_k<32, 32, 64, 64, 4, 4, 8, 4>(float *, const float *, const float *, const float *, const float *, int, int, float) (8, 96, 1)x(64, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
-    Section: GPU Speed Of Light Throughput
-    ----------------------- ----------- ------------
-    Metric Name             Metric Unit Metric Value
-    ----------------------- ----------- ------------
-    DRAM Frequency                  Ghz         7.99
-    SM Frequency                    Ghz         1.60
-    Elapsed Cycles                cycle      838,863
-    Memory Throughput                 %        62.85
-    DRAM Throughput                   %        23.46
-    Duration                         us       522.78
-    L1/TEX Cache Throughput           %        66.90
-    L2 Cache Throughput               %         8.87
-    SM Active Cycles              cycle   788,182.39
-    Compute (SM) Throughput           %        25.59
-    ----------------------- ----------- ------------
-
-    OPT   Memory is more heavily utilized than Compute: Look at the Memory Workload Analysis section to identify the L1 
-          bottleneck. Check memory replay (coalescing) metrics to make sure you're efficiently utilizing the bytes      
-          transferred. Also consider whether it is possible to do more work per memory access (kernel fusion) or        
-          whether there are values you can (re)compute.                                                                 
-
-    Section: Memory Workload Analysis
-    --------------------------------------- ----------- ------------
-    Metric Name                             Metric Unit Metric Value
-    --------------------------------------- ----------- ------------
-    Local Memory Spilling Requests                                 0
-    Local Memory Spilling Request Overhead            %            0
-    L2 Sector Promotion Misses                        %            0
-    Shared Memory Spilling Requests                                0
-    Shared Memory Spilling Request Overhead           %            0
-    Memory Throughput                           Gbyte/s        60.00
-    Mem Busy                                          %        62.85
-    Max Bandwidth                                     %        25.59
-    L1/TEX Hit Rate                                   %        24.38
-    L2 Persisting Size                            Mbyte         6.29
-    L2 Compression Success Rate                       %            0
-    L2 Compression Ratio                                           0
-    L2 Compression Input Sectors                 sector            0
-    L2 Hit Rate                                       %        64.25
-    Mem Pipes Busy                                    %        25.59
-    --------------------------------------- ----------- ------------
-
-    Section: Launch Statistics
-    -------------------------------- --------------- ---------------
-    Metric Name                          Metric Unit    Metric Value
-    -------------------------------- --------------- ---------------
-    Block Size                                                    64
-    Function Cache Configuration                     CachePreferNone
-    Grid Size                                                    768
-    Registers Per Thread             register/thread             114
-    Shared Memory Configuration Size           Kbyte          102.40
-    Driver Shared Memory Per Block       Kbyte/block            1.02
-    Dynamic Shared Memory Per Block      Kbyte/block           41.73
-    Static Shared Memory Per Block        byte/block               0
-    # SMs                                         SM              36
-    Stack Size                                                 1,024
-    Threads                                   thread          49,152
-    # TPCs                                                        18
-    Enabled TPC IDs                                              all
-    Uses Green Context                                             0
-    Waves Per SM                                               10.67
-    -------------------------------- --------------- ---------------
-
-    Section: Occupancy
-    ------------------------------- ----------- ------------
-    Metric Name                     Metric Unit Metric Value
-    ------------------------------- ----------- ------------
-    Block Limit SM                        block           24
-    Block Limit Registers                 block            8
-    Block Limit Shared Mem                block            2
-    Block Limit Warps                     block           24
-    Theoretical Active Warps per SM        warp            4
-    Theoretical Occupancy                     %         8.33
-    Achieved Occupancy                        %         8.16
-    Achieved Active Warps Per SM           warp         3.92
-    ------------------------------- ----------- ------------
-
-    OPT   Est. Local Speedup: 91.67%                                                                                    
-          The 1.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
-          hardware maximum of 12. This kernel's theoretical occupancy (8.3%) is limited by the required amount of       
-          shared memory.                                                                                                
-
-  <unnamed>::flash_dsum_k(float *, const float *, const float *, int, int, int, int) (6144, 1, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
-    Section: GPU Speed Of Light Throughput
-    ----------------------- ----------- ------------
-    Metric Name             Metric Unit Metric Value
-    ----------------------- ----------- ------------
-    DRAM Frequency                  Ghz         7.98
-    SM Frequency                    Ghz         1.60
-    Elapsed Cycles                cycle       88,165
-    Memory Throughput                 %        91.41
-    DRAM Throughput                   %        91.41
-    Duration                         us        55.04
-    L1/TEX Cache Throughput           %        17.73
-    L2 Cache Throughput               %        29.57
-    SM Active Cycles              cycle    84,724.64
-    Compute (SM) Throughput           %        33.80
+    Elapsed Cycles                cycle      949,481
+    Memory Throughput                 %        81.36
+    DRAM Throughput                   %        24.45
+    Duration                         us       591.84
+    L1/TEX Cache Throughput           %        87.79
+    L2 Cache Throughput               %         8.86
+    SM Active Cycles              cycle   900,245.61
+    Compute (SM) Throughput           %        35.29
     ----------------------- ----------- ------------
 
     INF   This workload is utilizing greater than 80.0% of the available compute or memory performance of this device.  
           To further improve performance, work will likely need to be shifted from the most utilized to another unit.   
-          Start by analyzing DRAM in the Memory Workload Analysis section.                                              
+          Start by analyzing L1 in the Memory Workload Analysis section.                                                
 
     Section: Memory Workload Analysis
     --------------------------------------- ----------- ------------
@@ -1331,16 +1647,16 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     L2 Sector Promotion Misses                        %            0
     Shared Memory Spilling Requests                                0
     Shared Memory Spilling Request Overhead           %            0
-    Memory Throughput                           Gbyte/s       233.46
-    Mem Busy                                          %        15.73
-    Max Bandwidth                                     %        91.41
-    L1/TEX Hit Rate                                   %         4.50
+    Memory Throughput                           Gbyte/s        62.53
+    Mem Busy                                          %        81.36
+    Max Bandwidth                                     %        37.17
+    L1/TEX Hit Rate                                   %         1.92
     L2 Persisting Size                            Mbyte         6.29
     L2 Compression Success Rate                       %            0
     L2 Compression Ratio                                           0
     L2 Compression Input Sectors                 sector            0
-    L2 Hit Rate                                       %         6.00
-    Mem Pipes Busy                                    %        17.23
+    L2 Hit Rate                                       %        68.79
+    Mem Pipes Busy                                    %        35.29
     --------------------------------------- ----------- ------------
 
     Section: Launch Statistics
@@ -1349,100 +1665,15 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     -------------------------------- --------------- ---------------
     Block Size                                                   128
     Function Cache Configuration                     CachePreferNone
-    Grid Size                                                  6,144
-    Registers Per Thread             register/thread              37
-    Shared Memory Configuration Size           Kbyte           32.77
-    Driver Shared Memory Per Block       Kbyte/block            1.02
-    Dynamic Shared Memory Per Block       byte/block               0
-    Static Shared Memory Per Block        byte/block               0
-    # SMs                                         SM              36
-    Stack Size                                                 1,024
-    Threads                                   thread         786,432
-    # TPCs                                                        18
-    Enabled TPC IDs                                              all
-    Uses Green Context                                             0
-    Waves Per SM                                               14.22
-    -------------------------------- --------------- ---------------
-
-    Section: Occupancy
-    ------------------------------- ----------- ------------
-    Metric Name                     Metric Unit Metric Value
-    ------------------------------- ----------- ------------
-    Block Limit SM                        block           24
-    Block Limit Registers                 block           12
-    Block Limit Shared Mem                block           32
-    Block Limit Warps                     block           12
-    Theoretical Active Warps per SM        warp           48
-    Theoretical Occupancy                     %          100
-    Achieved Occupancy                        %        87.01
-    Achieved Active Warps Per SM           warp        41.77
-    ------------------------------- ----------- ------------
-
-    OPT   Est. Local Speedup: 12.99%                                                                                    
-          The difference between calculated theoretical (100.0%) and measured achieved occupancy (87.0%) can be the     
-          result of warp scheduling overheads or workload imbalances during the kernel execution. Load imbalances can   
-          occur between warps within a block as well as across blocks of the same kernel. See the CUDA Best Practices   
-          Guide (https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#occupancy) for more details on     
-          optimizing occupancy.                                                                                         
-
-  void <unnamed>::flash_bwd_kv_k<32, 32, 64, 64, 4, 4, 8, 4>(float *, const float *, const float *, const float *, const float *, int, int, float) (8, 96, 1)x(64, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
-    Section: GPU Speed Of Light Throughput
-    ----------------------- ----------- ------------
-    Metric Name             Metric Unit Metric Value
-    ----------------------- ----------- ------------
-    DRAM Frequency                  Ghz         7.99
-    SM Frequency                    Ghz         1.60
-    Elapsed Cycles                cycle    1,114,076
-    Memory Throughput                 %        66.24
-    DRAM Throughput                   %        20.97
-    Duration                         us       694.21
-    L1/TEX Cache Throughput           %        71.01
-    L2 Cache Throughput               %         7.65
-    SM Active Cycles              cycle 1,041,754.83
-    Compute (SM) Throughput           %        25.94
-    ----------------------- ----------- ------------
-
-    OPT   Memory is more heavily utilized than Compute: Look at the Memory Workload Analysis section to identify the L1 
-          bottleneck. Check memory replay (coalescing) metrics to make sure you're efficiently utilizing the bytes      
-          transferred. Also consider whether it is possible to do more work per memory access (kernel fusion) or        
-          whether there are values you can (re)compute.                                                                 
-
-    Section: Memory Workload Analysis
-    --------------------------------------- ----------- ------------
-    Metric Name                             Metric Unit Metric Value
-    --------------------------------------- ----------- ------------
-    Local Memory Spilling Requests                                 0
-    Local Memory Spilling Request Overhead            %            0
-    L2 Sector Promotion Misses                        %            0
-    Shared Memory Spilling Requests                                0
-    Shared Memory Spilling Request Overhead           %            0
-    Memory Throughput                           Gbyte/s        53.63
-    Mem Busy                                          %        66.24
-    Max Bandwidth                                     %        25.94
-    L1/TEX Hit Rate                                   %         0.78
-    L2 Persisting Size                            Mbyte         6.29
-    L2 Compression Success Rate                       %            0
-    L2 Compression Ratio                                           0
-    L2 Compression Input Sectors                 sector            0
-    L2 Hit Rate                                       %        68.59
-    Mem Pipes Busy                                    %        25.94
-    --------------------------------------- ----------- ------------
-
-    Section: Launch Statistics
-    -------------------------------- --------------- ---------------
-    Metric Name                          Metric Unit    Metric Value
-    -------------------------------- --------------- ---------------
-    Block Size                                                    64
-    Function Cache Configuration                     CachePreferNone
     Grid Size                                                    768
-    Registers Per Thread             register/thread             137
+    Registers Per Thread             register/thread              96
     Shared Memory Configuration Size           Kbyte          102.40
     Driver Shared Memory Per Block       Kbyte/block            1.02
     Dynamic Shared Memory Per Block      Kbyte/block           46.34
     Static Shared Memory Per Block        byte/block               0
     # SMs                                         SM              36
     Stack Size                                                 1,024
-    Threads                                   thread          49,152
+    Threads                                   thread          98,304
     # TPCs                                                        18
     Enabled TPC IDs                                              all
     Uses Green Context                                             0
@@ -1454,41 +1685,40 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     Metric Name                     Metric Unit Metric Value
     ------------------------------- ----------- ------------
     Block Limit SM                        block           24
-    Block Limit Registers                 block            6
+    Block Limit Registers                 block            5
     Block Limit Shared Mem                block            2
-    Block Limit Warps                     block           24
-    Theoretical Active Warps per SM        warp            4
-    Theoretical Occupancy                     %         8.33
-    Achieved Occupancy                        %         8.14
-    Achieved Active Warps Per SM           warp         3.91
+    Block Limit Warps                     block           12
+    Theoretical Active Warps per SM        warp            8
+    Theoretical Occupancy                     %        16.67
+    Achieved Occupancy                        %        16.42
+    Achieved Active Warps Per SM           warp         7.88
     ------------------------------- ----------- ------------
 
-    OPT   Est. Local Speedup: 91.67%                                                                                    
-          The 1.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
-          hardware maximum of 12. This kernel's theoretical occupancy (8.3%) is limited by the required amount of       
+    OPT   Est. Local Speedup: 83.33%                                                                                    
+          The 2.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
+          hardware maximum of 12. This kernel's theoretical occupancy (16.7%) is limited by the required amount of      
           shared memory.                                                                                                
 
-  void <unnamed>::flash_bwd_q_k<32, 32, 64, 64, 4, 4, 8, 4>(float *, const float *, const float *, const float *, const float *, int, int, float) (8, 96, 1)x(64, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
+  void <unnamed>::flash_bwd_q_k<32, 32, 64, 128, 4, 2, 4, 4>(float *, const float *, const float *, const float *, const float *, int, int, float) (8, 96, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
     Section: GPU Speed Of Light Throughput
     ----------------------- ----------- ------------
     Metric Name             Metric Unit Metric Value
     ----------------------- ----------- ------------
     DRAM Frequency                  Ghz         7.99
     SM Frequency                    Ghz         1.60
-    Elapsed Cycles                cycle      846,466
-    Memory Throughput                 %        62.80
-    DRAM Throughput                   %        23.20
-    Duration                         us       527.84
-    L1/TEX Cache Throughput           %        66.92
-    L2 Cache Throughput               %         8.81
-    SM Active Cycles              cycle   787,662.28
-    Compute (SM) Throughput           %        25.57
+    Elapsed Cycles                cycle      963,789
+    Memory Throughput                 %        81.80
+    DRAM Throughput                   %        20.38
+    Duration                         us       600.67
+    L1/TEX Cache Throughput           %        88.23
+    L2 Cache Throughput               %         7.93
+    SM Active Cycles              cycle   877,127.25
+    Compute (SM) Throughput           %        34.02
     ----------------------- ----------- ------------
 
-    OPT   Memory is more heavily utilized than Compute: Look at the Memory Workload Analysis section to identify the L1 
-          bottleneck. Check memory replay (coalescing) metrics to make sure you're efficiently utilizing the bytes      
-          transferred. Also consider whether it is possible to do more work per memory access (kernel fusion) or        
-          whether there are values you can (re)compute.                                                                 
+    INF   This workload is utilizing greater than 80.0% of the available compute or memory performance of this device.  
+          To further improve performance, work will likely need to be shifted from the most utilized to another unit.   
+          Start by analyzing L1 in the Memory Workload Analysis section.                                                
 
     Section: Memory Workload Analysis
     --------------------------------------- ----------- ------------
@@ -1499,33 +1729,33 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     L2 Sector Promotion Misses                        %            0
     Shared Memory Spilling Requests                                0
     Shared Memory Spilling Request Overhead           %            0
-    Memory Throughput                           Gbyte/s        59.33
-    Mem Busy                                          %        62.80
-    Max Bandwidth                                     %        25.57
-    L1/TEX Hit Rate                                   %        24.19
+    Memory Throughput                           Gbyte/s        52.12
+    Mem Busy                                          %        81.80
+    Max Bandwidth                                     %        34.02
+    L1/TEX Hit Rate                                   %        22.43
     L2 Persisting Size                            Mbyte         6.29
     L2 Compression Success Rate                       %            0
     L2 Compression Ratio                                           0
     L2 Compression Input Sectors                 sector            0
-    L2 Hit Rate                                       %        64.51
-    Mem Pipes Busy                                    %        25.57
+    L2 Hit Rate                                       %        65.33
+    Mem Pipes Busy                                    %        34.02
     --------------------------------------- ----------- ------------
 
     Section: Launch Statistics
     -------------------------------- --------------- ---------------
     Metric Name                          Metric Unit    Metric Value
     -------------------------------- --------------- ---------------
-    Block Size                                                    64
+    Block Size                                                   128
     Function Cache Configuration                     CachePreferNone
     Grid Size                                                    768
-    Registers Per Thread             register/thread             114
+    Registers Per Thread             register/thread              64
     Shared Memory Configuration Size           Kbyte          102.40
     Driver Shared Memory Per Block       Kbyte/block            1.02
     Dynamic Shared Memory Per Block      Kbyte/block           41.73
     Static Shared Memory Per Block        byte/block               0
     # SMs                                         SM              36
     Stack Size                                                 1,024
-    Threads                                   thread          49,152
+    Threads                                   thread          98,304
     # TPCs                                                        18
     Enabled TPC IDs                                              all
     Uses Green Context                                             0
@@ -1539,16 +1769,16 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     Block Limit SM                        block           24
     Block Limit Registers                 block            8
     Block Limit Shared Mem                block            2
-    Block Limit Warps                     block           24
-    Theoretical Active Warps per SM        warp            4
-    Theoretical Occupancy                     %         8.33
-    Achieved Occupancy                        %         8.15
-    Achieved Active Warps Per SM           warp         3.91
+    Block Limit Warps                     block           12
+    Theoretical Active Warps per SM        warp            8
+    Theoretical Occupancy                     %        16.67
+    Achieved Occupancy                        %        16.34
+    Achieved Active Warps Per SM           warp         7.84
     ------------------------------- ----------- ------------
 
-    OPT   Est. Local Speedup: 91.67%                                                                                    
-          The 1.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
-          hardware maximum of 12. This kernel's theoretical occupancy (8.3%) is limited by the required amount of       
+    OPT   Est. Local Speedup: 83.33%                                                                                    
+          The 2.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
+          hardware maximum of 12. This kernel's theoretical occupancy (16.7%) is limited by the required amount of      
           shared memory.                                                                                                
 
   <unnamed>::flash_dsum_k(float *, const float *, const float *, int, int, int, int) (6144, 1, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
@@ -1556,16 +1786,16 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     ----------------------- ----------- ------------
     Metric Name             Metric Unit Metric Value
     ----------------------- ----------- ------------
-    DRAM Frequency                  Ghz         8.00
+    DRAM Frequency                  Ghz         7.99
     SM Frequency                    Ghz         1.60
-    Elapsed Cycles                cycle       87,941
-    Memory Throughput                 %        91.32
-    DRAM Throughput                   %        91.32
-    Duration                         us        54.88
-    L1/TEX Cache Throughput           %        17.72
-    L2 Cache Throughput               %        29.62
-    SM Active Cycles              cycle    84,758.11
-    Compute (SM) Throughput           %        33.68
+    Elapsed Cycles                cycle       88,397
+    Memory Throughput                 %        91.30
+    DRAM Throughput                   %        91.30
+    Duration                         us        55.20
+    L1/TEX Cache Throughput           %        17.68
+    L2 Cache Throughput               %        29.47
+    SM Active Cycles              cycle    84,949.86
+    Compute (SM) Throughput           %        33.91
     ----------------------- ----------- ------------
 
     INF   This workload is utilizing greater than 80.0% of the available compute or memory performance of this device.  
@@ -1581,16 +1811,16 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     L2 Sector Promotion Misses                        %            0
     Shared Memory Spilling Requests                                0
     Shared Memory Spilling Request Overhead           %            0
-    Memory Throughput                           Gbyte/s       233.63
-    Mem Busy                                          %        15.76
-    Max Bandwidth                                     %        91.32
-    L1/TEX Hit Rate                                   %         4.52
+    Memory Throughput                           Gbyte/s       233.31
+    Mem Busy                                          %        15.68
+    Max Bandwidth                                     %        91.30
+    L1/TEX Hit Rate                                   %         4.51
     L2 Persisting Size                            Mbyte         6.29
     L2 Compression Success Rate                       %            0
     L2 Compression Ratio                                           0
     L2 Compression Input Sectors                 sector            0
     L2 Hit Rate                                       %         6.02
-    Mem Pipes Busy                                    %        17.17
+    Mem Pipes Busy                                    %        17.29
     --------------------------------------- ----------- ------------
 
     Section: Launch Statistics
@@ -1624,203 +1854,37 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     Block Limit Warps                     block           12
     Theoretical Active Warps per SM        warp           48
     Theoretical Occupancy                     %          100
-    Achieved Occupancy                        %        87.14
-    Achieved Active Warps Per SM           warp        41.83
+    Achieved Occupancy                        %        86.88
+    Achieved Active Warps Per SM           warp        41.70
     ------------------------------- ----------- ------------
 
-    OPT   Est. Local Speedup: 12.86%                                                                                    
-          The difference between calculated theoretical (100.0%) and measured achieved occupancy (87.1%) can be the     
+    OPT   Est. Local Speedup: 13.12%                                                                                    
+          The difference between calculated theoretical (100.0%) and measured achieved occupancy (86.9%) can be the     
           result of warp scheduling overheads or workload imbalances during the kernel execution. Load imbalances can   
           occur between warps within a block as well as across blocks of the same kernel. See the CUDA Best Practices   
           Guide (https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#occupancy) for more details on     
           optimizing occupancy.                                                                                         
 
-  void <unnamed>::flash_bwd_kv_k<32, 32, 64, 64, 4, 4, 8, 4>(float *, const float *, const float *, const float *, const float *, int, int, float) (8, 96, 1)x(64, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
+  void <unnamed>::flash_bwd_kv_k<32, 32, 64, 128, 4, 2, 4, 4>(float *, const float *, const float *, const float *, const float *, int, int, float) (8, 96, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
     Section: GPU Speed Of Light Throughput
     ----------------------- ----------- ------------
     Metric Name             Metric Unit Metric Value
     ----------------------- ----------- ------------
     DRAM Frequency                  Ghz         7.99
     SM Frequency                    Ghz         1.60
-    Elapsed Cycles                cycle    1,128,113
-    Memory Throughput                 %        67.20
-    DRAM Throughput                   %        20.59
-    Duration                         us       703.14
-    L1/TEX Cache Throughput           %        71.20
-    L2 Cache Throughput               %         7.53
-    SM Active Cycles              cycle 1,038,900.83
-    Compute (SM) Throughput           %        26.31
-    ----------------------- ----------- ------------
-
-    OPT   Memory is more heavily utilized than Compute: Look at the Memory Workload Analysis section to identify the L1 
-          bottleneck. Check memory replay (coalescing) metrics to make sure you're efficiently utilizing the bytes      
-          transferred. Also consider whether it is possible to do more work per memory access (kernel fusion) or        
-          whether there are values you can (re)compute.                                                                 
-
-    Section: Memory Workload Analysis
-    --------------------------------------- ----------- ------------
-    Metric Name                             Metric Unit Metric Value
-    --------------------------------------- ----------- ------------
-    Local Memory Spilling Requests                                 0
-    Local Memory Spilling Request Overhead            %            0
-    L2 Sector Promotion Misses                        %            0
-    Shared Memory Spilling Requests                                0
-    Shared Memory Spilling Request Overhead           %            0
-    Memory Throughput                           Gbyte/s        52.66
-    Mem Busy                                          %        67.20
-    Max Bandwidth                                     %        26.31
-    L1/TEX Hit Rate                                   %         0.99
-    L2 Persisting Size                            Mbyte         6.29
-    L2 Compression Success Rate                       %            0
-    L2 Compression Ratio                                           0
-    L2 Compression Input Sectors                 sector            0
-    L2 Hit Rate                                       %        68.73
-    Mem Pipes Busy                                    %        26.31
-    --------------------------------------- ----------- ------------
-
-    Section: Launch Statistics
-    -------------------------------- --------------- ---------------
-    Metric Name                          Metric Unit    Metric Value
-    -------------------------------- --------------- ---------------
-    Block Size                                                    64
-    Function Cache Configuration                     CachePreferNone
-    Grid Size                                                    768
-    Registers Per Thread             register/thread             137
-    Shared Memory Configuration Size           Kbyte          102.40
-    Driver Shared Memory Per Block       Kbyte/block            1.02
-    Dynamic Shared Memory Per Block      Kbyte/block           46.34
-    Static Shared Memory Per Block        byte/block               0
-    # SMs                                         SM              36
-    Stack Size                                                 1,024
-    Threads                                   thread          49,152
-    # TPCs                                                        18
-    Enabled TPC IDs                                              all
-    Uses Green Context                                             0
-    Waves Per SM                                               10.67
-    -------------------------------- --------------- ---------------
-
-    Section: Occupancy
-    ------------------------------- ----------- ------------
-    Metric Name                     Metric Unit Metric Value
-    ------------------------------- ----------- ------------
-    Block Limit SM                        block           24
-    Block Limit Registers                 block            6
-    Block Limit Shared Mem                block            2
-    Block Limit Warps                     block           24
-    Theoretical Active Warps per SM        warp            4
-    Theoretical Occupancy                     %         8.33
-    Achieved Occupancy                        %         8.15
-    Achieved Active Warps Per SM           warp         3.91
-    ------------------------------- ----------- ------------
-
-    OPT   Est. Local Speedup: 91.67%                                                                                    
-          The 1.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
-          hardware maximum of 12. This kernel's theoretical occupancy (8.3%) is limited by the required amount of       
-          shared memory.                                                                                                
-
-  void <unnamed>::flash_bwd_q_k<32, 32, 64, 64, 4, 4, 8, 4>(float *, const float *, const float *, const float *, const float *, int, int, float) (8, 96, 1)x(64, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
-    Section: GPU Speed Of Light Throughput
-    ----------------------- ----------- ------------
-    Metric Name             Metric Unit Metric Value
-    ----------------------- ----------- ------------
-    DRAM Frequency                  Ghz         7.99
-    SM Frequency                    Ghz         1.60
-    Elapsed Cycles                cycle      839,829
-    Memory Throughput                 %        62.28
-    DRAM Throughput                   %        23.35
-    Duration                         us       523.33
-    L1/TEX Cache Throughput           %        66.68
-    L2 Cache Throughput               %         8.79
-    SM Active Cycles              cycle   790,853.64
-    Compute (SM) Throughput           %        25.35
-    ----------------------- ----------- ------------
-
-    OPT   Memory is more heavily utilized than Compute: Look at the Memory Workload Analysis section to identify the L1 
-          bottleneck. Check memory replay (coalescing) metrics to make sure you're efficiently utilizing the bytes      
-          transferred. Also consider whether it is possible to do more work per memory access (kernel fusion) or        
-          whether there are values you can (re)compute.                                                                 
-
-    Section: Memory Workload Analysis
-    --------------------------------------- ----------- ------------
-    Metric Name                             Metric Unit Metric Value
-    --------------------------------------- ----------- ------------
-    Local Memory Spilling Requests                                 0
-    Local Memory Spilling Request Overhead            %            0
-    L2 Sector Promotion Misses                        %            0
-    Shared Memory Spilling Requests                                0
-    Shared Memory Spilling Request Overhead           %            0
-    Memory Throughput                           Gbyte/s        59.71
-    Mem Busy                                          %        62.28
-    Max Bandwidth                                     %        25.35
-    L1/TEX Hit Rate                                   %        24.65
-    L2 Persisting Size                            Mbyte         6.29
-    L2 Compression Success Rate                       %            0
-    L2 Compression Ratio                                           0
-    L2 Compression Input Sectors                 sector            0
-    L2 Hit Rate                                       %        65.39
-    Mem Pipes Busy                                    %        25.35
-    --------------------------------------- ----------- ------------
-
-    Section: Launch Statistics
-    -------------------------------- --------------- ---------------
-    Metric Name                          Metric Unit    Metric Value
-    -------------------------------- --------------- ---------------
-    Block Size                                                    64
-    Function Cache Configuration                     CachePreferNone
-    Grid Size                                                    768
-    Registers Per Thread             register/thread             114
-    Shared Memory Configuration Size           Kbyte          102.40
-    Driver Shared Memory Per Block       Kbyte/block            1.02
-    Dynamic Shared Memory Per Block      Kbyte/block           41.73
-    Static Shared Memory Per Block        byte/block               0
-    # SMs                                         SM              36
-    Stack Size                                                 1,024
-    Threads                                   thread          49,152
-    # TPCs                                                        18
-    Enabled TPC IDs                                              all
-    Uses Green Context                                             0
-    Waves Per SM                                               10.67
-    -------------------------------- --------------- ---------------
-
-    Section: Occupancy
-    ------------------------------- ----------- ------------
-    Metric Name                     Metric Unit Metric Value
-    ------------------------------- ----------- ------------
-    Block Limit SM                        block           24
-    Block Limit Registers                 block            8
-    Block Limit Shared Mem                block            2
-    Block Limit Warps                     block           24
-    Theoretical Active Warps per SM        warp            4
-    Theoretical Occupancy                     %         8.33
-    Achieved Occupancy                        %         8.12
-    Achieved Active Warps Per SM           warp         3.90
-    ------------------------------- ----------- ------------
-
-    OPT   Est. Local Speedup: 91.67%                                                                                    
-          The 1.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
-          hardware maximum of 12. This kernel's theoretical occupancy (8.3%) is limited by the required amount of       
-          shared memory.                                                                                                
-
-  <unnamed>::flash_dsum_k(float *, const float *, const float *, int, int, int, int) (6144, 1, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
-    Section: GPU Speed Of Light Throughput
-    ----------------------- ----------- ------------
-    Metric Name             Metric Unit Metric Value
-    ----------------------- ----------- ------------
-    DRAM Frequency                  Ghz         7.98
-    SM Frequency                    Ghz         1.60
-    Elapsed Cycles                cycle       88,248
-    Memory Throughput                 %        91.19
-    DRAM Throughput                   %        91.19
-    Duration                         us        55.10
-    L1/TEX Cache Throughput           %        17.75
-    L2 Cache Throughput               %        29.52
-    SM Active Cycles              cycle    84,599.39
-    Compute (SM) Throughput           %        33.77
+    Elapsed Cycles                cycle      944,340
+    Memory Throughput                 %        81.98
+    DRAM Throughput                   %        24.64
+    Duration                         us       588.64
+    L1/TEX Cache Throughput           %        87.58
+    L2 Cache Throughput               %         8.93
+    SM Active Cycles              cycle   902,399.28
+    Compute (SM) Throughput           %        35.56
     ----------------------- ----------- ------------
 
     INF   This workload is utilizing greater than 80.0% of the available compute or memory performance of this device.  
           To further improve performance, work will likely need to be shifted from the most utilized to another unit.   
-          Start by analyzing DRAM in the Memory Workload Analysis section.                                              
+          Start by analyzing L1 in the Memory Workload Analysis section.                                                
 
     Section: Memory Workload Analysis
     --------------------------------------- ----------- ------------
@@ -1831,16 +1895,16 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     L2 Sector Promotion Misses                        %            0
     Shared Memory Spilling Requests                                0
     Shared Memory Spilling Request Overhead           %            0
-    Memory Throughput                           Gbyte/s       232.98
-    Mem Busy                                          %        15.71
-    Max Bandwidth                                     %        91.19
-    L1/TEX Hit Rate                                   %         4.52
+    Memory Throughput                           Gbyte/s        63.03
+    Mem Busy                                          %        81.98
+    Max Bandwidth                                     %        37.45
+    L1/TEX Hit Rate                                   %         1.80
     L2 Persisting Size                            Mbyte         6.29
     L2 Compression Success Rate                       %            0
     L2 Compression Ratio                                           0
     L2 Compression Input Sectors                 sector            0
-    L2 Hit Rate                                       %         6.00
-    Mem Pipes Busy                                    %        17.22
+    L2 Hit Rate                                       %        68.93
+    Mem Pipes Busy                                    %        35.56
     --------------------------------------- ----------- ------------
 
     Section: Launch Statistics
@@ -1849,100 +1913,15 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     -------------------------------- --------------- ---------------
     Block Size                                                   128
     Function Cache Configuration                     CachePreferNone
-    Grid Size                                                  6,144
-    Registers Per Thread             register/thread              37
-    Shared Memory Configuration Size           Kbyte           32.77
-    Driver Shared Memory Per Block       Kbyte/block            1.02
-    Dynamic Shared Memory Per Block       byte/block               0
-    Static Shared Memory Per Block        byte/block               0
-    # SMs                                         SM              36
-    Stack Size                                                 1,024
-    Threads                                   thread         786,432
-    # TPCs                                                        18
-    Enabled TPC IDs                                              all
-    Uses Green Context                                             0
-    Waves Per SM                                               14.22
-    -------------------------------- --------------- ---------------
-
-    Section: Occupancy
-    ------------------------------- ----------- ------------
-    Metric Name                     Metric Unit Metric Value
-    ------------------------------- ----------- ------------
-    Block Limit SM                        block           24
-    Block Limit Registers                 block           12
-    Block Limit Shared Mem                block           32
-    Block Limit Warps                     block           12
-    Theoretical Active Warps per SM        warp           48
-    Theoretical Occupancy                     %          100
-    Achieved Occupancy                        %        87.21
-    Achieved Active Warps Per SM           warp        41.86
-    ------------------------------- ----------- ------------
-
-    OPT   Est. Local Speedup: 12.79%                                                                                    
-          The difference between calculated theoretical (100.0%) and measured achieved occupancy (87.2%) can be the     
-          result of warp scheduling overheads or workload imbalances during the kernel execution. Load imbalances can   
-          occur between warps within a block as well as across blocks of the same kernel. See the CUDA Best Practices   
-          Guide (https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html#occupancy) for more details on     
-          optimizing occupancy.                                                                                         
-
-  void <unnamed>::flash_bwd_kv_k<32, 32, 64, 64, 4, 4, 8, 4>(float *, const float *, const float *, const float *, const float *, int, int, float) (8, 96, 1)x(64, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
-    Section: GPU Speed Of Light Throughput
-    ----------------------- ----------- ------------
-    Metric Name             Metric Unit Metric Value
-    ----------------------- ----------- ------------
-    DRAM Frequency                  Ghz         7.99
-    SM Frequency                    Ghz         1.60
-    Elapsed Cycles                cycle    1,111,055
-    Memory Throughput                 %        66.85
-    DRAM Throughput                   %        20.96
-    Duration                         us       692.35
-    L1/TEX Cache Throughput           %        71.10
-    L2 Cache Throughput               %         7.64
-    SM Active Cycles              cycle 1,040,535.03
-    Compute (SM) Throughput           %        26.17
-    ----------------------- ----------- ------------
-
-    OPT   Memory is more heavily utilized than Compute: Look at the Memory Workload Analysis section to identify the L1 
-          bottleneck. Check memory replay (coalescing) metrics to make sure you're efficiently utilizing the bytes      
-          transferred. Also consider whether it is possible to do more work per memory access (kernel fusion) or        
-          whether there are values you can (re)compute.                                                                 
-
-    Section: Memory Workload Analysis
-    --------------------------------------- ----------- ------------
-    Metric Name                             Metric Unit Metric Value
-    --------------------------------------- ----------- ------------
-    Local Memory Spilling Requests                                 0
-    Local Memory Spilling Request Overhead            %            0
-    L2 Sector Promotion Misses                        %            0
-    Shared Memory Spilling Requests                                0
-    Shared Memory Spilling Request Overhead           %            0
-    Memory Throughput                           Gbyte/s        53.61
-    Mem Busy                                          %        66.85
-    Max Bandwidth                                     %        26.17
-    L1/TEX Hit Rate                                   %         1.09
-    L2 Persisting Size                            Mbyte         6.29
-    L2 Compression Success Rate                       %            0
-    L2 Compression Ratio                                           0
-    L2 Compression Input Sectors                 sector            0
-    L2 Hit Rate                                       %        68.95
-    Mem Pipes Busy                                    %        26.17
-    --------------------------------------- ----------- ------------
-
-    Section: Launch Statistics
-    -------------------------------- --------------- ---------------
-    Metric Name                          Metric Unit    Metric Value
-    -------------------------------- --------------- ---------------
-    Block Size                                                    64
-    Function Cache Configuration                     CachePreferNone
     Grid Size                                                    768
-    Registers Per Thread             register/thread             137
+    Registers Per Thread             register/thread              96
     Shared Memory Configuration Size           Kbyte          102.40
     Driver Shared Memory Per Block       Kbyte/block            1.02
     Dynamic Shared Memory Per Block      Kbyte/block           46.34
     Static Shared Memory Per Block        byte/block               0
     # SMs                                         SM              36
     Stack Size                                                 1,024
-    Threads                                   thread          49,152
+    Threads                                   thread          98,304
     # TPCs                                                        18
     Enabled TPC IDs                                              all
     Uses Green Context                                             0
@@ -1954,41 +1933,40 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     Metric Name                     Metric Unit Metric Value
     ------------------------------- ----------- ------------
     Block Limit SM                        block           24
-    Block Limit Registers                 block            6
+    Block Limit Registers                 block            5
     Block Limit Shared Mem                block            2
-    Block Limit Warps                     block           24
-    Theoretical Active Warps per SM        warp            4
-    Theoretical Occupancy                     %         8.33
-    Achieved Occupancy                        %         8.16
-    Achieved Active Warps Per SM           warp         3.92
+    Block Limit Warps                     block           12
+    Theoretical Active Warps per SM        warp            8
+    Theoretical Occupancy                     %        16.67
+    Achieved Occupancy                        %        16.36
+    Achieved Active Warps Per SM           warp         7.85
     ------------------------------- ----------- ------------
 
-    OPT   Est. Local Speedup: 91.67%                                                                                    
-          The 1.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
-          hardware maximum of 12. This kernel's theoretical occupancy (8.3%) is limited by the required amount of       
+    OPT   Est. Local Speedup: 83.33%                                                                                    
+          The 2.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
+          hardware maximum of 12. This kernel's theoretical occupancy (16.7%) is limited by the required amount of      
           shared memory.                                                                                                
 
-  void <unnamed>::flash_bwd_q_k<32, 32, 64, 64, 4, 4, 8, 4>(float *, const float *, const float *, const float *, const float *, int, int, float) (8, 96, 1)x(64, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
+  void <unnamed>::flash_bwd_q_k<32, 32, 64, 128, 4, 2, 4, 4>(float *, const float *, const float *, const float *, const float *, int, int, float) (8, 96, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
     Section: GPU Speed Of Light Throughput
     ----------------------- ----------- ------------
     Metric Name             Metric Unit Metric Value
     ----------------------- ----------- ------------
     DRAM Frequency                  Ghz         7.99
     SM Frequency                    Ghz         1.60
-    Elapsed Cycles                cycle      835,291
-    Memory Throughput                 %        62.77
-    DRAM Throughput                   %        23.51
-    Duration                         us       520.54
-    L1/TEX Cache Throughput           %        66.99
-    L2 Cache Throughput               %         9.01
-    SM Active Cycles              cycle   786,921.86
-    Compute (SM) Throughput           %        25.56
+    Elapsed Cycles                cycle      921,979
+    Memory Throughput                 %        83.53
+    DRAM Throughput                   %        21.30
+    Duration                         us       574.75
+    L1/TEX Cache Throughput           %        88.08
+    L2 Cache Throughput               %         8.32
+    SM Active Cycles              cycle   878,570.97
+    Compute (SM) Throughput           %        34.75
     ----------------------- ----------- ------------
 
-    OPT   Memory is more heavily utilized than Compute: Look at the Memory Workload Analysis section to identify the L1 
-          bottleneck. Check memory replay (coalescing) metrics to make sure you're efficiently utilizing the bytes      
-          transferred. Also consider whether it is possible to do more work per memory access (kernel fusion) or        
-          whether there are values you can (re)compute.                                                                 
+    INF   This workload is utilizing greater than 80.0% of the available compute or memory performance of this device.  
+          To further improve performance, work will likely need to be shifted from the most utilized to another unit.   
+          Start by analyzing L1 in the Memory Workload Analysis section.                                                
 
     Section: Memory Workload Analysis
     --------------------------------------- ----------- ------------
@@ -1999,33 +1977,33 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     L2 Sector Promotion Misses                        %            0
     Shared Memory Spilling Requests                                0
     Shared Memory Spilling Request Overhead           %            0
-    Memory Throughput                           Gbyte/s        60.14
-    Mem Busy                                          %        62.77
-    Max Bandwidth                                     %        25.56
-    L1/TEX Hit Rate                                   %        23.58
+    Memory Throughput                           Gbyte/s        54.47
+    Mem Busy                                          %        83.53
+    Max Bandwidth                                     %        34.75
+    L1/TEX Hit Rate                                   %        22.33
     L2 Persisting Size                            Mbyte         6.29
     L2 Compression Success Rate                       %            0
     L2 Compression Ratio                                           0
     L2 Compression Input Sectors                 sector            0
-    L2 Hit Rate                                       %        64.13
-    Mem Pipes Busy                                    %        25.56
+    L2 Hit Rate                                       %        65.40
+    Mem Pipes Busy                                    %        34.75
     --------------------------------------- ----------- ------------
 
     Section: Launch Statistics
     -------------------------------- --------------- ---------------
     Metric Name                          Metric Unit    Metric Value
     -------------------------------- --------------- ---------------
-    Block Size                                                    64
+    Block Size                                                   128
     Function Cache Configuration                     CachePreferNone
     Grid Size                                                    768
-    Registers Per Thread             register/thread             114
+    Registers Per Thread             register/thread              64
     Shared Memory Configuration Size           Kbyte          102.40
     Driver Shared Memory Per Block       Kbyte/block            1.02
     Dynamic Shared Memory Per Block      Kbyte/block           41.73
     Static Shared Memory Per Block        byte/block               0
     # SMs                                         SM              36
     Stack Size                                                 1,024
-    Threads                                   thread          49,152
+    Threads                                   thread          98,304
     # TPCs                                                        18
     Enabled TPC IDs                                              all
     Uses Green Context                                             0
@@ -2039,15 +2017,15 @@ V  LQ, tHt vVFQVc&j?gM,HmzNOt'-&&
     Block Limit SM                        block           24
     Block Limit Registers                 block            8
     Block Limit Shared Mem                block            2
-    Block Limit Warps                     block           24
-    Theoretical Active Warps per SM        warp            4
-    Theoretical Occupancy                     %         8.33
-    Achieved Occupancy                        %         8.16
-    Achieved Active Warps Per SM           warp         3.92
+    Block Limit Warps                     block           12
+    Theoretical Active Warps per SM        warp            8
+    Theoretical Occupancy                     %        16.67
+    Achieved Occupancy                        %        16.29
+    Achieved Active Warps Per SM           warp         7.82
     ------------------------------- ----------- ------------
 
-    OPT   Est. Local Speedup: 91.67%                                                                                    
-          The 1.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
-          hardware maximum of 12. This kernel's theoretical occupancy (8.3%) is limited by the required amount of       
+    OPT   Est. Local Speedup: 83.33%                                                                                    
+          The 2.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
+          hardware maximum of 12. This kernel's theoretical occupancy (16.7%) is limited by the required amount of      
           shared memory.                                                                                                
 
