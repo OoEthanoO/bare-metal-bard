@@ -1,0 +1,29 @@
+# Fused vs unfused attention, RTX 4070 Laptop (sm_89)
+# SM clock pinned to 1200 MHz; CUDA 12.5; driver 610.88
+# clock during run: 1200 MHz
+
+B=16 T=256 C=384 NH=6 (hs=64)
+
+impl                     best ms    med ms    GFLOP/s vs unfused     norm err
+unfused (3 kernels)        1.132     1.138      714.5      1.00x            -
+br64 bc64 t128 4x8         0.455     0.461     1778.2      2.49x     2.09e-07 ok
+br64 bc32 t128 4x4         0.340     0.348     2378.0      3.33x     2.09e-07 ok
+br64 bc64 t256 4x4         0.356     0.358     2268.7      3.18x     2.09e-07 ok
+br128 bc32 t256 4x4        0.425     0.429     1902.4      2.66x     2.09e-07 ok
+br32 bc32 t64 4x4          0.384     0.390     2105.3      2.95x     2.09e-07 ok
+
+backward                 best ms    med ms    GFLOP/s vs unfused     dq err     dk err     dv err
+unfused (7 kernels)        1.834     1.838     1542.9      1.00x
+br64 bc32 t128 kv4x4 q8x4     1.767     1.775     1601.0      1.04x   3.00e-07   4.19e-07   3.26e-07 ok
+br64 bc32 t128 kv4x4 q4x8     1.966     1.971     1439.2      0.93x   3.00e-07   4.19e-07   3.26e-07 ok
+br32 bc32 t64  kv4x8 q4x8     2.075     2.103     1363.9      0.88x   3.00e-07   4.19e-07   3.26e-07 ok
+br32 bc32 t64  kv8x4 q8x4     1.639     1.656     1726.0      1.12x   3.00e-07   4.19e-07   3.26e-07 ok
+br32 bc32 t64  kv4x4 q4x4         - (not valid for hs=64)
+
+per layer, per forward pass:
+  score matrix (B,NH,T,T)       25.2 MB   written once, read twice
+  permuted qkvr (4,B,NH,T,hs)   25.2 MB   written once, read twice
+  fused saves                   50.3 MB of resident activation memory
+  lse kept instead             0.098 MB
+
+fastest config: br64 bc32 t128 4x4 (0.340 ms)
