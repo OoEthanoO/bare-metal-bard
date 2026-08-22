@@ -128,15 +128,15 @@ repo.
 
 ```
 params    10.80M (41.2 MB; +41.2 MB grads, +82.4 MB adam state)
-memory    952.4 MB forward activations, 146.0 MB backward scratch
+memory    665.0 MB forward activations, 98.1 MB backward scratch
 batch     16 x 256 = 4096 tokens/step
-speed     88.6 ms/step, 46,261 tokens/s, ~3320 GFLOP/s end to end
-loss      4.174 (= ln 65, uniform guess) -> 1.5157 val at step 2750
+speed     85.7 ms/step, 47,814 tokens/s, ~3435 GFLOP/s end to end
+loss      4.174 (= ln 65, uniform guess) -> 1.5056 val at step 2400
 ```
 
 ![training curve](docs/training_curve.svg)
 
-Validation bottoms at **1.5157** around step 2750 and then climbs -- 10.8M
+Validation bottoms at **1.5056** around step 2400 and then climbs -- 10.8M
 parameters on 1 MB of text overfits well before the LR schedule ends, so the
 best-validation checkpoint is the one kept, not the last. Full curve, config and
 sample: [`docs/training.md`](docs/training.md).
@@ -144,18 +144,35 @@ sample: [`docs/training.md`](docs/training.md).
 Sampled from that checkpoint at temperature 0.8:
 
 ```
-GLOUCESTER:
-He shall not be the curtain: an of your
-good chorn shall the gaze on the of your tried
-on prison, or brother the other reapt
-of one to supper, whom our pride to king
-In queen exposed fall outterprised, which in the
-good trooping high tune of mortal hour
+Lord Lord Amaculled and that handled him,
+And cummon and be at the envious story
+And this love and her with his sake, he be bequired
+The matter curren'd the broke of the wars
+I' the should have been much by the destroyms:
+And, upon my son's wonding adreadful strange,
+And is truth on the still ae in a suffice.
 ```
 
-The end-to-end 3320 GFLOP/s sits below the standalone GEMM peak because a
+This run uses the [fused attention](#fused-attention-the-score-matrix-never-exists)
+described below. Running the same seed and configuration on the unfused path is
+the control:
+
+| | step | tokens/s | best val | at step | final train |
+|---|---:|---:|---:|---:|---:|
+| fused | **85.7 ms** | **47,814** | **1.5056** | 2400 | 0.6484 |
+| unfused | 91.0 ms | 44,988 | 1.5194 | 2400 | 0.6538 |
+
+Both bottom out at step 2400 and land 0.014 nats apart, which is what the
+identical-computation claim should look like in practice rather than in theory:
+fp32 addition is not associative, so a different summation order gives a
+trajectory that differs in the last digits and then diverges chaotically over
+5000 steps. What matters is that neither the shape of the curve nor the quality
+of the model moved. The fused kernels are faster and smaller, not different.
+
+The end-to-end 3435 GFLOP/s sits below the standalone GEMM peak because a
 training step is not all GEMM. Profiling every kernel launch with `ncu` and
-aggregating by category:
+aggregating by category — this is the **unfused** path, and it is the
+measurement that motivated the fused attention below:
 
 | category | share of kernel time |
 |---|---:|
@@ -265,10 +282,13 @@ this repo's whole lesson restated one level up.
 
 | | unfused | fused | |
 |---|--------:|------:|---|
-| attention forward | 1.132 ms | **0.337 ms** | 3.36x |
-| attention backward | 1.828 ms | **1.595 ms** | 1.15x |
+| attention forward | 1.133 ms | **0.339 ms** | 3.34x |
+| attention backward | 1.832 ms | **1.602 ms** | 1.14x |
 | forward activations | 952.4 MB | **665.0 MB** | -30% |
 | backward scratch | 146.0 MB | **98.1 MB** | -33% |
+
+Full log, including every tile configuration and the ragged-shape checks:
+[`bench/logs/flash_pinned.txt`](bench/logs/flash_pinned.txt).
 
 Accuracy against the attention this repo already trains with: **2.09e-07**
 normwise on the output, and 3.00e-07 / 4.19e-07 / 3.26e-07 on dq / dk / dv.
@@ -282,7 +302,7 @@ compute the same thing.
 ./bench/train_gpt --unfused   # the three-kernel path, for comparison
 ```
 
-### The backward is only 1.15x, and here is why
+### The backward is only 1.14x, and here is why
 
 The forward result is most of the story; the backward is nearly a wash, and it
 is worth saying why rather than quoting the forward alone.
@@ -525,8 +545,8 @@ four scalar stores.
 2. **`cp.async`** for the staging copies, so kernel 8's prefetch bypasses
    registers entirely rather than costing 32 of them per thread.
 3. ~~**Fuse attention** (FlashAttention-style)~~ — [done](#fused-attention-the-score-matrix-never-exists).
-   Forward is 3.36x and activation memory is down 30%. The backward is only
-   1.15x and the profiler says why: shared-memory→register traffic, kernel 6's
+   Forward is 3.34x and activation memory is down 30%. The backward is only
+   1.14x and the profiler says why: shared-memory→register traffic, kernel 6's
    problem at a different level. **Chunk the head dimension** the way a GEMM
    chunks K, so that bigger register tiles and more blocks per SM stop
    competing for the same shared memory. DRAM sits at 21%, so there is

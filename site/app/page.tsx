@@ -53,6 +53,7 @@ function KernelBars() {
 
 export default function Page() {
   const t = data.training;
+  const f = data.flash as any;
   const first = data.kernels[0];
   const dbuf = byName('dbuffer');
   const tc = byName('tensorcore');
@@ -395,8 +396,10 @@ __syncthreads()              <- and blocks again before overwriting`}</code>
           <span className="k">best val loss (step {t.bestStep})</span>
         </div>
         <div className="stat">
-          <span className="v">1.1 GB</span>
-          <span className="k">activations + scratch</span>
+          <span className="v">
+            {f?.memory?.length ? `${f.memory[0].fused.toFixed(2)} GB` : '0.75 GB'}
+          </span>
+          <span className="k">resident, everything</span>
         </div>
       </div>
 
@@ -435,6 +438,170 @@ __syncthreads()              <- and blocks again before overwriting`}</code>
       <p>Sampled from the best checkpoint at temperature 0.8:</p>
       <div className="sample">{t.sample}</div>
 
+      <h2>Fusing attention: the score matrix never exists</h2>
+      <p>
+        The table above says attention costs about 21% of a training step across three kernels.
+        None of them is badly written — the batched GEMM is the same code that reaches 90% of
+        cuBLAS. The cost is <em>structural</em>. A (B, NH, T, T) score matrix gets written to global
+        memory and read back, and the softmax over it does roughly 5 flops per 8 bytes on a card
+        whose ridge point is 43 FLOP/byte. That is 0.6% of peak no matter how good the kernel is.
+        The only fix is to not have the intermediate.
+      </p>
+      <p>
+        A softmax normally needs the whole row before it can emit anything, because it needs the row
+        max and the row sum. But both are <em>running</em> statistics. After seeing part of a row you
+        hold a partial max <code>m</code> and partial sum <code>l</code>, and when a later block
+        raises the max to <code>m&prime;</code>, everything computed so far is corrected by one
+        factor — <code>exp(m - m&prime;)</code>:
+      </p>
+      <pre>
+        <code>{`m' = max(m, rowmax(S_j))
+l' = l * exp(m - m') + rowsum(exp(S_j - m'))
+O' = O * exp(m - m') + exp(S_j - m') @ V_j`}</code>
+      </pre>
+      <p>
+        with <code>O</code> divided by <code>l</code> only at the end. Each score tile lives in
+        registers for the few instructions it takes to consume it and is then gone. This is
+        FlashAttention. Note it does <em>more</em> arithmetic than the unfused version, not less —
+        the whole win is in what never gets written.
+      </p>
+      <p>
+        Two more wins fall out of the structure, and on this hardware they matter as much as the
+        famous one. <strong>Causality becomes a loop bound rather than a mask</strong>: the unfused
+        path computes all T×T scores and discards the upper triangle inside the softmax, while a
+        query block here simply never visits key blocks past its diagonal — so both attention
+        matmuls do half the work. And <strong>the head permute disappears</strong>: the unfused path
+        pays a bandwidth-bound pass over 3·B·T·C to make each head&rsquo;s slice contiguous because
+        a batched GEMM needs uniform strides, while the fused kernel indexes q/k/v straight out of
+        the (B, T, 3C) projection — one block owns one head, so the head offset is a constant on the
+        row pointer.
+      </p>
+      <p>
+        Backward never stores the score matrix either. It rebuilds the probabilities from the saved
+        log-sum-exp, which is exact and needs no reductions at all:{' '}
+        <code>P[i,j] = exp(S[i,j] − lse[i])</code>. Recomputing S costs one matmul; reading a stored
+        score matrix back costs 25 MB of DRAM per layer. On this card that trade is not close. It is
+        two kernels rather than one, because dQ reduces over keys while dK and dV reduce over
+        queries — fusing them would push one of the three through global atomics on a tensor the
+        size of the activations. <strong>Recompute beats communication</strong>, which is this
+        project&rsquo;s whole lesson restated one level up.
+      </p>
+
+      {f.fwd?.best && f.bwd?.best && (
+        <div className="statgrid" style={{ margin: '26px 0' }}>
+          <div className="stat">
+            <span className="v">{f.fwd.best.speedup.toFixed(2)}×</span>
+            <span className="k">attention forward</span>
+          </div>
+          <div className="stat">
+            <span className="v">{f.bwd.best.speedup.toFixed(2)}×</span>
+            <span className="k">attention backward</span>
+          </div>
+          <div className="stat">
+            <span className="v">{f.savedMbPerLayer.toFixed(0)} MB</span>
+            <span className="k">saved per layer</span>
+          </div>
+          <div className="stat">
+            <span className="v">{f.err.out.toExponential(1)}</span>
+            <span className="k">normwise error vs unfused</span>
+          </div>
+        </div>
+      )}
+
+      <h3>The backward is only {f.bwd?.best ? f.bwd.best.speedup.toFixed(2) : ''}×, and why</h3>
+      <p>
+        The forward result is most of the story; the backward is nearly a wash, and it is worth
+        saying why rather than quoting the forward alone. My first answer was a guess: the fastest
+        backward config ran 64 threads per block at 46 KB of shared memory — two blocks per SM, 8%
+        occupancy. So I added a config with twice the threads. It gained 2.4%. The profiler explains
+        why:
+      </p>
+
+      {f.profile && (
+        <div className="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th>kernel</th>
+                <th className="n">L1/TEX</th>
+                <th className="n">DRAM</th>
+                <th className="n">compute</th>
+                <th className="n">occupancy</th>
+              </tr>
+            </thead>
+            <tbody>
+              {f.profile.map((p: any) => (
+                <tr key={p.name}>
+                  <td>
+                    <code>{p.name}</code>
+                  </td>
+                  <td className="n">{p.l1.toFixed(1)}%</td>
+                  <td className="n">{p.dram.toFixed(1)}%</td>
+                  <td className="n">{p.compute.toFixed(1)}%</td>
+                  <td className="n">{p.occupancy.toFixed(1)}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <p>
+        L1/TEX saturated near 70% with DRAM at ~21% is a signature this project has met before —
+        kernel 6 showed 81% against 15%. Shared memory and L1 share the LSU/MIO datapath, so this is
+        shared-memory→register traffic and the FMA pipes are starved. <strong>The same disease as
+        kernel 6, one level up the hierarchy.</strong> Counting loads per FMA agrees: the forward
+        spends 12 shared loads on 32 FMAs in its P@V loop, the backward accumulation spends 16 on
+        32. That is also why more threads did not help — a narrower column tile buys occupancy by
+        loading <em>more</em> per unit of arithmetic, so the two effects nearly cancel.
+      </p>
+
+      <h3>What the memory actually buys: twice the context</h3>
+      <p>
+        The speedup is nice; the memory is the part that changes what the card can do. Unfused
+        attention is <em>quadratic</em> in context length, fused is <em>linear</em>. Total resident
+        memory at batch 16 — parameters, gradients, Adam state, activations and backward scratch:
+      </p>
+
+      {f.memory && (
+        <div className="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th className="n">context</th>
+                <th className="n">fused</th>
+                <th className="n">unfused</th>
+              </tr>
+            </thead>
+            <tbody>
+              {f.memory.map((m: any) => (
+                <tr key={m.ctx} className={m.ctx === 2048 ? 'hi' : undefined}>
+                  <td className="n">{m.ctx}</td>
+                  <td className="n">{m.fused === null ? 'out of memory' : `${m.fused.toFixed(2)} GB`}</td>
+                  <td className="n">
+                    {m.unfused === null ? 'out of memory' : `${m.unfused.toFixed(2)} GB`}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <p>
+        This card has 8 GB. The unfused path tops out at context 1024; the fused path trains at
+        context 2048, and the unfused path would need nearly three times the card to do the same.{' '}
+        <strong>Fusing attention doubled the context this GPU can train.</strong>
+      </p>
+      <div className="note">
+        <p>
+          A thing worth knowing on Windows: a successful <code>cudaMalloc</code> is not evidence
+          that a model fits. WDDM will oversubscribe VRAM into system memory and page, so the 17.94
+          GB allocation above <em>succeeded</em> and then ran at a crawl. The number that means
+          something is the total against the card&rsquo;s memory.
+        </p>
+      </div>
+
       <h2>What I&rsquo;d do next</h2>
       <ol>
         <li>
@@ -450,9 +617,13 @@ __syncthreads()              <- and blocks again before overwriting`}</code>
           of them per thread.
         </li>
         <li>
-          <strong>Fuse attention</strong> FlashAttention-style. The current version materializes the
-          full (B, NH, T, T) score matrix — 25 MB per layer of pure bandwidth a fused kernel would
-          never spend.
+          <strong>
+            <s>Fuse attention</s>
+          </strong>{' '}
+          — done, above. What is left is the backward: it is bound on shared-memory→register
+          traffic, so <strong>chunk the head dimension</strong> the way a GEMM chunks K, and stop
+          bigger register tiles competing with more blocks per SM for the same shared memory. DRAM
+          sits at ~21%, so there is bandwidth to pay for the re-staging.
         </li>
         <li>
           <strong>Multi-GPU</strong>, where communication rather than compute becomes the limit.
@@ -462,9 +633,12 @@ __syncthreads()              <- and blocks again before overwriting`}</code>
 
       <footer>
         <p>
-          Built on an RTX 4070 Laptop with CUDA 12.4. All numbers on this page are generated
-          directly from <code>bench/results.csv</code> and the training log — see{' '}
-          <code>tools/make_site_data.py</code>.
+          Built on an RTX 4070 Laptop. The SGEMM numbers were measured under CUDA 12.4 on Linux;
+          the fused-attention and training numbers under CUDA 12.5 on Windows, driver 610.88 —
+          which is worth stating, because nvcc&rsquo;s version determines the generated SASS and
+          the cuBLAS beside it is the denominator of every &ldquo;% of cuBLAS&rdquo; here. All
+          numbers on this page are generated directly from <code>bench/results.csv</code>, the
+          training log and the profiler output — see <code>tools/make_site_data.py</code>.
         </p>
       </footer>
     </main>

@@ -106,10 +106,12 @@ __device__ __forceinline__ void store_n(float *dst, const float *src) {
 // and CT columns are contiguous and load as float4. V is stored straight,
 // because the second matmul reduces over keys and reads V along its head axis.
 //
-// K's tile and P's tile are the same allocation. Once S is in registers the K
-// tile is dead, and (when BR == HS) the two are exactly the same size. That
-// costs one extra barrier per key block and buys 16 KB, which is the difference
-// between one and two resident blocks per SM.
+// K's tile and P's tile are the same allocation. Once S is in registers for a
+// key block, the K tile is dead, so P can be written over it. That costs one
+// extra barrier per key block and saves max(HS*BC, BC*BR) floats -- 8.5 KB at
+// the default shape, 16 KB when BR = BC = HS. Shared memory is what caps
+// blocks per SM here, so the saving is occupancy, which the sweep in
+// test_flash then confirms or refutes for each shape rather than assuming.
 template <int BR, int BC, int HS, int NT, int RT, int CT>
 __global__ __launch_bounds__(NT) void flash_fwd_k(float *__restrict__ out,
                                                   float *__restrict__ lse,

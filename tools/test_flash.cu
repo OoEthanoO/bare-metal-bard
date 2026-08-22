@@ -65,6 +65,80 @@ static Timing time_it(F fn, int warmup, int iters) {
     return {s.front(), s[s.size() / 2]};
 }
 
+// Correctness only, at a shape whose context does NOT divide the tile.
+//
+// Every other test here uses T=256 against tiles of 32 and 64, so the bounds
+// checks in the kernels -- the `t < T` guards on staging and the masking of
+// out-of-range rows -- have never once executed. A partial tile is exactly
+// where a fused kernel goes wrong: a stale value in the padded region of the
+// score tile is not masked out, and it silently pollutes a real output row.
+static bool check_shape(int B, int T, int C, int NH) {
+    const int hs = C / NH;
+    const size_t BTC = (size_t)B * T * C;
+    const size_t att_sz = (size_t)B * NH * T * T;
+
+    std::vector<float> h_qkv(BTC * 3), h_dout(BTC), a(BTC), b(BTC),
+        da(BTC * 3), db(BTC * 3);
+    fill_random(h_qkv, 4321u);
+    fill_random(h_dout, 8765u);
+
+    float *d_qkv, *d_o1, *d_o2, *d_qkvr, *d_att, *d_lse, *d_dout, *d_d1, *d_d2,
+        *d_dqkvr, *d_datt, *d_dsum;
+    CUDA_CHECK(cudaMalloc(&d_qkv, BTC * 3 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_o1, BTC * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_o2, BTC * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_qkvr, BTC * 4 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_att, att_sz * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_lse, (size_t)B * NH * T * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_dout, BTC * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_d1, BTC * 3 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_d2, BTC * 3 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_dqkvr, BTC * 4 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_datt, att_sz * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_dsum, (size_t)B * NH * T * sizeof(float)));
+    CUDA_CHECK(cudaMemcpy(d_qkv, h_qkv.data(), BTC * 3 * sizeof(float),
+                          cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_dout, h_dout.data(), BTC * sizeof(float),
+                          cudaMemcpyHostToDevice));
+    // Poison the outputs: a kernel that skips a partial tile rather than
+    // computing it should fail loudly instead of inheriting a zeroed buffer.
+    CUDA_CHECK(cudaMemset(d_o2, 0x7f, BTC * sizeof(float)));
+    CUDA_CHECK(cudaMemset(d_d2, 0x7f, BTC * 3 * sizeof(float)));
+
+    attention_forward(d_o1, d_qkvr, d_att, d_qkv, B, T, C, NH);
+    attention_backward(d_d1, d_dqkvr, d_datt, d_datt, d_dout, d_qkvr, d_att, B,
+                       T, C, NH);
+    flash_attention_forward(d_o2, d_lse, d_qkv, B, T, C, NH);
+    flash_attention_backward(d_d2, d_dsum, d_dout, d_qkv, d_o2, d_lse, B, T, C,
+                             NH);
+    CUDA_CHECK(cudaDeviceSynchronize());
+    CUDA_CHECK(cudaGetLastError());
+
+    CUDA_CHECK(cudaMemcpy(a.data(), d_o1, BTC * sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(b.data(), d_o2, BTC * sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(da.data(), d_d1, BTC * 3 * sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(db.data(), d_d2, BTC * 3 * sizeof(float), cudaMemcpyDeviceToHost));
+
+    double eo = 0, ro = 0, eg = 0, rg = 0;
+    for (size_t i = 0; i < BTC; ++i) {
+        ro = fmax(ro, fabs((double)a[i]));
+        eo = fmax(eo, fabs((double)a[i] - (double)b[i]));
+    }
+    for (size_t i = 0; i < BTC * 3; ++i) {
+        rg = fmax(rg, fabs((double)da[i]));
+        eg = fmax(eg, fabs((double)da[i] - (double)db[i]));
+    }
+    const double no = eo / ro, ng = eg / rg;
+    const bool ok = no < 1e-5 && ng < 1e-5;
+    printf("  B=%-3d T=%-5d C=%-4d NH=%-2d (hs=%2d)   out %8.2e   dqkv %8.2e  %s\n",
+           B, T, C, NH, hs, no, ng, ok ? "ok" : "FAIL");
+
+    cudaFree(d_qkv); cudaFree(d_o1); cudaFree(d_o2); cudaFree(d_qkvr);
+    cudaFree(d_att); cudaFree(d_lse); cudaFree(d_dout); cudaFree(d_d1);
+    cudaFree(d_d2); cudaFree(d_dqkvr); cudaFree(d_datt); cudaFree(d_dsum);
+    return ok;
+}
+
 int main(int argc, char **argv) {
     int B = 16, T = 256, C = 384, NH = 6, iters = 50;
     for (int i = 1; i < argc; ++i) {
@@ -257,7 +331,15 @@ int main(int argc, char **argv) {
     printf("  lse kept instead          %8.3f MB\n",
            (double)B * NH * T * 4.0 / 1e6);
 
-    if (fails) printf("\n%d backward config(s) FAILED\n", fails);
+    // ---- ragged shapes ----
+    printf("\nragged shapes (context does not divide the tile):\n");
+    if (!check_shape(3, 100, 384, 6)) ++fails;   // T mod 64 = 36, mod 32 = 4
+    if (!check_shape(2, 33, 384, 6)) ++fails;    // shorter than one tile
+    if (!check_shape(1, 1, 384, 6)) ++fails;     // single token, all masked but self
+    if (!check_shape(2, 129, 256, 8)) ++fails;   // hs=32, T mod 32 = 1
+    if (!check_shape(5, 200, 128, 4)) ++fails;   // hs=32, odd batch
+
+    if (fails) printf("\n%d config(s)/shape(s) FAILED\n", fails);
     if (best_cfg >= 0)
         printf("\nfastest config: %s (%.3f ms)\n", flash_config_name(best_cfg),
                best_ms);

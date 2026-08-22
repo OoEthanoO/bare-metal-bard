@@ -13,7 +13,7 @@ bench/test_flash
 *.pdb
 
 # trained weights (43 MB) and the dataset are reproducible; don't ship them
-bench/gpt.bin
+bench/*.bin
 data/
 
 # profiler output
@@ -26,5 +26,6 @@ node_modules/
 site/.next/
 site/out/
 site/next-env.d.ts
+site/tsconfig.tsbuildinfo
 
 __pycache__/

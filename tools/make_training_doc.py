@@ -66,12 +66,20 @@ doc.append("| step time | %.1f ms |" % med_ms)
 doc.append("| tokens/s | %s |" % f"{med_tok:,}")
 doc.append("| end-to-end | %s GFLOP/s |" % f"{med_gf:,}")
 doc.append("")
+# The bandwidth-bound tail is a different list depending on which attention the
+# run used, so read it out of the log rather than asserting one of them.
+fused = "fused attention" in text
+tail = ("layernorm, softmax, GELU and the optimizer are all bandwidth-bound work "
+        "at arithmetic intensity below 1. The attention score matrices no longer "
+        "cost anything: the fused kernel keeps them in registers and never writes "
+        "them to memory."
+        if fused else
+        "layernorm, softmax, GELU, the attention permutes and the optimizer are "
+        "all bandwidth-bound work at arithmetic intensity below 1, and the "
+        "attention score matrices alone move 25 MB per layer per pass.")
 doc.append("The end-to-end figure counts `6*N*P` for the parameter matmuls plus "
            "the attention terms. It sits below the standalone GEMM peak "
-           "(~6420 GFLOP/s) because a training step is not all GEMM: layernorm, "
-           "softmax, GELU, the attention permutes and the optimizer are all "
-           "bandwidth-bound work at arithmetic intensity below 1, and the "
-           "attention score matrices alone move 25 MB per layer per pass.\n")
+           "(~6420 GFLOP/s) because a training step is not all GEMM: " + tail + "\n")
 
 doc.append("## Loss curve\n")
 doc.append("![training curve](training_curve.svg)\n")

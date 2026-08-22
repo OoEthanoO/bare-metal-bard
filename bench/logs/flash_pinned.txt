@@ -5,20 +5,22 @@
 B=16 T=256 C=384 NH=6 (hs=64)
 
 impl                     best ms    med ms    GFLOP/s vs unfused     norm err
-unfused (3 kernels)        1.132     1.138      714.5      1.00x            -
-br64 bc64 t128 4x8         0.455     0.461     1778.2      2.49x     2.09e-07 ok
-br64 bc32 t128 4x4         0.340     0.348     2378.0      3.33x     2.09e-07 ok
-br64 bc64 t256 4x4         0.356     0.358     2268.7      3.18x     2.09e-07 ok
-br128 bc32 t256 4x4        0.425     0.429     1902.4      2.66x     2.09e-07 ok
-br32 bc32 t64 4x4          0.384     0.390     2105.3      2.95x     2.09e-07 ok
+unfused (3 kernels)        1.133     1.138      713.8      1.00x            -
+br64 bc64 t128 4x8         0.456     0.461     1774.2      2.49x     2.09e-07 ok
+br64 bc32 t128 4x4         0.339     0.348     2385.2      3.34x     2.09e-07 ok
+br64 bc64 t256 4x4         0.356     0.361     2268.7      3.18x     2.09e-07 ok
+br128 bc32 t256 4x4        0.423     0.428     1911.6      2.68x     2.09e-07 ok
+br32 bc32 t64 4x4          0.381     0.390     2122.3      2.97x     2.09e-07 ok
 
 backward                 best ms    med ms    GFLOP/s vs unfused     dq err     dk err     dv err
-unfused (7 kernels)        1.834     1.838     1542.9      1.00x
-br64 bc32 t128 kv4x4 q8x4     1.767     1.775     1601.0      1.04x   3.00e-07   4.19e-07   3.26e-07 ok
-br64 bc32 t128 kv4x4 q4x8     1.966     1.971     1439.2      0.93x   3.00e-07   4.19e-07   3.26e-07 ok
-br32 bc32 t64  kv4x8 q4x8     2.075     2.103     1363.9      0.88x   3.00e-07   4.19e-07   3.26e-07 ok
-br32 bc32 t64  kv8x4 q8x4     1.639     1.656     1726.0      1.12x   3.00e-07   4.19e-07   3.26e-07 ok
+unfused (7 kernels)        1.832     1.861     1544.6      1.00x
+br64 bc32 t128 kv4x4 q8x4     1.763     1.773     1604.7      1.04x   3.00e-07   4.19e-07   3.26e-07 ok
+br64 bc32 t128 kv4x4 q4x8     1.960     1.972     1443.7      0.93x   3.00e-07   4.19e-07   3.26e-07 ok
+br32 bc32 t64  kv4x8 q4x8     2.079     2.102     1361.2      0.88x   3.00e-07   4.19e-07   3.26e-07 ok
+br32 bc32 t64  kv8x4 q8x4     1.640     1.660     1724.9      1.12x   3.00e-07   4.19e-07   3.26e-07 ok
 br32 bc32 t64  kv4x4 q4x4         - (not valid for hs=64)
+br32 bc32 t128 kv4x4 q4x4     1.602     1.628     1766.8      1.14x   3.00e-07   4.19e-07   3.26e-07 ok
+br32 bc64 t128 kv8x4 q4x4     2.004     2.016     1412.0      0.91x   3.00e-07   4.19e-07   3.26e-07 ok
 
 per layer, per forward pass:
   score matrix (B,NH,T,T)       25.2 MB   written once, read twice
@@ -26,4 +28,11 @@ per layer, per forward pass:
   fused saves                   50.3 MB of resident activation memory
   lse kept instead             0.098 MB
 
-fastest config: br64 bc32 t128 4x4 (0.340 ms)
+ragged shapes (context does not divide the tile):
+  B=3   T=100   C=384  NH=6  (hs=64)   out 1.79e-07   dqkv 2.15e-07  ok
+  B=2   T=33    C=384  NH=6  (hs=64)   out 1.19e-07   dqkv 2.56e-07  ok
+  B=1   T=1     C=384  NH=6  (hs=64)   out 0.00e+00   dqkv 3.54e-08  ok
+  B=2   T=129   C=256  NH=8  (hs=32)   out 1.79e-07   dqkv 2.97e-07  ok
+  B=5   T=200   C=128  NH=4  (hs=32)   out 1.49e-07   dqkv 3.12e-07  ok
+
+fastest config: br64 bc32 t128 4x4 (0.339 ms)
