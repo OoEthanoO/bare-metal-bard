@@ -246,6 +246,7 @@ int main(int argc, char **argv) {
     const char *load_path = nullptr;
     float temperature = 0.8f;
     unsigned seed = 1337;
+    bool use_flash = true;  // --unfused selects the three-kernel attention
 
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "-d") && i + 1 < argc) data_path = argv[++i];
@@ -264,6 +265,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--load") && i + 1 < argc) load_path = argv[++i];
         else if (!strcmp(argv[i], "--len") && i + 1 < argc) sample_len = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--temp") && i + 1 < argc) temperature = atof(argv[++i]);
+        else if (!strcmp(argv[i], "--unfused")) use_flash = false;
         else { fprintf(stderr, "unknown arg %s\n", argv[i]); return 1; }
     }
 
@@ -271,6 +273,7 @@ int main(int argc, char **argv) {
     if (load_path) {
         GPT lg;
         lg.B = B;
+        lg.use_flash = true;
         std::vector<char> itos;
         if (!load_checkpoint(lg, load_path, itos)) return 1;
         std::mt19937 srng(seed + 1);
@@ -285,6 +288,7 @@ int main(int argc, char **argv) {
     GPT g;
     g.config = {T, V, Vp, n_layer, n_head, n_embd};
     g.B = B; g.T = T;
+    g.use_flash = use_flash;
 
     printf("data      %zu train / %zu val tokens, vocab %d (padded %d)\n",
            ds.train.size(), ds.val.size(), V, Vp);
@@ -295,7 +299,8 @@ int main(int argc, char **argv) {
     const double param_mb = g.num_params * 4.0 / 1048576.0;
     const double act_mb = g.num_acts * 4.0 / 1048576.0;
     const double gact_mb = g.num_grad_acts * 4.0 / 1048576.0;
-    printf("model     %d layers, %d heads, %d embd, ctx %d\n", n_layer, n_head, n_embd, T);
+    printf("model     %d layers, %d heads, %d embd, ctx %d, %s attention\n",
+           n_layer, n_head, n_embd, T, use_flash ? "fused" : "unfused");
     printf("params    %.2fM (%.1f MB; +%.1f MB grads, +%.1f MB adam state)\n",
            g.num_params / 1e6, param_mb, param_mb, 2 * param_mb);
     printf("memory    %.1f MB forward activations, %.1f MB backward scratch\n",

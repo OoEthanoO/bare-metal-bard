@@ -30,6 +30,7 @@ struct Activations {
     float *encoded;
     float *ln1, *ln1_mean, *ln1_rstd;
     float *qkv, *qkvr, *att, *atty, *attproj;
+    float *lse;  // fused path: (B, NH, T) log-sum-exp, replaces att entirely
     float *residual2, *ln2, *ln2_mean, *ln2_rstd;
     float *fch, *fch_gelu, *fcproj, *residual3;
     float *lnf, *lnf_mean, *lnf_rstd;
@@ -41,12 +42,16 @@ struct Gradients {
     float *dres;
     float *dln1, *dln2, *datty;
     float *dqkv, *dqkvr, *datt;
+    float *dsum;  // fused path: (B, NH, T) rowsum(dout * out)
     float *dfch, *dfch_gelu;
     float *dlogits, *dlnf;
 };
 
 struct GPT {
     GPTConfig config;
+    // Fused (FlashAttention-style) attention instead of the three-kernel path.
+    // Changes what gets allocated, so it must be set before gpt_alloc.
+    bool use_flash;
     int B, T;
 
     Parameters params, grads;

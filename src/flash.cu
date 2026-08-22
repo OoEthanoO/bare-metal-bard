@@ -365,7 +365,10 @@ const char *flash_config_name(int cfg) {
     }
 }
 
-int flash_default_config() { return 0; }
+// Measured, not reasoned: br64/bc32 wins at hs=64 despite br64/bc64 having the
+// better arithmetic intensity on paper, because the smaller key tile fits two
+// blocks per SM instead of one.
+int flash_default_config() { return 1; }
 
 bool flash_attention_forward_cfg(int cfg, float *out, float *lse,
                                  const float *qkv, int B, int T, int C, int NH) {
@@ -379,13 +382,592 @@ bool flash_attention_forward_cfg(int cfg, float *out, float *lse,
     }
 }
 
+// The tile shapes that are fastest for one head size are often not even legal
+// for another -- the accumulator constraints tie the thread count to HS. So the
+// default is a preference, not a requirement: try it, then fall back through
+// the rest of the table until one fits.
 void flash_attention_forward(float *out, float *lse, const float *qkv, int B,
                              int T, int C, int NH) {
-    if (!flash_attention_forward_cfg(flash_default_config(), out, lse, qkv, B, T,
-                                     C, NH)) {
+    if (flash_attention_forward_cfg(flash_default_config(), out, lse, qkv, B, T,
+                                    C, NH))
+        return;
+    for (int cfg = 0; cfg < flash_num_configs(); ++cfg)
+        if (flash_attention_forward_cfg(cfg, out, lse, qkv, B, T, C, NH)) return;
+    {
         // A head size the tiles cannot cover is a build-time mistake, not a
         // runtime condition to paper over.
         fprintf(stderr, "flash: no tile config for head size %d\n", C / NH);
+        exit(1);
+    }
+}
+
+// ---------------------------------------------------------------- backward
+//
+// Backward has the same shape of problem as forward plus one extra wrinkle: it
+// needs P, which was deliberately never stored. FlashAttention's answer is to
+// recompute it. That sounds expensive and is not, because the saved lse makes
+// the recomputation exact and free of reductions:
+//
+//     P[i,j] = exp(S[i,j] - lse[i])
+//
+// -- no row max pass, no row sum pass, just an exp. Recomputing S costs one
+// matmul; reading a stored score matrix back would cost 25 MB of DRAM traffic
+// per layer. On a card with a 43 FLOP/byte ridge point that trade is not close.
+//
+// The gradients themselves:
+//
+//     dV[j]   = sum_i P[i,j] dO[i]
+//     dP[i,j] = dO[i] . v_j
+//     dS[i,j] = P[i,j] * (dP[i,j] - D[i]),   D[i] = sum_j dO[i,j] O[i,j]
+//     dQ[i]   = scale * sum_j dS[i,j] k_j
+//     dK[j]   = scale * sum_i dS[i,j] q_i
+//
+// D is the softmax Jacobian's rank-one correction term -- the same sum(dy*y)
+// that softmax_causal_bwd_k computes, except that here y is the attention
+// *output* rather than the probabilities. That identity is what lets the
+// correction be computed without P in memory.
+//
+// TWO KERNELS, NOT ONE. dQ reduces over keys while dK and dV reduce over
+// queries. A single kernel would have to accumulate one of them across blocks,
+// i.e. through global atomics, on a tensor the size of the activations. Two
+// kernels each recompute S -- one extra matmul over the causal half -- and in
+// exchange every accumulator stays in registers and every write is a plain
+// store. Recompute beats communication; that is this repo's whole lesson
+// restated one level up.
+
+namespace {
+
+// D[i] = sum_j dO[i,j] * O[i,j], one warp per (b, h, t) row.
+__global__ void flash_dsum_k(float *__restrict__ dsum,
+                             const float *__restrict__ dout,
+                             const float *__restrict__ out, int T, int NH,
+                             int HS, int rows) {
+    const int row = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
+    const int lane = threadIdx.x % 32;
+    if (row >= rows) return;
+
+    const int t = row % T, h = (row / T) % NH, b = row / (T * NH);
+    const int C = NH * HS;
+    const size_t off = (size_t)(b * T + t) * C + (size_t)h * HS;
+
+    float s = 0.0f;
+    for (int i = lane; i < HS; i += 32) s += dout[off + i] * out[off + i];
+    s = row_reduce<32, false>(s);
+    if (lane == 0) dsum[row] = s;
+}
+
+// dK and dV: one block owns BC keys and streams every query block that can see
+// them. Both accumulators live in registers for the whole kernel and are
+// written exactly once.
+template <int BR, int BC, int HS, int NT, int RT, int CT, int AT, int BT>
+__global__ __launch_bounds__(NT) void flash_bwd_kv_k(
+    float *__restrict__ dqkv, const float *__restrict__ qkv,
+    const float *__restrict__ dout, const float *__restrict__ lse,
+    const float *__restrict__ dsum, int T, int NH, float scale) {
+    constexpr int PAD = 4;
+    constexpr int RG = BR / RT, CG = BC / CT;
+    constexpr int AG = BC / AT, BG = HS / BT;
+    constexpr int V4 = HS / 4;
+    constexpr int QW = BR + PAD;  // Qst/dOst row width (head-size major)
+    constexpr int KW = BC + PAD;  // Kst/Vst row width (head-size major)
+    constexpr int PW = BC + PAD;  // Pst/dSst row width (query major)
+
+    static_assert(RG * CG == NT, "score tile must cover the thread block");
+    static_assert(AG * BG == NT, "accumulator tile must cover it too");
+    static_assert(RT % 4 == 0 && CT % 4 == 0, "vector loads");
+    static_assert(AT % 4 == 0 && BT % 4 == 0, "vector loads");
+    static_assert(NT % V4 == 0, "staging must tile evenly");
+
+    extern __shared__ float smem[];
+    float *Qst = smem;              // [HS][QW], carries the 1/sqrt(hs)
+    float *dOst = Qst + HS * QW;    // [HS][QW]
+    float *Kst = dOst + HS * QW;    // [HS][KW]
+    float *Vst = Kst + HS * KW;     // [HS][KW]
+    float *Pst = Vst + HS * KW;     // [BR][PW]
+    float *dSst = Pst + BR * PW;    // [BR][PW]
+    float *lses = dSst + BR * PW;   // [BR]
+    float *dss = lses + BR;         // [BR]
+
+    const int tid = threadIdx.x;
+    const int tRow = tid / CG, tCol = tid % CG;
+    const int r0 = tRow * RT, c0 = tCol * CT;
+    const int a0 = (tid / BG) * AT, b0 = (tid % BG) * BT;
+
+    const int bh = blockIdx.y, b = bh / NH, h = bh % NH;
+    const int C = NH * HS;
+    const int j0 = blockIdx.x * BC;
+
+    const float *base = qkv + (size_t)b * T * 3 * C + h * HS;
+    const float *dob = dout + (size_t)b * T * C + h * HS;
+    const float *lserow = lse + (size_t)bh * T;
+    const float *dsrow = dsum + (size_t)bh * T;
+
+    // K and V are fixed for this block: stage once, transposed.
+    {
+        const int i4 = (tid % V4) * 4;
+        for (int c = tid / V4; c < BC; c += NT / V4) {
+            const int t = j0 + c;
+            float4 k = make_float4(0.f, 0.f, 0.f, 0.f), v = k;
+            if (t < T) {
+                k = CVEC4(base[(size_t)t * 3 * C + C + i4]);
+                v = CVEC4(base[(size_t)t * 3 * C + 2 * C + i4]);
+            }
+            Kst[(i4 + 0) * KW + c] = k.x; Kst[(i4 + 1) * KW + c] = k.y;
+            Kst[(i4 + 2) * KW + c] = k.z; Kst[(i4 + 3) * KW + c] = k.w;
+            Vst[(i4 + 0) * KW + c] = v.x; Vst[(i4 + 1) * KW + c] = v.y;
+            Vst[(i4 + 2) * KW + c] = v.z; Vst[(i4 + 3) * KW + c] = v.w;
+        }
+    }
+
+    float dK[AT][BT], dV[AT][BT];
+#pragma unroll
+    for (int a = 0; a < AT; ++a)
+#pragma unroll
+        for (int j = 0; j < BT; ++j) { dK[a][j] = 0.0f; dV[a][j] = 0.0f; }
+
+    // Only queries at or after this key block can attend it.
+    for (int i0 = (j0 / BR) * BR; i0 < T; i0 += BR) {
+        __syncthreads();
+        {
+            const int i4 = (tid % V4) * 4;
+            for (int r = tid / V4; r < BR; r += NT / V4) {
+                const int t = i0 + r;
+                float4 q = make_float4(0.f, 0.f, 0.f, 0.f), o = q;
+                if (t < T) {
+                    q = CVEC4(base[(size_t)t * 3 * C + i4]);
+                    o = CVEC4(dob[(size_t)t * C + i4]);
+                }
+                Qst[(i4 + 0) * QW + r] = q.x * scale;
+                Qst[(i4 + 1) * QW + r] = q.y * scale;
+                Qst[(i4 + 2) * QW + r] = q.z * scale;
+                Qst[(i4 + 3) * QW + r] = q.w * scale;
+                dOst[(i4 + 0) * QW + r] = o.x; dOst[(i4 + 1) * QW + r] = o.y;
+                dOst[(i4 + 2) * QW + r] = o.z; dOst[(i4 + 3) * QW + r] = o.w;
+            }
+            for (int r = tid; r < BR; r += NT) {
+                const int t = i0 + r;
+                lses[r] = (t < T) ? lserow[t] : 0.0f;
+                dss[r] = (t < T) ? dsrow[t] : 0.0f;
+            }
+        }
+        __syncthreads();
+
+        // S = Q K^T and dP = dO V^T share one loop: same shape, same tiles, and
+        // interleaving them doubles the independent FMAs in flight.
+        float s[RT][CT], dp[RT][CT];
+#pragma unroll
+        for (int r = 0; r < RT; ++r)
+#pragma unroll
+            for (int c = 0; c < CT; ++c) { s[r][c] = 0.0f; dp[r][c] = 0.0f; }
+
+        for (int i = 0; i < HS; ++i) {
+            float rq[RT], rk[CT], rdo[RT], rv[CT];
+#pragma unroll
+            for (int r = 0; r < RT; r += 4) {
+                VEC4(rq[r]) = CVEC4(Qst[i * QW + r0 + r]);
+                VEC4(rdo[r]) = CVEC4(dOst[i * QW + r0 + r]);
+            }
+#pragma unroll
+            for (int c = 0; c < CT; c += 4) {
+                VEC4(rk[c]) = CVEC4(Kst[i * KW + c0 + c]);
+                VEC4(rv[c]) = CVEC4(Vst[i * KW + c0 + c]);
+            }
+#pragma unroll
+            for (int r = 0; r < RT; ++r)
+#pragma unroll
+                for (int c = 0; c < CT; ++c) {
+                    s[r][c] += rq[r] * rk[c];
+                    dp[r][c] += rdo[r] * rv[c];
+                }
+        }
+
+        // P from lse -- exact, and with no reduction. Masked entries become 0
+        // rather than -inf: these are probabilities now, not scores, and 0 is
+        // what makes their gradient vanish.
+#pragma unroll
+        for (int r = 0; r < RT; ++r) {
+            const int qg = i0 + r0 + r;
+            const float li = lses[r0 + r], di = dss[r0 + r];
+#pragma unroll
+            for (int c = 0; c < CT; ++c) {
+                const int kg = j0 + c0 + c;
+                const bool live = (qg < T) && (kg < T) && (kg <= qg);
+                const float p = live ? __expf(s[r][c] - li) : 0.0f;
+                s[r][c] = p;
+                dp[r][c] = p * (dp[r][c] - di);
+            }
+        }
+#pragma unroll
+        for (int r = 0; r < RT; ++r) {
+#pragma unroll
+            for (int c = 0; c < CT; c += 4) {
+                VEC4(Pst[(r0 + r) * PW + c0 + c]) = VEC4(s[r][c]);
+                VEC4(dSst[(r0 + r) * PW + c0 + c]) = VEC4(dp[r][c]);
+            }
+        }
+        __syncthreads();
+
+        // dV[c][j] += sum_i P[i][c] dO[i][j]
+        // dK[c][j] += sum_i dS[i][c] Q[i][j]
+        //
+        // Both reduce over queries, so one pass over i feeds both. dO and Q are
+        // stored head-size major, so reading [i][j] walks a column -- the PAD on
+        // QW is what keeps those BT reads in distinct banks.
+        for (int i = 0; i < BR; ++i) {
+            float rp[AT], rds[AT], rdo[BT], rq[BT];
+#pragma unroll
+            for (int a = 0; a < AT; a += 4) {
+                VEC4(rp[a]) = CVEC4(Pst[i * PW + a0 + a]);
+                VEC4(rds[a]) = CVEC4(dSst[i * PW + a0 + a]);
+            }
+#pragma unroll
+            for (int j = 0; j < BT; ++j) {
+                rdo[j] = dOst[(b0 + j) * QW + i];
+                rq[j] = Qst[(b0 + j) * QW + i];
+            }
+#pragma unroll
+            for (int a = 0; a < AT; ++a)
+#pragma unroll
+                for (int j = 0; j < BT; ++j) {
+                    dV[a][j] += rp[a] * rdo[j];
+                    dK[a][j] += rds[a] * rq[j];
+                }
+        }
+    }
+
+    // Qst already carried the scale, so dK needs no further multiply.
+#pragma unroll
+    for (int a = 0; a < AT; ++a) {
+        const int kg = j0 + a0 + a;
+        if (kg >= T) continue;
+        float *dk = dqkv + ((size_t)b * T + kg) * 3 * C + C + h * HS + b0;
+        float *dv = dk + C;
+#pragma unroll
+        for (int j = 0; j < BT; j += 4) {
+            VEC4(dk[j]) = VEC4(dK[a][j]);
+            VEC4(dv[j]) = VEC4(dV[a][j]);
+        }
+    }
+}
+
+// dQ: one block owns BR queries and streams the key blocks below the diagonal.
+template <int BR, int BC, int HS, int NT, int RT, int CT, int AT, int BT>
+__global__ __launch_bounds__(NT) void flash_bwd_q_k(
+    float *__restrict__ dqkv, const float *__restrict__ qkv,
+    const float *__restrict__ dout, const float *__restrict__ lse,
+    const float *__restrict__ dsum, int T, int NH, float scale) {
+    constexpr int PAD = 4;
+    constexpr int RG = BR / RT, CG = BC / CT;
+    constexpr int AG = BR / AT, BG = HS / BT;
+    constexpr int V4 = HS / 4;
+    constexpr int QW = BR + PAD;
+    constexpr int KW = BC + PAD;
+
+    static_assert(RG * CG == NT, "score tile must cover the thread block");
+    static_assert(AG * BG == NT, "accumulator tile must cover it too");
+    static_assert(RT % 4 == 0 && CT % 4 == 0, "vector loads");
+    static_assert(AT % 4 == 0 && BT % 4 == 0, "vector loads");
+    static_assert(NT % V4 == 0, "staging must tile evenly");
+
+    extern __shared__ float smem[];
+    float *Qst = smem;              // [HS][QW], carries the 1/sqrt(hs)
+    float *dOst = Qst + HS * QW;    // [HS][QW]
+    float *Kst = dOst + HS * QW;    // [HS][KW]
+    float *Vst = Kst + HS * KW;     // [HS][KW]
+    float *dSst = Vst + HS * KW;    // [BC][QW], transposed: dSst[c][i]
+    float *lses = dSst + BC * QW;   // [BR]
+    float *dss = lses + BR;         // [BR]
+
+    const int tid = threadIdx.x;
+    const int tRow = tid / CG, tCol = tid % CG;
+    const int r0 = tRow * RT, c0 = tCol * CT;
+    const int a0 = (tid / BG) * AT, b0 = (tid % BG) * BT;
+
+    const int bh = blockIdx.y, b = bh / NH, h = bh % NH;
+    const int C = NH * HS;
+    const int i0 = blockIdx.x * BR;
+
+    const float *base = qkv + (size_t)b * T * 3 * C + h * HS;
+    const float *dob = dout + (size_t)b * T * C + h * HS;
+    const float *lserow = lse + (size_t)bh * T;
+    const float *dsrow = dsum + (size_t)bh * T;
+
+    // Q and dO are fixed for this block; the key blocks stream past them.
+    {
+        const int i4 = (tid % V4) * 4;
+        for (int r = tid / V4; r < BR; r += NT / V4) {
+            const int t = i0 + r;
+            float4 q = make_float4(0.f, 0.f, 0.f, 0.f), o = q;
+            if (t < T) {
+                q = CVEC4(base[(size_t)t * 3 * C + i4]);
+                o = CVEC4(dob[(size_t)t * C + i4]);
+            }
+            Qst[(i4 + 0) * QW + r] = q.x * scale;
+            Qst[(i4 + 1) * QW + r] = q.y * scale;
+            Qst[(i4 + 2) * QW + r] = q.z * scale;
+            Qst[(i4 + 3) * QW + r] = q.w * scale;
+            dOst[(i4 + 0) * QW + r] = o.x; dOst[(i4 + 1) * QW + r] = o.y;
+            dOst[(i4 + 2) * QW + r] = o.z; dOst[(i4 + 3) * QW + r] = o.w;
+        }
+        for (int r = tid; r < BR; r += NT) {
+            const int t = i0 + r;
+            lses[r] = (t < T) ? lserow[t] : 0.0f;
+            dss[r] = (t < T) ? dsrow[t] : 0.0f;
+        }
+    }
+
+    float dQ[AT][BT];
+#pragma unroll
+    for (int a = 0; a < AT; ++a)
+#pragma unroll
+        for (int j = 0; j < BT; ++j) dQ[a][j] = 0.0f;
+
+    const int jmax = min(T, i0 + BR);
+    for (int j0 = 0; j0 < jmax; j0 += BC) {
+        __syncthreads();
+        {
+            const int i4 = (tid % V4) * 4;
+            for (int c = tid / V4; c < BC; c += NT / V4) {
+                const int t = j0 + c;
+                float4 k = make_float4(0.f, 0.f, 0.f, 0.f), v = k;
+                if (t < T) {
+                    k = CVEC4(base[(size_t)t * 3 * C + C + i4]);
+                    v = CVEC4(base[(size_t)t * 3 * C + 2 * C + i4]);
+                }
+                Kst[(i4 + 0) * KW + c] = k.x; Kst[(i4 + 1) * KW + c] = k.y;
+                Kst[(i4 + 2) * KW + c] = k.z; Kst[(i4 + 3) * KW + c] = k.w;
+                Vst[(i4 + 0) * KW + c] = v.x; Vst[(i4 + 1) * KW + c] = v.y;
+                Vst[(i4 + 2) * KW + c] = v.z; Vst[(i4 + 3) * KW + c] = v.w;
+            }
+        }
+        __syncthreads();
+
+        float s[RT][CT], dp[RT][CT];
+#pragma unroll
+        for (int r = 0; r < RT; ++r)
+#pragma unroll
+            for (int c = 0; c < CT; ++c) { s[r][c] = 0.0f; dp[r][c] = 0.0f; }
+
+        for (int i = 0; i < HS; ++i) {
+            float rq[RT], rk[CT], rdo[RT], rv[CT];
+#pragma unroll
+            for (int r = 0; r < RT; r += 4) {
+                VEC4(rq[r]) = CVEC4(Qst[i * QW + r0 + r]);
+                VEC4(rdo[r]) = CVEC4(dOst[i * QW + r0 + r]);
+            }
+#pragma unroll
+            for (int c = 0; c < CT; c += 4) {
+                VEC4(rk[c]) = CVEC4(Kst[i * KW + c0 + c]);
+                VEC4(rv[c]) = CVEC4(Vst[i * KW + c0 + c]);
+            }
+#pragma unroll
+            for (int r = 0; r < RT; ++r)
+#pragma unroll
+                for (int c = 0; c < CT; ++c) {
+                    s[r][c] += rq[r] * rk[c];
+                    dp[r][c] += rdo[r] * rv[c];
+                }
+        }
+
+#pragma unroll
+        for (int r = 0; r < RT; ++r) {
+            const int qg = i0 + r0 + r;
+            const float li = lses[r0 + r], di = dss[r0 + r];
+#pragma unroll
+            for (int c = 0; c < CT; ++c) {
+                const int kg = j0 + c0 + c;
+                const bool live = (qg < T) && (kg < T) && (kg <= qg);
+                const float p = live ? __expf(s[r][c] - li) : 0.0f;
+                s[r][c] = p * (dp[r][c] - di);
+            }
+        }
+        // dS goes out transposed, dSst[c][i], so the accumulation below reads
+        // its AT queries contiguously for a fixed key.
+#pragma unroll
+        for (int c = 0; c < CT; ++c) {
+#pragma unroll
+            for (int r = 0; r < RT; r += 4) {
+                float4 d;
+                d.x = s[r + 0][c]; d.y = s[r + 1][c];
+                d.z = s[r + 2][c]; d.w = s[r + 3][c];
+                VEC4(dSst[(c0 + c) * QW + r0 + r]) = d;
+            }
+        }
+        __syncthreads();
+
+        // dQ[i][j] += sum_c dS[i][c] K[c][j]
+        for (int c = 0; c < BC; ++c) {
+            float rds[AT], rk[BT];
+#pragma unroll
+            for (int a = 0; a < AT; a += 4)
+                VEC4(rds[a]) = CVEC4(dSst[c * QW + a0 + a]);
+#pragma unroll
+            for (int j = 0; j < BT; ++j) rk[j] = Kst[(b0 + j) * KW + c];
+#pragma unroll
+            for (int a = 0; a < AT; ++a)
+#pragma unroll
+                for (int j = 0; j < BT; ++j) dQ[a][j] += rds[a] * rk[j];
+        }
+    }
+
+    // K was staged unscaled, so the 1/sqrt(hs) lands here.
+#pragma unroll
+    for (int a = 0; a < AT; ++a) {
+        const int qg = i0 + a0 + a;
+        if (qg >= T) continue;
+        float *dq = dqkv + ((size_t)b * T + qg) * 3 * C + h * HS + b0;
+#pragma unroll
+        for (int j = 0; j < BT; j += 4) {
+            float4 g;
+            g.x = dQ[a][j + 0] * scale; g.y = dQ[a][j + 1] * scale;
+            g.z = dQ[a][j + 2] * scale; g.w = dQ[a][j + 3] * scale;
+            VEC4(dq[j]) = g;
+        }
+    }
+}
+
+constexpr size_t SMEM_CAP = 99 * 1024;  // Ada's opt-in maximum per block
+
+template <int BR, int BC, int HS, int NT, int RT, int CT, int AT, int BT,
+          int QAT, int QBT>
+bool launch_bwd(float *dqkv, float *dsum, const float *dout, const float *qkv,
+                const float *out, const float *lse, int B, int T, int NH,
+                float scale) {
+    constexpr int PAD = 4, QW = BR + PAD, KW = BC + PAD, PW = BC + PAD;
+    constexpr size_t kv_smem =
+        (size_t)(2 * HS * QW + 2 * HS * KW + 2 * BR * PW + 2 * BR) * sizeof(float);
+    constexpr size_t q_smem =
+        (size_t)(2 * HS * QW + 2 * HS * KW + BC * QW + 2 * BR) * sizeof(float);
+    if (kv_smem > SMEM_CAP || q_smem > SMEM_CAP) return false;
+
+    auto kv = flash_bwd_kv_k<BR, BC, HS, NT, RT, CT, AT, BT>;
+    auto qk = flash_bwd_q_k<BR, BC, HS, NT, RT, CT, QAT, QBT>;
+    static bool configured = false;
+    if (!configured) {
+        if (cudaFuncSetAttribute(kv, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                 (int)kv_smem) != cudaSuccess) return false;
+        if (cudaFuncSetAttribute(qk, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                 (int)q_smem) != cudaSuccess) return false;
+        configured = true;
+    }
+
+    const int rows = B * NH * T;
+    flash_dsum_k<<<ceil_div(rows * 32, 128), 128>>>(dsum, dout, out, T, NH, HS,
+                                                    rows);
+    kv<<<dim3(ceil_div(T, BC), B * NH), NT, kv_smem>>>(dqkv, qkv, dout, lse,
+                                                       dsum, T, NH, scale);
+    qk<<<dim3(ceil_div(T, BR), B * NH), NT, q_smem>>>(dqkv, qkv, dout, lse, dsum,
+                                                      T, NH, scale);
+    return true;
+}
+
+// The two kernels accumulate DIFFERENT tensors -- dK/dV is BC x HS, dQ is
+// BR x HS -- so they need separate tile shapes. Sharing one pair would force
+// BR == BC for no reason but notation, and BR != BC turns out to be the
+// interesting region.
+//
+// (id, BR, BC, NT, RT, CT, kv: AT, BT, dQ: QAT, QBT, name)
+#define BWD_CONFIGS(X)                                                         \
+    X(0, 64, 32, 128, 4, 4, 4, 4, 8, 4, "br64 bc32 t128 kv4x4 q8x4")           \
+    X(1, 64, 32, 128, 4, 4, 4, 4, 4, 8, "br64 bc32 t128 kv4x4 q4x8")           \
+    X(2, 32, 32, 64, 4, 4, 4, 8, 4, 8, "br32 bc32 t64  kv4x8 q4x8")            \
+    X(3, 32, 32, 64, 4, 4, 8, 4, 8, 4, "br32 bc32 t64  kv8x4 q8x4")            \
+    X(4, 32, 32, 64, 4, 4, 4, 4, 4, 4, "br32 bc32 t64  kv4x4 q4x4")
+
+template <int BR, int BC, int HS, int NT, int RT, int CT, int AT, int BT,
+          int QAT, int QBT>
+constexpr bool bwd_cfg_ok() {
+    return (BR / RT) * (BC / CT) == NT &&        // score tile
+           (BC / AT) * (HS / BT) == NT &&        // dK/dV tile
+           (BR / QAT) * (HS / QBT) == NT &&      // dQ tile
+           NT % (HS / 4) == 0 && HS % BT == 0 && HS % QBT == 0 &&
+           BC % AT == 0 && BR % QAT == 0 && AT % 4 == 0 && BT % 4 == 0 &&
+           QAT % 4 == 0 && QBT % 4 == 0;
+}
+
+template <int BR, int BC, int HS, int NT, int RT, int CT, int AT, int BT,
+          int QAT, int QBT>
+struct BwdInst {
+    static bool run(float *dqkv, float *dsum, const float *dout,
+                    const float *qkv, const float *out, const float *lse, int B,
+                    int T, int NH, float scale) {
+        if constexpr (bwd_cfg_ok<BR, BC, HS, NT, RT, CT, AT, BT, QAT, QBT>())
+            return launch_bwd<BR, BC, HS, NT, RT, CT, AT, BT, QAT, QBT>(
+                dqkv, dsum, dout, qkv, out, lse, B, T, NH, scale);
+        else
+            return false;
+    }
+};
+
+template <int HS>
+bool dispatch_bwd(int cfg, float *dqkv, float *dsum, const float *dout,
+                  const float *qkv, const float *out, const float *lse, int B,
+                  int T, int NH, float scale) {
+    switch (cfg) {
+#define X(id, BR, BC, NT, RT, CT, AT, BT, QAT, QBT, name)                      \
+    case id:                                                                   \
+        return BwdInst<BR, BC, HS, NT, RT, CT, AT, BT, QAT, QBT>::run(         \
+            dqkv, dsum, dout, qkv, out, lse, B, T, NH, scale);
+        BWD_CONFIGS(X)
+#undef X
+    default: return false;
+    }
+}
+}  // namespace
+
+int flash_num_bwd_configs() {
+    int n = 0;
+#define X(id, BR, BC, NT, RT, CT, AT, BT, QAT, QBT, name) ++n;
+    BWD_CONFIGS(X)
+#undef X
+    return n;
+}
+
+const char *flash_bwd_config_name(int cfg) {
+    switch (cfg) {
+#define X(id, BR, BC, NT, RT, CT, AT, BT, QAT, QBT, name)                      \
+    case id: return name;
+        BWD_CONFIGS(X)
+#undef X
+    default: return "?";
+    }
+}
+
+// Also measured: the 8x4 accumulator tile beats 4x8 by 25%, which is the extra
+// reuse on the strided dO/Q reads paying for itself.
+int flash_default_bwd_config() { return 3; }
+
+bool flash_attention_backward_cfg(int cfg, float *dqkv, float *dsum,
+                                  const float *dout, const float *qkv,
+                                  const float *out, const float *lse, int B,
+                                  int T, int C, int NH) {
+    const int hs = C / NH;
+    const float scale = 1.0f / sqrtf((float)hs);
+    switch (hs) {
+    case 32:
+        return dispatch_bwd<32>(cfg, dqkv, dsum, dout, qkv, out, lse, B, T, NH, scale);
+    case 64:
+        return dispatch_bwd<64>(cfg, dqkv, dsum, dout, qkv, out, lse, B, T, NH, scale);
+    case 128:
+        return dispatch_bwd<128>(cfg, dqkv, dsum, dout, qkv, out, lse, B, T, NH, scale);
+    default:
+        return false;
+    }
+}
+
+void flash_attention_backward(float *dqkv, float *dsum, const float *dout,
+                              const float *qkv, const float *out,
+                              const float *lse, int B, int T, int C, int NH) {
+    if (flash_attention_backward_cfg(flash_default_bwd_config(), dqkv, dsum,
+                                     dout, qkv, out, lse, B, T, C, NH))
+        return;
+    for (int cfg = 0; cfg < flash_num_bwd_configs(); ++cfg)
+        if (flash_attention_backward_cfg(cfg, dqkv, dsum, dout, qkv, out, lse, B,
+                                         T, C, NH))
+            return;
+    {
+        fprintf(stderr, "flash: no backward tile config for head size %d\n",
+                C / NH);
         exit(1);
     }
 }

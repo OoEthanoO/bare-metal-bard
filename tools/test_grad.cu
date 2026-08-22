@@ -31,6 +31,7 @@
 #include <vector>
 #include <random>
 #include <algorithm>
+#include <cstring>
 #include <cuda_runtime.h>
 
 #include "../src/gpt.h"
@@ -58,6 +59,7 @@ int main(int argc, char **argv) {
     if (argc > 1) eps = atof(argv[1]);
 
     GPT g;
+    g.use_flash = (argc > 2 && !strcmp(argv[2], "--unfused")) ? false : true;
     g.config = {T, V, Vp, L, NH, C};
     g.B = B; g.T = T;
     g_N = B * T;

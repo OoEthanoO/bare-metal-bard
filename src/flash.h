@@ -51,3 +51,12 @@ int flash_default_config();
 // Returns false if the config cannot run for this head size.
 bool flash_attention_forward_cfg(int cfg, float *out, float *lse,
                                  const float *qkv, int B, int T, int C, int NH);
+
+// ---- backward tuning harness ----
+int flash_num_bwd_configs();
+const char *flash_bwd_config_name(int cfg);
+int flash_default_bwd_config();
+bool flash_attention_backward_cfg(int cfg, float *dqkv, float *dsum,
+                                  const float *dout, const float *qkv,
+                                  const float *out, const float *lse, int B,
+                                  int T, int C, int NH);

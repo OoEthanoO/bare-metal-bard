@@ -152,6 +152,98 @@ int main(int argc, char **argv) {
                ratio, rel, rel < 1e-5 ? "ok" : "FAIL");
     }
 
+    // ---- backward ----
+    //
+    // dq, dk and dv are checked separately even though they share one buffer.
+    // They fail in different ways: a wrong scale shows up only in dq and dk, a
+    // dropped D term only in dq and dk, a transposed accumulation only in dv.
+    // One combined number would hide which.
+    std::vector<float> h_dout(BTC), h_dref(BTC * 3), h_dflash(BTC * 3);
+    fill_random(h_dout, 99u);
+
+    float *d_dout, *d_dqkv_ref, *d_dqkv, *d_dqkvr, *d_datt, *d_dsum;
+    CUDA_CHECK(cudaMalloc(&d_dout, BTC * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_dqkv_ref, BTC * 3 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_dqkv, BTC * 3 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_dqkvr, BTC * 4 * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_datt, att_sz * sizeof(float)));
+    CUDA_CHECK(cudaMalloc(&d_dsum, (size_t)B * NH * T * sizeof(float)));
+    CUDA_CHECK(cudaMemcpy(d_dout, h_dout.data(), BTC * sizeof(float),
+                          cudaMemcpyHostToDevice));
+
+    // Reference needs its own forward first: it reads qkvr and att.
+    attention_forward(d_out_ref, d_qkvr, d_att, d_qkv, B, T, C, NH);
+    attention_backward(d_dqkv_ref, d_dqkvr, d_datt, d_datt, d_dout, d_qkvr,
+                       d_att, B, T, C, NH);
+    CUDA_CHECK(cudaDeviceSynchronize());
+    CUDA_CHECK(cudaMemcpy(h_dref.data(), d_dqkv_ref, BTC * 3 * sizeof(float),
+                          cudaMemcpyDeviceToHost));
+
+    const Timing bref_t = time_it(
+        [&] {
+            attention_backward(d_dqkv_ref, d_dqkvr, d_datt, d_datt, d_dout,
+                               d_qkvr, d_att, B, T, C, NH);
+        },
+        5, iters);
+
+    // Backward is 5 matmuls over the causal half: S recomputed in each kernel,
+    // then dV, dP, dQ, dK. (dP appears in both kernels, S in both -- 7 tile
+    // matmuls total, of which 2 are the recompute that buys the memory back.)
+    const double useful_bwd = 3.5 * useful;
+    auto gfb = [&](double ms) { return useful_bwd / (ms * 1e-3) / 1e9; };
+
+    printf("\n%-22s %9s %9s %10s %10s %10s %10s %10s\n", "backward", "best ms",
+           "med ms", "GFLOP/s", "vs unfused", "dq err", "dk err", "dv err");
+    printf("%-22s %9.3f %9.3f %10.1f %10s\n", "unfused (7 kernels)",
+           bref_t.best_ms, bref_t.median_ms, gfb(bref_t.best_ms), "1.00x");
+
+    // Flash backward consumes the flash forward's lse, so produce it once.
+    flash_attention_forward(d_out, d_lse, d_qkv, B, T, C, NH);
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    int fails = 0;
+    for (int cfg = 0; cfg < flash_num_bwd_configs(); ++cfg) {
+        CUDA_CHECK(cudaMemset(d_dqkv, 0, BTC * 3 * sizeof(float)));
+        if (!flash_attention_backward_cfg(cfg, d_dqkv, d_dsum, d_dout, d_qkv,
+                                          d_out, d_lse, B, T, C, NH)) {
+            printf("%-22s %9s (not valid for hs=%d)\n",
+                   flash_bwd_config_name(cfg), "-", hs);
+            continue;
+        }
+        CUDA_CHECK(cudaDeviceSynchronize());
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaMemcpy(h_dflash.data(), d_dqkv, BTC * 3 * sizeof(float),
+                              cudaMemcpyDeviceToHost));
+
+        double err[3] = {0, 0, 0}, ref[3] = {0, 0, 0};
+        for (size_t r = 0; r < (size_t)B * T; ++r) {
+            for (int s = 0; s < 3; ++s) {
+                for (int c = 0; c < C; ++c) {
+                    const size_t i = r * 3 * C + (size_t)s * C + c;
+                    ref[s] = fmax(ref[s], fabs((double)h_dref[i]));
+                    err[s] = fmax(err[s],
+                                  fabs((double)h_dflash[i] - (double)h_dref[i]));
+                }
+            }
+        }
+        const Timing t = time_it(
+            [&] {
+                flash_attention_backward_cfg(cfg, d_dqkv, d_dsum, d_dout, d_qkv,
+                                             d_out, d_lse, B, T, C, NH);
+            },
+            5, iters);
+
+        char ratio[16];
+        snprintf(ratio, sizeof ratio, "%.2fx", bref_t.best_ms / t.best_ms);
+        const double rq = err[0] / ref[0], rk = err[1] / ref[1],
+                     rv = err[2] / ref[2];
+        const bool ok = rq < 1e-5 && rk < 1e-5 && rv < 1e-5;
+        if (!ok) ++fails;
+        printf("%-22s %9.3f %9.3f %10.1f %10s %10.2e %10.2e %10.2e %s\n",
+               flash_bwd_config_name(cfg), t.best_ms, t.median_ms,
+               gfb(t.best_ms), ratio, rq, rk, rv, ok ? "ok" : "FAIL");
+    }
+
     // ---- what the fusion actually saves, in bytes ----
     const double att_mb = att_sz * 4.0 / 1e6;
     const double qkvr_mb = BTC * 4.0 * 4.0 / 1e6;
@@ -165,6 +257,7 @@ int main(int argc, char **argv) {
     printf("  lse kept instead          %8.3f MB\n",
            (double)B * NH * T * 4.0 / 1e6);
 
+    if (fails) printf("\n%d backward config(s) FAILED\n", fails);
     if (best_cfg >= 0)
         printf("\nfastest config: %s (%.3f ms)\n", flash_config_name(best_cfg),
                best_ms);

@@ -13,6 +13,7 @@
 #include "gemm.h"
 #include "nn.h"
 #include "attention.h"
+#include "flash.h"
 
 #define CUDA_CHECK(x)                                                          \
     do {                                                                       \
@@ -62,7 +63,7 @@ static void point_params(Parameters &p, float *base, const size_t *s) {
 }
 
 struct Strides {
-    size_t BTC, BT3C, BT4C, BTNHTT, BT, qkvr;
+    size_t BTC, BT3C, BT4C, BTNHTT, BT, qkvr, lse;
 };
 
 static Strides make_strides(const GPT &g) {
@@ -74,6 +75,7 @@ static Strides make_strides(const GPT &g) {
     s.BTNHTT = B * NH * T * T;
     s.BT = B * T;
     s.qkvr = 4 * B * T * C;  // q, k, v, plus the head-major output scratch
+    s.lse = B * NH * T;      // fused path keeps this instead of att
     return s;
 }
 
@@ -97,11 +99,14 @@ void gpt_alloc(GPT &g) {
 
     // --- forward activations, one arena ---
     const Strides s = make_strides(g);
+    // The fused path is where most of the activation memory goes or does not
+    // go: qkvr and att are 4*B*T*C and B*NH*T*T per layer, and the fused
+    // kernel needs neither -- only B*NH*T floats of log-sum-exp.
+    const size_t attn_mem = g.use_flash ? s.lse : s.qkvr + s.BTNHTT;
     const size_t per_layer = s.BTC     // ln1
                            + s.BT * 2  // ln1_mean, ln1_rstd
                            + s.BT3C    // qkv
-                           + s.qkvr    // qkvr
-                           + s.BTNHTT  // att
+                           + attn_mem  // qkvr + att, or just lse
                            + s.BTC     // atty
                            + s.BTC     // attproj
                            + s.BTC     // residual2
@@ -126,8 +131,9 @@ void gpt_alloc(GPT &g) {
     g.acts.ln1_mean  = take(s.BT * L);
     g.acts.ln1_rstd  = take(s.BT * L);
     g.acts.qkv       = take(s.BT3C * L);
-    g.acts.qkvr      = take(s.qkvr * L);
-    g.acts.att       = take(s.BTNHTT * L);
+    g.acts.qkvr      = g.use_flash ? nullptr : take(s.qkvr * L);
+    g.acts.att       = g.use_flash ? nullptr : take(s.BTNHTT * L);
+    g.acts.lse       = g.use_flash ? take(s.lse * L) : nullptr;
     g.acts.atty      = take(s.BTC * L);
     g.acts.attproj   = take(s.BTC * L);
     g.acts.residual2 = take(s.BTC * L);
@@ -146,11 +152,11 @@ void gpt_alloc(GPT &g) {
     g.acts.losses    = take(s.BT);
 
     // --- backward scratch, single layer, reused ---
+    const size_t dattn_mem = g.use_flash ? s.lse : s.qkvr + s.BTNHTT;
     g.num_grad_acts = s.BTC          // dres
                     + s.BTC * 3      // dln1, dln2, datty
                     + s.BT3C         // dqkv
-                    + s.qkvr         // dqkvr
-                    + s.BTNHTT       // datt
+                    + dattn_mem      // dqkvr + datt, or just dsum
                     + s.BT4C * 2     // dfch, dfch_gelu
                     + (size_t)B * T * c.padded_vocab  // dlogits
                     + s.BTC;         // dlnf
@@ -161,8 +167,9 @@ void gpt_alloc(GPT &g) {
     g.gr.dln2      = take(s.BTC);
     g.gr.datty     = take(s.BTC);
     g.gr.dqkv      = take(s.BT3C);
-    g.gr.dqkvr     = take(s.qkvr);
-    g.gr.datt      = take(s.BTNHTT);
+    g.gr.dqkvr     = g.use_flash ? nullptr : take(s.qkvr);
+    g.gr.datt      = g.use_flash ? nullptr : take(s.BTNHTT);
+    g.gr.dsum      = g.use_flash ? take(s.lse) : nullptr;
     g.gr.dfch      = take(s.BT4C);
     g.gr.dfch_gelu = take(s.BT4C);
     g.gr.dlogits   = take((size_t)B * T * c.padded_vocab);
@@ -248,7 +255,10 @@ float gpt_forward(GPT &g, const int *tokens, const int *targets) {
         // Weights are (out, in), so every forward matmul is the transB case.
         gemm(false, true, N, 3 * C, C, 1.0f, ln1, qkvw, 0.0f, qkv);
         bias_forward(qkv, qkvb, N, 3 * C);
-        attention_forward(atty, qkvr, att, qkv, B, T, C, NH);
+        if (g.use_flash)
+            flash_attention_forward(atty, a.lse + l * s.lse, qkv, B, T, C, NH);
+        else
+            attention_forward(atty, qkvr, att, qkv, B, T, C, NH);
         gemm(false, true, N, C, C, 1.0f, atty, apw, 0.0f, attproj);
         bias_forward(attproj, apb, N, C);
         residual_forward(residual2, residual, attproj, N * C);
@@ -310,6 +320,7 @@ void gpt_backward(GPT &g) {
         float *ln1_mean = a.ln1_mean + l * s.BT, *ln1_rstd = a.ln1_rstd + l * s.BT;
         // Backward reads the PERMUTED q/k/v (qkvr), not the raw fused qkv.
         float *qkvr = a.qkvr + l * s.qkvr;
+        float *qkv = a.qkv + l * s.BT3C;
         float *att = a.att + l * s.BTNHTT, *atty = a.atty + l * s.BTC;
         float *residual2 = a.residual2 + l * s.BTC, *ln2 = a.ln2 + l * s.BTC;
         float *ln2_mean = a.ln2_mean + l * s.BT, *ln2_rstd = a.ln2_rstd + l * s.BT;
@@ -350,8 +361,16 @@ void gpt_backward(GPT &g) {
         gemm(true, false, C, C, N, 1.0f, gr.dres, atty, 1.0f, dapw);
         bias_backward(dapb, gr.dres, N, C);
 
-        attention_backward(gr.dqkv, gr.dqkvr, gr.datt, gr.datt, gr.datty, qkvr,
-                           att, B, T, C, NH);
+        // The fused backward reads the raw qkv and the attention output, both
+        // already saved, and rebuilds the probabilities from lse. That is why
+        // it needs no score matrix: nothing here was thrown away that cannot
+        // be recomputed in registers.
+        if (g.use_flash)
+            flash_attention_backward(gr.dqkv, gr.dsum, gr.datty, qkv, atty,
+                                     a.lse + l * s.lse, B, T, C, NH);
+        else
+            attention_backward(gr.dqkv, gr.dqkvr, gr.datt, gr.datt, gr.datty,
+                               qkvr, att, B, T, C, NH);
 
         gemm(false, false, N, C, 3 * C, 1.0f, gr.dqkv, qkvw, 0.0f, gr.dln1);
         gemm(true, false, 3 * C, C, N, 1.0f, gr.dqkv, ln1, 1.0f, dqkvw);
