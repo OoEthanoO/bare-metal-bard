@@ -22,8 +22,19 @@ REM Toolkits install side by side. CUDA_PATH points at the newest one the
 REM installer saw; override it to pin a specific toolkit, which matters because
 REM nvcc version changes the generated SASS and cuBLAS version changes the
 REM baseline every percentage in the README is measured against.
-REM   set "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.5"
-if not defined CUDA_PATH set "CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.5"
+REM   scripts\build.bat --cuda 13.3 sgemm
+REM
+REM The flag exists because setting CUDA_PATH from another shell is unreliable:
+REM cmd expands %VAR% when it parses a line, not when it runs it, so a
+REM `set ... && build.bat` one-liner quietly builds with the old toolkit. Ask
+REM for the version explicitly instead of hoping the environment carried.
+set "CUDA_ROOT=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA"
+if /i "%~1"=="--cuda" (
+  set "CUDA_PATH=%CUDA_ROOT%\v%~2"
+  shift
+  shift
+)
+if not defined CUDA_PATH set "CUDA_PATH=%CUDA_ROOT%\v12.5"
 set "NVCC=%CUDA_PATH%\bin\nvcc.exe"
 if not exist "%NVCC%" (
   echo no nvcc at "%NVCC%" -- set CUDA_PATH to an installed toolkit
@@ -40,7 +51,15 @@ for %%f in (src\kernels\*.cu) do set "KERNELS=!KERNELS! %%f"
 
 set "GPT_SRC=src\gpt.cu src\gemm.cu src\bgemm.cu src\nn.cu src\attention.cu src\flash.cu"
 
-set "TARGETS=%*"
+REM Collected by walking the arguments rather than using %*, because %* still
+REM contains the --cuda pair that shift already consumed.
+set "TARGETS="
+:argloop
+if "%~1"=="" goto argdone
+set "TARGETS=!TARGETS! %~1"
+shift
+goto argloop
+:argdone
 if "%TARGETS%"=="" set "TARGETS=sgemm test_gemm train_gpt test_grad test_flash device_query"
 
 for %%t in (%TARGETS%) do (

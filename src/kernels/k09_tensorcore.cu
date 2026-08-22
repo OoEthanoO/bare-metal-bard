@@ -45,7 +45,7 @@ constexpr int WMMA_M = 16, WMMA_N = 16, WMMA_K = 8;
 }
 
 template <int BM, int BN, int BK, int WM, int WN, int NUM_THREADS>
-__global__ __launch_bounds__(NUM_THREADS) void tensorcore_kernel(
+__global__ __launch_bounds__(NUM_THREADS, 2) void tensorcore_kernel(
     int M, int N, int K, float alpha, const float *A, const float *B,
     float beta, float *C) {
     // Leading dimensions are padded by 8 floats. Without the skew every row of

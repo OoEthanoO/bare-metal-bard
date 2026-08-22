@@ -9,10 +9,18 @@ int main() {
         cudaDeviceProp p;
         cudaGetDeviceProperties(&p, d);
 
-        // Memory bandwidth: bus width is in bits, clock in kHz, DDR -> x2.
-        double bw = 2.0 * p.memoryClockRate * (p.memoryBusWidth / 8.0) * 1e3 / 1e9;
+        // CUDA 13 removed cudaDeviceProp::clockRate and ::memoryClockRate,
+        // which were deprecated through 12.x. The attribute API is the
+        // replacement and works on both, so this file builds against either
+        // toolkit. Both are still in kHz.
+        int clock_khz = 0, mem_clock_khz = 0;
+        cudaDeviceGetAttribute(&clock_khz, cudaDevAttrClockRate, d);
+        cudaDeviceGetAttribute(&mem_clock_khz, cudaDevAttrMemoryClockRate, d);
 
-        // NOTE: p.clockRate reports the BASE clock (1605 MHz here), not the
+        // Memory bandwidth: bus width is in bits, clock in kHz, DDR -> x2.
+        double bw = 2.0 * mem_clock_khz * (p.memoryBusWidth / 8.0) * 1e3 / 1e9;
+
+        // NOTE: the reported clock is the BASE clock (1605 MHz here), not the
         // boost ceiling (3105 MHz per nvidia-smi). Peak flops quoted against
         // it would be understated by ~2x. Since benchmarks run with the clock
         // pinned (scripts/gpu_clocks.sh), the number that actually matters is
@@ -20,14 +28,14 @@ int main() {
         const double BENCH_CLOCK_GHZ = 1.2;  // must match gpu_clocks.sh
 
         // FP32 peak: 128 FMA lanes/SM on Ada (sm_89), 2 flops per FMA.
-        double fp32 = 2.0 * 128 * p.multiProcessorCount * (p.clockRate * 1e3) / 1e9;
+        double fp32 = 2.0 * 128 * p.multiProcessorCount * (clock_khz * 1e3) / 1e9;
         double fp32_bench = 2.0 * 128 * p.multiProcessorCount * BENCH_CLOCK_GHZ;
 
         printf("device %d: %s (sm_%d%d)\n", d, p.name, p.major, p.minor);
         printf("  SMs                       %d\n", p.multiProcessorCount);
-        printf("  clock                     %.2f GHz\n", p.clockRate / 1e6);
+        printf("  clock                     %.2f GHz\n", clock_khz / 1e6);
         printf("  global memory             %.2f GiB\n", p.totalGlobalMem / 1073741824.0);
-        printf("  memory bus                %d-bit @ %.2f GHz\n", p.memoryBusWidth, p.memoryClockRate / 1e6);
+        printf("  memory bus                %d-bit @ %.2f GHz\n", p.memoryBusWidth, mem_clock_khz / 1e6);
         printf("  peak bandwidth            %.1f GB/s\n", bw);
         printf("  L2 cache                  %.2f MiB\n", p.l2CacheSize / 1048576.0);
         printf("  shared mem / block        %.1f KiB (opt-in max %.1f KiB)\n",
