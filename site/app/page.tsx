@@ -367,6 +367,115 @@ __syncthreads()              <- and blocks again before overwriting`}</code>
         </figcaption>
       </figure>
 
+      <h2>The compiler optimized the thing it could see</h2>
+      <p>
+        Kernel 9 sat at 8064 GF/s until a question about a version number. The writeup said CUDA
+        12.5; 13.3 was also installed. Building the same source with both — same machine, same
+        pinned clock, N={data.benchSize} — eight of the nine kernels came out indistinguishable, and
+        one did not:
+      </p>
+      <div className="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>kernel</th>
+              <th className="n">CUDA 12.5</th>
+              <th className="n">CUDA 13.3</th>
+              <th className="n">delta</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>naive … warptile</td>
+              <td className="n">—</td>
+              <td className="n">—</td>
+              <td className="n">within 1%</td>
+            </tr>
+            <tr>
+              <td>
+                <code>dbuffer</code>
+              </td>
+              <td className="n">6709</td>
+              <td className="n">6579</td>
+              <td className="n">−1.9%</td>
+            </tr>
+            <tr className="hi">
+              <td>
+                <code>tensorcore</code>
+              </td>
+              <td className="n">8064</td>
+              <td className="n">6499</td>
+              <td className="n">−19.4%</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        A fifth of the throughput, reproducibly, at <em>identical</em> numerical error — so it was
+        still genuinely TF32, just slower. <code>ptxas -v</code> gives the whole story in two lines:
+      </p>
+      <pre>
+        <code>{`12.5:  128 registers, 12 bytes spill stores
+13.3:  142 registers,  0 spills`}</code>
+      </pre>
+      <p>
+        nvcc 13.3 spent 14 more registers to eliminate a 12-byte spill. In isolation that is a good
+        trade. Here it crosses an occupancy cliff, because registers are allocated per warp in
+        multiples of eight and this kernel runs 256 threads per block:
+      </p>
+      <ul>
+        <li>
+          128 regs → 4096/warp → 65536/4096 = <strong>16 warps per SM</strong> → 2 resident blocks
+        </li>
+        <li>
+          142 regs → rounds to 144 → 4608/warp → 65536/4608 = <strong>14 warps per SM</strong> → 1
+          block
+        </li>
+      </ul>
+      <p>
+        Halving the resident blocks to avoid twelve bytes of spill. The compiler optimized what it
+        could see — the spill — and could not see what it cost.
+      </p>
+      <p>
+        The fix is to state what the kernel needs instead of hoping the register allocator infers
+        it. The second argument to <code>__launch_bounds__</code> is minimum blocks per SM:
+      </p>
+      <pre>
+        <code>{`__global__ __launch_bounds__(NUM_THREADS, 2) void tensorcore_kernel(...)`}</code>
+      </pre>
+      <p>
+        Both toolkits then allocate 128 registers and accept the spill. This is not a 13.3
+        workaround — it is faster on both, and 8290 GF/s is the fastest this kernel has ever run:
+      </p>
+      <div className="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>toolkit</th>
+              <th className="n">before</th>
+              <th className="n">after</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>CUDA 12.5</td>
+              <td className="n">8064 (113.9%)</td>
+              <td className="n">8250 (116.7%)</td>
+            </tr>
+            <tr>
+              <td>CUDA 13.3</td>
+              <td className="n">6499 (91.6%)</td>
+              <td className="n">8290 (117.3%)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        A spilled byte is cheap; a resident block is not. <code>__launch_bounds__</code> is how you
+        tell the compiler which one you are buying — and the 19% was invisible until someone asked
+        why the page said 12.5.
+      </p>
+
       <h2>Then: a language model on top of it</h2>
       <p>
         A matmul is only interesting if something uses it. So the second half was a GPT — 6 layers,
