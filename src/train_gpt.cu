@@ -32,6 +32,7 @@
 #include "nn.h"
 #include "ddp.h"
 #include <chrono>
+#include <thread>
 
 #define CUDA_CHECK(x)                                                          \
     do {                                                                       \
@@ -382,13 +383,36 @@ int main(int argc, char **argv) {
         // Each rank runs its own shard of the batch. Averaging the shard means
         // reproduces the full-batch mean exactly, so N ranks of B/N compute the
         // same gradient as one rank of B.
-        double loss_sum = 0.0;
-        for (int r = 0; r < nranks; ++r) {
-            CUDA_CHECK(cudaSetDevice(devs[r]));
-            const size_t off = (size_t)r * Bshard * T;
-            loss_sum += gpt_forward(reps[r], x.data() + off, y.data() + off);
-            gpt_backward(reps[r]);
+        // One host thread per rank. CUDA's current device is per-THREAD, so
+        // each thread simply selects its own GPU and the two run concurrently.
+        //
+        // Driving both from one thread does not work: gpt_forward blocks on a
+        // token upload and on the loss reduction, so rank 1 could not start
+        // until rank 0 had finished. Two GPUs then take longer than one, and
+        // the profile blames nothing in particular because the stall is in the
+        // host loop rather than on the device.
+        std::vector<double> rank_loss(nranks, 0.0);
+        if (nranks == 1) {
+            CUDA_CHECK(cudaSetDevice(devs[0]));
+            rank_loss[0] = gpt_forward(reps[0], x.data(), y.data());
+            gpt_backward(reps[0]);
+        } else {
+            std::vector<std::thread> workers;
+            workers.reserve(nranks);
+            for (int r = 0; r < nranks; ++r) {
+                workers.emplace_back([&, r] {
+                    cudaSetDevice(devs[r]);
+                    const size_t off = (size_t)r * Bshard * T;
+                    rank_loss[r] =
+                        gpt_forward(reps[r], x.data() + off, y.data() + off);
+                    gpt_backward(reps[r]);
+                    cudaDeviceSynchronize();
+                });
+            }
+            for (auto &w : workers) w.join();
         }
+        double loss_sum = 0.0;
+        for (int r = 0; r < nranks; ++r) loss_sum += rank_loss[r];
         const float loss = (float)(loss_sum / nranks);
         // Without this the compute/communication split is a lie: the backward
         // pass is still running on each device's default stream, and because
@@ -415,8 +439,8 @@ int main(int argc, char **argv) {
         // update carry a 1/nranks to turn it back into the mean.
         const float lr_now = lr_at(step, warmup, steps, lr);
         float gnorm = 0.0f;
-        for (int r = 0; r < nranks; ++r) {
-            CUDA_CHECK(cudaSetDevice(devs[r]));
+        auto opt_step = [&](int r) {
+            cudaSetDevice(devs[r]);
             const float gn =
                 grad_global_norm(reps[r].grads_mem, (int)reps[r].num_params) /
                 nranks;
@@ -425,6 +449,14 @@ int main(int argc, char **argv) {
             adamw_update(reps[r].params_mem, reps[r].grads_mem, reps[r].m_mem,
                          reps[r].v_mem, (int)reps[r].num_params, lr_now, 0.9f,
                          0.999f, 1e-8f, weight_decay, step, gs);
+            cudaDeviceSynchronize();
+        };
+        if (nranks == 1) {
+            opt_step(0);
+        } else {
+            std::vector<std::thread> workers;
+            for (int r = 0; r < nranks; ++r) workers.emplace_back(opt_step, r);
+            for (auto &w : workers) w.join();
         }
         for (int r = 0; r < nranks; ++r) {
             CUDA_CHECK(cudaSetDevice(devs[r]));

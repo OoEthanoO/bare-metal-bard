@@ -12,7 +12,7 @@ ARCH ?= sm_$(shell nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/d
 CCBIN     := $(shell command -v g++-13 2>/dev/null)
 CCBIN_FLAG := $(if $(CCBIN),-ccbin $(CCBIN),)
 
-NVCCFLAGS := $(CCBIN_FLAG) -arch=$(ARCH) -O3 -lineinfo -std=c++17 \
+NVCCFLAGS := $(CCBIN_FLAG) -arch=$(ARCH) -O3 -lineinfo -std=c++17 -Xcompiler -pthread \
              -Xcompiler -Wall -Xcompiler -Wno-unused-function
 LDFLAGS   := -lcublas
 
