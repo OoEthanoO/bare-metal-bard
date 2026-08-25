@@ -27,6 +27,7 @@ NOTES = {
     "warptile": "block -> warp -> thread blocking",
     "dbuffer": "double-buffered SMEM, one barrier per chunk",
     "tensorcore": "WMMA m16n16k8 TF32 tensor cores",
+    "mma": "raw mma.sync PTX, lane-major SMEM, 64x64 warp tile",
 }
 INTENSITY = {
     "naive": 0.25, "coalesced": 0.25, "smem": 8, "tile1d": 16,

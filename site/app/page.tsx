@@ -426,12 +426,101 @@ __syncthreads()              <- and blocks again before overwriting`}</code>
       <div className="note">
         <p style={{ margin: 0 }}>
           Ruling things out is the useful part. Global bandwidth, L2 reuse, tile size and global
-          latency are all now eliminated by measurement rather than by argument, which leaves the
-          abstraction itself: WMMA fixes the fragment layout and forces a round trip through shared
-          memory that raw <code>mma.sync</code> plus <code>ldmatrix</code> would skip. That is the
-          remaining 21%, and it is a conclusion now instead of the guess this page used to make.
+          latency are all eliminated here by measurement rather than by argument, which leaves the
+          abstraction itself: WMMA fixes the fragment layout and forces four separate shared-memory
+          reads per fragment where raw <code>mma.sync</code> would need one. That is a specific,
+          falsifiable claim, so the next kernel tests it — and it turns out to be wrong.
         </p>
       </div>
+
+      <h2>Kernel 10: the hypothesis was wrong and the kernel got faster anyway</h2>
+      <p>
+        <strong>Shared memory does not have to hold a matrix.</strong> It only has to hold whatever
+        makes the next read cheap. The <code>mma.m16n8k8</code> TF32 instruction requires each of
+        the 32 lanes to hold four particular elements of A —{' '}
+        <code>a0=(g,t) a1=(g+8,t) a2=(g,t+4) a3=(g+8,t+4)</code>, where <code>g=laneid&gt;&gt;2</code>{' '}
+        and <code>t=laneid&amp;3</code>. In a row-major tile those sit at four unrelated addresses.
+        So kernel 10 stores each 16×8 tile <em>lane-major</em> — lane <code>L</code>&rsquo;s four
+        elements at <code>L*4</code> — and the fragment load becomes one 128-bit access at{' '}
+        <code>base + laneid*16</code>, which is also the ideal shared-memory pattern: 32 lanes over
+        512 contiguous bytes, no bank conflict possible. Per warp per k-step, 24 shared-load
+        instructions become 6, moving exactly the same 3072 bytes.
+      </p>
+      <p>
+        <strong>It bought 2.7%.</strong> Instruction issue on the shared path was never the
+        constraint. The bytes were — and WMMA moves exactly as many.
+      </p>
+      <p>
+        The other 8% came from somewhere kernel 9 could not reach. What this kernel is actually
+        limited by is shared-memory <em>reuse</em>: bytes read from shared per{' '}
+        <code>mma</code> issued is <code>4096·(WM+WN)/(WM·WN)</code>, which falls only when both
+        warp-tile dimensions grow — and the accumulator costs <code>WM·WN/32</code> registers per
+        thread, so reuse is a register-budget problem in disguise. Going from a 32×64 warp tile to
+        64×64 halves it, and is worth <strong>8.7%</strong>, three times what hand-written PTX was
+        worth on its own.
+      </p>
+      <p>
+        And that exact shape is already in kernel 9&rsquo;s tuning table, at 7783 GF/s — <em>slower</em>{' '}
+        than the shape it settled on. WMMA at a 64×64 warp tile needs 255 registers and spills; the
+        hand-written version spills four bytes. <strong>So raw PTX did matter — indirectly, by
+        making the tile affordable rather than by making the loads cheaper.</strong> The stated
+        hypothesis was wrong and the conclusion drawn from it was right, which is not the same
+        thing as being right.
+      </p>
+      <div className="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>at N={data.benchSize}</th>
+              <th className="n">GFLOP/s</th>
+              <th className="n">vs cuBLAS TF32</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>kernel 9, WMMA</td>
+              <td className="n">8318</td>
+              <td className="n">79.2%</td>
+            </tr>
+            <tr>
+              <td>kernel 10, raw mma.sync, same tile</td>
+              <td className="n">8540</td>
+              <td className="n">81.3%</td>
+            </tr>
+            <tr className="hi">
+              <td>kernel 10, 64×64 warp tile</td>
+              <td className="n">9210</td>
+              <td className="n">87.7%</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <h3>Two failures on the way, both worth more than the result</h3>
+      <p>
+        <strong>A fragment layout is a fact to measure, not to recall.</strong> I wrote the A
+        register order from memory and swapped <code>a1</code> and <code>a2</code> — correct for the
+        analogous f16 shape, wrong for TF32, which concatenates two k4 chunks rather than two row
+        halves. The kernel compiled, ran at full speed, and returned garbage. Guessing produced a{' '}
+        <em>silent</em> wrong answer, so there is now a one-hot probe that discovers the mapping on
+        the hardware: set one element of A to 1, make B the identity, and see which lane and
+        register light up.
+      </p>
+      <p>
+        <strong>Fewer instructions is worth nothing if the bytes arrive four at a time.</strong> The
+        first correct version ran 8% <em>slower</em> than the WMMA kernel it was meant to beat, on a
+        layout whose entire justification was cheaper shared access. Lane-major staging is 8-way
+        bank conflicted on A and 16-way on B, because a warp of staging threads varies only in bits
+        the slot index scales by 4. The fix is an XOR swizzle keyed on the tile index: staging sees
+        it vary across the warp and spreads out, while a fragment load reads one whole tile per warp
+        so it is uniform there and the permutation is invisible. 8-way and 16-way become 2-way, and
+        the load stays perfectly conflict-free.
+      </p>
+      <p>
+        That is index arithmetic, not a hardware mystery, so it can be settled without a GPU.{' '}
+        <code>tools/smem_banks.py</code> derives both layouts, proves they are bijections, checks
+        that a fragment load picks up exactly the elements the instruction demands in exactly the
+        right register slots, and simulates the bank pattern of every access.
+      </p>
 
       <h2>The compiler optimized the thing it could see</h2>
       <p>
@@ -1077,17 +1166,21 @@ O' = O * exp(m - m') + exp(S_j - m') @ V_j`}</code>
       <h2>What I&rsquo;d do next</h2>
       <ol>
         <li>
-          <strong>Raw <code>mma.sync</code></strong> instead of WMMA — now the only candidate left
-          for the ~21% gap to cuBLAS&rsquo;s tensor-core path rather than one guess among several,
-          since block scheduling, tile size, <code>BK</code> and double buffering have each been
-          tried and measured worse.
+          <strong>
+            <s>Raw <code>mma.sync</code></s>
+          </strong>{' '}
+          — done, above. 8318 → 9210 GF/s, and the gap to cuBLAS&rsquo;s tensor-core path is 12%
+          rather than 21%. The hypothesis behind it was wrong, which is the part worth keeping.
         </li>
         <li>
           <strong>
             <code>cp.async</code>
           </strong>{' '}
-          for the staging copies, so the prefetch bypasses registers entirely rather than costing 32
-          of them per thread.
+          for the staging copies. Kernel 10 stages through registers into a scattered shared layout,
+          four 32-bit stores per <code>float4</code>; <code>cp.async</code> would write
+          global→shared directly and free the 32 registers staging pins. Kernel 10 is now register-
+          bound at 255, and registers are what caps the warp tile — which is the thing that turned
+          out to matter. This has gone from a tidy-up to the main event.
         </li>
         <li>
           <strong>
