@@ -29,6 +29,7 @@
 #include <cuda_runtime.h>
 
 #include "gpt.h"
+#include "gemm.h"
 #include "nn.h"
 #include "ddp.h"
 #include <chrono>
@@ -252,6 +253,7 @@ int main(int argc, char **argv) {
     bool use_flash = true;  // --unfused selects the three-kernel attention
     bool alloc_only = false;
     int nranks = 1;  // --gpus N: data-parallel replicas
+    bool tf32 = false;  // --tf32: route the matmuls through the tensor cores
 
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "-d") && i + 1 < argc) data_path = argv[++i];
@@ -272,6 +274,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--temp") && i + 1 < argc) temperature = atof(argv[++i]);
         else if (!strcmp(argv[i], "--alloc-only")) alloc_only = true;
         else if (!strcmp(argv[i], "--gpus") && i + 1 < argc) nranks = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--tf32")) tf32 = true;
         else if (!strcmp(argv[i], "--unfused")) use_flash = false;
         else { fprintf(stderr, "unknown arg %s\n", argv[i]); return 1; }
     }
@@ -301,6 +304,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     const int Bshard = B / nranks;
+    gemm_set_tf32(tf32);
     int ndev = 0;
     CUDA_CHECK(cudaGetDeviceCount(&ndev));
     if (ndev < 1) { fprintf(stderr, "no CUDA device\n"); return 1; }
@@ -336,6 +340,7 @@ int main(int argc, char **argv) {
     const double gact_mb = g.num_grad_acts * 4.0 / 1048576.0;
     printf("model     %d layers, %d heads, %d embd, ctx %d, %s attention\n",
            n_layer, n_head, n_embd, T, use_flash ? "fused" : "unfused");
+    printf("matmul    %s\n", tf32 ? "TF32 tensor cores" : "fp32");
     printf("params    %.2fM (%.1f MB; +%.1f MB grads, +%.1f MB adam state)\n",
            g.num_params / 1e6, param_mb, param_mb, 2 * param_mb);
     printf("memory    %.1f MB forward activations, %.1f MB backward scratch\n",

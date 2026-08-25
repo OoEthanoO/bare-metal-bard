@@ -20,6 +20,10 @@
 // transpose costs only the choice between a vector store and four scalar
 // stores into shared memory.
 #include "gemm.h"
+#include <mma.h>
+#include <type_traits>
+
+using namespace nvcuda;
 #include "kernels.h"
 #include <cstdio>
 
@@ -220,6 +224,165 @@ __global__ __launch_bounds__(NUM_THREADS) void gemm_fast(
             }
 }
 
+// ------------------------------------------------------- tensor-core path
+//
+// The same transpose-aware idea as gemm_fast, but the inner product runs on the
+// tensor cores in TF32 instead of the fp32 FMA pipes.
+//
+// The trick that keeps this from being four kernels: WMMA fragments could be
+// loaded col_major to express a transpose, but then each of the four cases
+// would need its own fragment types and its own leading dimensions. Instead the
+// transpose is absorbed entirely into STAGING -- shared memory always holds
+// As[m][k] and Bs[k][n], whatever layout the operand had in global memory --
+// so the fragment loads and the mma below are literally identical in all four
+// cases. That is the same move gemm_fast makes, for the same reason.
+//
+// Measured at the shapes this model actually runs, tensor cores are worth
+// 1.22-1.58x over the fp32 kernel -- a wider margin than the 1.30x they manage
+// on square matrices, because skinny matmuls starve the fp32 pipes harder than
+// they starve the tensor cores.
+// The TF32 WMMA shape available on sm_80+.
+constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+
+template <bool TA, bool TB, int BM, int BN, int BK, int WM, int WN,
+          int NUM_THREADS>
+__global__ __launch_bounds__(NUM_THREADS, 2) void gemm_tc(
+    int M, int N, int K, float alpha, const float *A, const float *B,
+    float beta, float *C) {
+    // Shared memory holds each operand in whichever orientation makes STAGING a
+    // straight vector copy, and the fragment layout is chosen to match. The
+    // first version of this kernel always stored As[m][k] and Bs[k][n], which
+    // forced the transposed cases to scatter four scalars per float4 read.
+    // Measured, that cost more than the tensor cores gained: TF32 beat fp32 by
+    // 1.10-1.47x on NN and NT and LOST by 0.64-0.87x on TN and TT, and the
+    // backward pass computes every weight gradient as TN.
+    //
+    // So when A arrives K x M it is stored K x M, and the fragment is loaded
+    // col_major instead. Same data, same mma, no scatter.
+    using ALayout = std::conditional_t<TA, wmma::col_major, wmma::row_major>;
+    using BLayout = std::conditional_t<TB, wmma::col_major, wmma::row_major>;
+    // Padded by 8 so a fragment load, which walks a column of lanes across
+    // consecutive rows, does not put every lane in the same bank. 8 keeps the
+    // leading dimension a multiple of 8, which TF32 WMMA requires.
+    constexpr int LDA = (TA ? BM : BK) + 8;
+    constexpr int LDB = (TB ? BK : BN) + 8;
+    __shared__ float As[(TA ? BK : BM) * LDA];
+    __shared__ float Bs[(TB ? BN : BK) * LDB];
+
+    const int cRow = blockIdx.y * BM;
+    const int cCol = blockIdx.x * BN;
+    const int tid = threadIdx.x;
+
+    const int warpIdx = tid / WARPSIZE;
+    const int warpCol = warpIdx % (BN / WN);
+    const int warpRow = warpIdx / (BN / WN);
+
+    constexpr int WMITER = WM / TC_M;
+    constexpr int WNITER = WN / TC_N;
+
+    // Two index maps per operand: one for each transpose case, each reading
+    // along whichever axis is contiguous in the layout the operand really has.
+    const int aRow = TA ? tid / (BM / 4) : tid / (BK / 4);
+    const int aCol = TA ? tid % (BM / 4) : tid % (BK / 4);
+    constexpr int aStride = TA ? NUM_THREADS / (BM / 4) : NUM_THREADS / (BK / 4);
+    constexpr int aIters = TA ? BK / aStride : BM / aStride;
+
+    const int bRow = TB ? tid / (BK / 4) : tid / (BN / 4);
+    const int bCol = TB ? tid % (BK / 4) : tid % (BN / 4);
+    constexpr int bStride = TB ? NUM_THREADS / (BK / 4) : NUM_THREADS / (BN / 4);
+    constexpr int bIters = TB ? BN / bStride : BK / bStride;
+
+    wmma::fragment<wmma::matrix_a, TC_M, TC_N, TC_K, wmma::precision::tf32,
+                   ALayout> aFrag[WMITER];
+    wmma::fragment<wmma::matrix_b, TC_M, TC_N, TC_K, wmma::precision::tf32,
+                   BLayout> bFrag[WNITER];
+    wmma::fragment<wmma::accumulator, TC_M, TC_N, TC_K, float> acc[WMITER][WNITER];
+
+#pragma unroll
+    for (int i = 0; i < WMITER; ++i)
+#pragma unroll
+        for (int j = 0; j < WNITER; ++j) wmma::fill_fragment(acc[i][j], 0.0f);
+
+    for (int k0 = 0; k0 < K; k0 += BK) {
+#pragma unroll
+        for (int it = 0; it < aIters; ++it) {
+            const int off = it * aStride;
+            if constexpr (TA) {
+                // A is K x M: read along m and store K x M. Vector copy.
+                VEC4(As[(aRow + off) * LDA + aCol * 4]) =
+                    CVEC4(A[(size_t)(k0 + aRow + off) * M + cRow + aCol * 4]);
+            } else {
+                // A is M x K: read along k and store M x K. Vector copy.
+                VEC4(As[(aRow + off) * LDA + aCol * 4]) =
+                    CVEC4(A[(size_t)(cRow + aRow + off) * K + k0 + aCol * 4]);
+            }
+        }
+#pragma unroll
+        for (int it = 0; it < bIters; ++it) {
+            const int off = it * bStride;
+            if constexpr (TB) {
+                // B is N x K: read along k and store N x K. Vector copy.
+                VEC4(Bs[(bRow + off) * LDB + bCol * 4]) =
+                    CVEC4(B[(size_t)(cCol + bRow + off) * K + k0 + bCol * 4]);
+            } else {
+                VEC4(Bs[(bRow + off) * LDB + bCol * 4]) =
+                    CVEC4(B[(size_t)(k0 + bRow + off) * N + cCol + bCol * 4]);
+            }
+        }
+        __syncthreads();
+
+#pragma unroll
+        for (int kk = 0; kk < BK; kk += TC_K) {
+#pragma unroll
+            for (int i = 0; i < WMITER; ++i) {
+                // row_major: element (m,k) at As[m*LDA + k]; the tile starts at
+                // (m0, kk). col_major: element (m,k) at As[k*LDA + m], so the
+                // same tile starts at As[kk*LDA + m0]. One index, two readings.
+                const int m0 = warpRow * WM + i * TC_M;
+                wmma::load_matrix_sync(
+                    aFrag[i], TA ? &As[kk * LDA + m0] : &As[m0 * LDA + kk], LDA);
+                // Rounding to TF32 happens here rather than at staging time.
+                // It is three times more of it and measurably faster: in the
+                // compute phase there is enough independent work to hide it,
+                // in the staging path there is not. See k09 for the numbers.
+#pragma unroll
+                for (int t = 0; t < aFrag[i].num_elements; ++t)
+                    aFrag[i].x[t] = wmma::__float_to_tf32(aFrag[i].x[t]);
+            }
+#pragma unroll
+            for (int j = 0; j < WNITER; ++j) {
+                const int n0 = warpCol * WN + j * TC_N;
+                wmma::load_matrix_sync(
+                    bFrag[j], TB ? &Bs[n0 * LDB + kk] : &Bs[kk * LDB + n0], LDB);
+#pragma unroll
+                for (int t = 0; t < bFrag[j].num_elements; ++t)
+                    bFrag[j].x[t] = wmma::__float_to_tf32(bFrag[j].x[t]);
+            }
+#pragma unroll
+            for (int i = 0; i < WMITER; ++i)
+#pragma unroll
+                for (int j = 0; j < WNITER; ++j)
+                    wmma::mma_sync(acc[i][j], aFrag[i], bFrag[j], acc[i][j]);
+        }
+        __syncthreads();
+    }
+
+#pragma unroll
+    for (int i = 0; i < WMITER; ++i) {
+#pragma unroll
+        for (int j = 0; j < WNITER; ++j) {
+            float *cptr = C + (size_t)(cRow + warpRow * WM + i * TC_M) * N +
+                          cCol + warpCol * WN + j * TC_N;
+            wmma::fragment<wmma::accumulator, TC_M, TC_N, TC_K, float> cFrag;
+            wmma::load_matrix_sync(cFrag, cptr, N, wmma::mem_row_major);
+#pragma unroll
+            for (int t = 0; t < cFrag.num_elements; ++t)
+                cFrag.x[t] = alpha * acc[i][j].x[t] + beta * cFrag.x[t];
+            wmma::store_matrix_sync(cptr, cFrag, N, wmma::mem_row_major);
+        }
+    }
+}
+
 // --------------------------------------------------------------- slow path
 // Guarded, scalar, handles any M/N/K and any transpose combination. Used for
 // ragged shapes (e.g. an unpadded vocabulary). Correctness first; the fast
@@ -260,10 +423,26 @@ constexpr int FBM = 128, FBN = 128, FBK = 16;
 constexpr int FWM = 64, FWN = 64, FWNITER = 4;
 constexpr int FTM = 8, FTN = 4, FTHREADS = 128;
 
+// Tile parameters of the tensor-core path, matching kernel 9.
+constexpr int TBM = 128, TBN = 128, TBK = 32;
+constexpr int TWM = 32, TWN = 64, TTHREADS = 256;
+
+// Off by default: TF32 keeps fp32 range but only 10 mantissa bits, so turning
+// it on changes what the model computes. It is the precision the hardware was
+// built to train in, but that is a decision for the caller to make explicitly.
+static bool g_tf32 = false;
+
 template <bool TA, bool TB>
 void dispatch(int M, int N, int K, float alpha, const float *A, const float *B,
               float beta, float *C, cudaStream_t stream) {
-    if (M % FBM == 0 && N % FBN == 0 && K % FBK == 0) {
+    // Tensor cores when asked for and the shape lines up. BK is 32 here, not
+    // the fp32 path's 16, so the alignment test is stricter and a shape that
+    // misses it simply falls through to fp32 rather than to the slow path.
+    if (g_tf32 && M % TBM == 0 && N % TBN == 0 && K % TBK == 0) {
+        dim3 grid(N / TBN, M / TBM);
+        gemm_tc<TA, TB, TBM, TBN, TBK, TWM, TWN, TTHREADS>
+            <<<grid, TTHREADS, 0, stream>>>(M, N, K, alpha, A, B, beta, C);
+    } else if (M % FBM == 0 && N % FBN == 0 && K % FBK == 0) {
         dim3 grid(N / FBN, M / FBM);
         gemm_fast<TA, TB, FBM, FBN, FBK, FWM, FWN, FWNITER, FTM, FTN, FTHREADS>
             <<<grid, FTHREADS, 0, stream>>>(M, N, K, alpha, A, B, beta, C);
@@ -284,3 +463,6 @@ void gemm(bool transA, bool transB, int M, int N, int K, float alpha,
     else if (transA && !transB)  dispatch<true,  false>(M, N, K, alpha, A, B, beta, C, stream);
     else                         dispatch<true,  true >(M, N, K, alpha, A, B, beta, C, stream);
 }
+
+void gemm_set_tf32(bool on) { g_tf32 = on; }
+bool gemm_tf32() { return g_tf32; }

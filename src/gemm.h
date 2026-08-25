@@ -27,3 +27,10 @@ void batched_gemm(bool transA, bool transB, int batch, int M, int N, int K,
                   float alpha, const float *A, long long strideA,
                   const float *B, long long strideB, float beta, float *C,
                   long long strideC, cudaStream_t stream = 0);
+
+// Route the matmuls above through the TF32 tensor cores where the shape allows
+// it. Off by default: this changes the numerics, not just the speed. TF32 keeps
+// fp32's 8-bit exponent and 10 of its 23 mantissa bits, which is the trade
+// every framework makes by default on Ampere and later.
+void gemm_set_tf32(bool on);
+bool gemm_tf32();

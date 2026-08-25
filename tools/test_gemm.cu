@@ -4,6 +4,7 @@
 // silent bug there would show up only as a model that trains slightly wrong --
 // the worst kind of bug to chase. So it gets tested directly.
 #include <cstdio>
+#include <cstring>
 #include <cstdlib>
 #include <cmath>
 #include <vector>
@@ -44,7 +45,46 @@ static void fill(std::vector<float> &v, unsigned s) {
     }
 }
 
-int main() {
+
+// Time one gemm configuration. Both paths are timed in the same process, back
+// to back, so they see the same thermal state -- the same reason the SGEMM
+// harness re-times cuBLAS next to every kernel.
+static double time_gemm(bool TA, bool TB, int M, int N, int K, const float *A,
+                        const float *B, float *C, int iters) {
+    cudaEvent_t a, b;
+    cudaEventCreate(&a);
+    cudaEventCreate(&b);
+    for (int i = 0; i < 3; ++i) gemm(TA, TB, M, N, K, 1.0f, A, B, 0.0f, C);
+    cudaDeviceSynchronize();
+    double best = 1e30;
+    for (int i = 0; i < iters; ++i) {
+        cudaEventRecord(a);
+        gemm(TA, TB, M, N, K, 1.0f, A, B, 0.0f, C);
+        cudaEventRecord(b);
+        cudaEventSynchronize(b);
+        float ms = 0.f;
+        cudaEventElapsedTime(&ms, a, b);
+        if (ms < best) best = ms;
+    }
+    cudaEventDestroy(a);
+    cudaEventDestroy(b);
+    return best;
+}
+
+int main(int argc, char **argv) {
+    // --tf32 routes the same 56 cases through the tensor-core path. TF32 keeps
+    // 10 mantissa bits, so the bar moves from 1e-4 to 5e-3: the point of the
+    // run is that the transpose staging is right, not that the format is exact.
+    bool tf32 = false, bench = false;
+    for (int i = 1; i < argc; ++i) {
+        if (!strcmp(argv[i], "--tf32")) tf32 = true;
+        else if (!strcmp(argv[i], "--bench")) bench = true;
+    }
+    if (tf32) {
+        gemm_set_tf32(true);
+        printf("TENSOR-CORE path (TF32), tolerance 5e-3\n\n");
+    }
+    const double TOL = tf32 ? 5e-3 : 1e-4;
     CUBLAS_CHECK(cublasCreate(&handle));
 
     struct Shape { int M, N, K; const char *tag; };
@@ -62,6 +102,44 @@ int main() {
     };
 
     int failures = 0;
+
+    // --bench answers a specific question: the tensor-core kernel is faster
+    // than the fp32 one when measured standalone, and slower inside the model.
+    // Timing the SAME entry point both ways, per shape and per transpose case,
+    // is what tells you which of the four cases pays for it.
+    if (bench) {
+        printf("%-22s %6s %6s %6s  %-4s %10s %10s %8s\n", "shape", "M", "N", "K",
+               "op", "fp32 GF/s", "tf32 GF/s", "ratio");
+        printf("--------------------------------------------------------------------------\n");
+        for (const Shape &s : shapes) {
+            if (s.M % 128 || s.N % 128 || s.K % 32) continue;  // tc path needs this
+            size_t szA = (size_t)s.M * s.K, szB = (size_t)s.K * s.N,
+                   szC = (size_t)s.M * s.N;
+            float *dA, *dB, *dC;
+            CUDA_CHECK(cudaMalloc(&dA, szA * 4));
+            CUDA_CHECK(cudaMalloc(&dB, szB * 4));
+            CUDA_CHECK(cudaMalloc(&dC, szC * 4));
+            CUDA_CHECK(cudaMemset(dA, 0, szA * 4));
+            CUDA_CHECK(cudaMemset(dB, 0, szB * 4));
+            const double flop = 2.0 * s.M * s.N * s.K;
+            for (int t = 0; t < 4; ++t) {
+                const bool TA = t & 1, TB = t & 2;
+                const char *tag = TA ? (TB ? "TT" : "TN") : (TB ? "NT" : "NN");
+                gemm_set_tf32(false);
+                const double f = time_gemm(TA, TB, s.M, s.N, s.K, dA, dB, dC, 20);
+                gemm_set_tf32(true);
+                const double g = time_gemm(TA, TB, s.M, s.N, s.K, dA, dB, dC, 20);
+                gemm_set_tf32(false);
+                printf("%-22s %6d %6d %6d  %-4s %10.1f %10.1f %7.2fx\n", s.tag,
+                       s.M, s.N, s.K, tag, flop / (f * 1e-3) / 1e9,
+                       flop / (g * 1e-3) / 1e9, f / g);
+            }
+            cudaFree(dA); cudaFree(dB); cudaFree(dC);
+        }
+        cublasDestroy(handle);
+        return 0;
+    }
+
     printf("%-22s %6s %6s %6s  %-6s %10s  %s\n", "shape", "M", "N", "K", "op", "norm_rel", "");
     printf("--------------------------------------------------------------------------\n");
 
@@ -104,7 +182,7 @@ int main() {
                 refinf = std::max(refinf, std::fabs((double)ref[i]));
             }
             double rel = maxabs / std::max(refinf, 1e-30);
-            bool ok = rel < 1e-4;
+            bool ok = rel < TOL;
             if (!ok) ++failures;
             printf("%-22s %6d %6d %6d  %-6s %10.2e  %s\n", s.tag, s.M, s.N, s.K,
                    tag, rel, ok ? "ok" : "FAIL");
@@ -167,7 +245,7 @@ int main() {
                 refinf = std::max(refinf, std::fabs((double)ref[i]));
             }
             const double rel = maxabs / std::max(refinf, 1e-30);
-            const bool ok = rel < 1e-4;
+            const bool ok = rel < TOL;
             if (!ok) ++failures;
             printf("%-22s %6d %6d %6d  %-6s %10.2e  %s\n", s.tag, s.M, s.N, s.K,
                    tag, rel, ok ? "ok" : "FAIL");
