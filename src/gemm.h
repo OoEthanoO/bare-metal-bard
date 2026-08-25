@@ -14,9 +14,16 @@
 // NT and TN cases. Materializing the transposes would cost an extra pass over
 // the data; instead the transpose is folded into the shared-memory staging,
 // which already had to reindex the operands anyway.
+//
+// `bias`, when given, adds bias[col] to every output element -- fused into the
+// epilogue rather than run as a second kernel. That matters more than it
+// sounds: a separate bias pass reads and writes the ENTIRE output tensor for
+// one add per element, and the profile put it at 8.2% of a training step,
+// second only to the matmuls themselves. In the epilogue the same add costs
+// two floats per lane out of L1 and no global traffic at all.
 void gemm(bool transA, bool transB, int M, int N, int K, float alpha,
           const float *A, const float *B, float beta, float *C,
-          cudaStream_t stream = 0);
+          cudaStream_t stream = 0, const float *bias = nullptr);
 
 // Batched GEMM: `batch` independent problems, each strided by strideA/B/C.
 //

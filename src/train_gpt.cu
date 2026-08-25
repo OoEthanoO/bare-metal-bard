@@ -489,7 +489,7 @@ int main(int argc, char **argv) {
             fflush(stdout);
         }
 
-        if (step % eval_every == 0) {
+        if (eval_every > 0 && step % eval_every == 0) {
             // Fixed seed: every eval sees the SAME validation batches, so the
             // curve reflects the model changing rather than the sample.
             const float vl = evaluate(g, ds.val, B, T, 7777, eval_batches);
@@ -514,10 +514,18 @@ int main(int argc, char **argv) {
         }
     }
 
-    const float final_val = evaluate(g, ds.val, B, T, 7777, eval_batches);
-    const float final_train = evaluate(g, ds.train, B, T, 8888, eval_batches);
-    printf("\nfinal  train loss %.4f   val loss %.4f   (%d batches each)\n",
-           final_train, final_val, eval_batches);
+    // --eval-batches 0 suppresses evaluation entirely. That exists for the
+    // profiler: `--eval 99999` still evaluated at step 0 and twice at the
+    // end, and a forward-only pass over 20 validation batches swamped a
+    // 2-step profile -- the first run of tools/step_profile.py reported
+    // forward kernels 21x more often than their own backward kernels,
+    // which is the tell.
+    if (eval_batches > 0) {
+        const float final_val = evaluate(g, ds.val, B, T, 7777, eval_batches);
+        const float final_train = evaluate(g, ds.train, B, T, 8888, eval_batches);
+        printf("\nfinal  train loss %.4f   val loss %.4f   (%d batches each)\n",
+               final_train, final_val, eval_batches);
+    }
 
     printf("best   val loss %.4f at step %d (checkpoint saved there)\n",
            best_val, best_step);

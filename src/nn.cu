@@ -168,15 +168,11 @@ __global__ void add_inplace_k(float *dst, const float *src, int n4) {
 }
 
 // --------------------------------------------------------------------- bias
-__global__ void bias_fwd_k(float *out, const float *bias, int C, int total4) {
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= total4) return;
-    const int c = (i * 4) % C;
-    float4 v = CVEC4(out[i * 4]);
-    const float4 b = CVEC4(bias[c]);
-    v.x += b.x; v.y += b.y; v.z += b.z; v.w += b.w;
-    VEC4(out[i * 4]) = v;
-}
+// The forward bias used to live here as its own kernel. It now rides in the
+// GEMM epilogue (see gemm.h): a standalone pass reads and writes the entire
+// output tensor to do one add per element, and the step profile put the four
+// of them together at 8.2% of a training step. The backward stays, because a
+// column reduction is not something an epilogue can do -- it needs every row.
 
 // dbias[c] = sum over all N rows of dout[n][c]. One block per output column,
 // striding down the rows: each thread reads a coalesced run because
@@ -314,10 +310,6 @@ void add_inplace(float *dst, const float *src, int n) {
     add_inplace_k<<<ceil_div(n / 4, 256), 256>>>(dst, src, n / 4);
 }
 
-void bias_forward(float *out, const float *bias, int N, int C) {
-    const int total4 = N * C / 4;
-    bias_fwd_k<<<ceil_div(total4, 256), 256>>>(out, bias, C, total4);
-}
 void bias_backward(float *dbias, const float *dout, int N, int C) {
     bias_bwd_k<<<C, 256>>>(dbias, dout, N, C);
 }

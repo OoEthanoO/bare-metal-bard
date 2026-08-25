@@ -261,22 +261,21 @@ float gpt_forward(GPT &g, const int *tokens, const int *targets) {
 
         layernorm_forward(ln1, ln1_mean, ln1_rstd, residual, ln1w, ln1b, N, C);
         // Weights are (out, in), so every forward matmul is the transB case.
-        gemm(false, true, N, 3 * C, C, 1.0f, ln1, qkvw, 0.0f, qkv);
-        bias_forward(qkv, qkvb, N, 3 * C);
+        // The bias rides in the GEMM epilogue. As its own kernel it read and
+        // wrote the whole (N, 3C) tensor to do one add per element, and the
+        // profile put all four of these together at 8.2% of a training step.
+        gemm(false, true, N, 3 * C, C, 1.0f, ln1, qkvw, 0.0f, qkv, 0, qkvb);
         if (g.use_flash)
             flash_attention_forward(atty, a.lse + l * s.lse, qkv, B, T, C, NH);
         else
             attention_forward(atty, qkvr, att, qkv, B, T, C, NH);
-        gemm(false, true, N, C, C, 1.0f, atty, apw, 0.0f, attproj);
-        bias_forward(attproj, apb, N, C);
+        gemm(false, true, N, C, C, 1.0f, atty, apw, 0.0f, attproj, 0, apb);
         residual_forward(residual2, residual, attproj, N * C);
 
         layernorm_forward(ln2, ln2_mean, ln2_rstd, residual2, ln2w, ln2b, N, C);
-        gemm(false, true, N, 4 * C, C, 1.0f, ln2, fcw, 0.0f, fch);
-        bias_forward(fch, fcb, N, 4 * C);
+        gemm(false, true, N, 4 * C, C, 1.0f, ln2, fcw, 0.0f, fch, 0, fcb);
         gelu_forward(fch_gelu, fch, N * 4 * C);
-        gemm(false, true, N, C, 4 * C, 1.0f, fch_gelu, fpw, 0.0f, fcproj);
-        bias_forward(fcproj, fpb, N, C);
+        gemm(false, true, N, C, 4 * C, 1.0f, fch_gelu, fpw, 0.0f, fcproj, 0, fpb);
         residual_forward(residual3, residual2, fcproj, N * C);
 
         residual = residual3;

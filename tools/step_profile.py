@@ -10,6 +10,12 @@ usage: python3 tools/step_profile.py bench/logs/step_ncu_fp32.csv [more.csv ...]
 
 ncu replays kernels to collect counters, so absolute times are inflated. Only
 the SHARES are meaningful, and shares are what this prints.
+
+Profile with `scripts/profile_step.bat`, which passes `--eval-batches 0`. That
+matters: with evaluation on, a forward-only pass over 20 validation batches
+runs before and after the two profiled steps, and it swamps everything. The
+tell is the launch counts -- forward kernels appearing many times more often
+than their own backward kernels means you are profiling evaluation.
 """
 import csv
 import re
@@ -30,7 +36,8 @@ CATEGORIES = [
     ("softmax_causal", "attention softmax"),
     ("bgemm", "GEMM (attention, batched)"),
     ("batched", "GEMM (attention, batched)"),
-    ("gemm_tc", "GEMM (tensor core)"),
+    ("gemm_mma", "GEMM (tensor core, mma.sync)"),
+    ("gemm_tc", "GEMM (tensor core, WMMA)"),
     ("gemm_fast", "GEMM (fp32)"),
     ("gemm_generic", "GEMM (ragged fallback)"),
     ("gemm", "GEMM (other)"),

@@ -38,7 +38,7 @@ template <bool TA, bool TB, int BM, int BN, int BK, int WM, int WN, int WNITER,
           int TM, int TN, int NUM_THREADS>
 __global__ __launch_bounds__(NUM_THREADS) void gemm_fast(
     int M, int N, int K, float alpha, const float *A, const float *B,
-    float beta, float *C) {
+    float beta, float *C, const float *bias) {
     // Double buffered, exactly as kernel 8 is. This GEMM was written against
     // the kernel-7 structure and kernel 8 arrived afterwards, so the model
     // never got the prefetch -- and measured at the shapes the model actually
@@ -214,11 +214,18 @@ __global__ __launch_bounds__(NUM_THREADS) void gemm_fast(
                 for (int j = 0; j < TN; j += 4) {
                     const int c = cCol + warpCol * WN + wSubCol * WSUBN +
                                   threadColInWarp * TN + j;
-                    float4 old = CVEC4(C[r * N + c]);
-                    old.x = alpha * acc[wSubRow * TM + i][wSubCol * TN + j + 0] + beta * old.x;
-                    old.y = alpha * acc[wSubRow * TM + i][wSubCol * TN + j + 1] + beta * old.y;
-                    old.z = alpha * acc[wSubRow * TM + i][wSubCol * TN + j + 2] + beta * old.z;
-                    old.w = alpha * acc[wSubRow * TM + i][wSubCol * TN + j + 3] + beta * old.w;
+                    // beta == 0 is not just "multiply by zero": it means the
+                    // old C is not needed, so the LOAD goes away too. Every
+                    // activation GEMM in the model passes beta = 0, and the
+                    // read it was doing is a full extra pass over the output.
+                    float4 old = (beta != 0.0f) ? CVEC4(C[r * N + c])
+                                                : make_float4(0, 0, 0, 0);
+                    float4 bv = make_float4(0, 0, 0, 0);
+                    if (bias) bv = CVEC4(bias[c]);
+                    old.x = alpha * acc[wSubRow * TM + i][wSubCol * TN + j + 0] + beta * old.x + bv.x;
+                    old.y = alpha * acc[wSubRow * TM + i][wSubCol * TN + j + 1] + beta * old.y + bv.y;
+                    old.z = alpha * acc[wSubRow * TM + i][wSubCol * TN + j + 2] + beta * old.z + bv.z;
+                    old.w = alpha * acc[wSubRow * TM + i][wSubCol * TN + j + 3] + beta * old.w + bv.w;
                     VEC4(C[r * N + c]) = old;
                 }
             }
@@ -389,7 +396,8 @@ __global__ __launch_bounds__(NUM_THREADS, 2) void gemm_tc(
 // path is what the hot shapes are aligned to hit.
 template <bool TA, bool TB, int BS>
 __global__ void gemm_generic(int M, int N, int K, float alpha, const float *A,
-                             const float *B, float beta, float *C) {
+                             const float *B, float beta, float *C,
+                             const float *bias) {
     __shared__ float As[BS][BS];
     __shared__ float Bs[BS][BS + 1];  // +1 breaks the bank conflict on Bs[k][.]
 
@@ -414,7 +422,8 @@ __global__ void gemm_generic(int M, int N, int K, float alpha, const float *A,
 
     if (cRow + row < M && cCol + col < N) {
         const size_t idx = (size_t)(cRow + row) * N + cCol + col;
-        C[idx] = alpha * acc + beta * C[idx];
+        const float old = (beta != 0.0f) ? C[idx] : 0.0f;
+        C[idx] = alpha * acc + beta * old + (bias ? bias[cCol + col] : 0.0f);
     }
 }
 
@@ -489,7 +498,7 @@ template <bool TA, bool TB, int BM, int BN, int BK, int WM, int WN,
           int NUM_THREADS, int MINB>
 __global__ __launch_bounds__(NUM_THREADS, MINB) void gemm_mma(
     int M, int N, int K, float alpha, const float *A, const float *B,
-    float beta, float *C) {
+    float beta, float *C, const float *bias) {
     // No padding: the layout IS the fragment, so a fragment load is 32 lanes
     // over 512 contiguous bytes and cannot conflict.
     __shared__ float As[BM * BK];
@@ -608,12 +617,26 @@ __global__ __launch_bounds__(NUM_THREADS, MINB) void gemm_mma(
                 float *p0 = &C[(size_t)(m0 + g) * N + n0];
                 float *p1 = &C[(size_t)(m0 + g + 8) * N + n0];
                 const float *r = acc[i][j][h];
-                float2 o0 = reinterpret_cast<float2 *>(p0)[0];
-                float2 o1 = reinterpret_cast<float2 *>(p1)[0];
-                o0.x = alpha * r[0] + beta * o0.x;
-                o0.y = alpha * r[1] + beta * o0.y;
-                o1.x = alpha * r[2] + beta * o1.x;
-                o1.y = alpha * r[3] + beta * o1.y;
+                // beta == 0 means the old C is not needed, so do not read it.
+                // Every activation GEMM in the model passes beta = 0, and this
+                // load was a whole extra pass over the output tensor.
+                float2 o0 = {0.0f, 0.0f}, o1 = {0.0f, 0.0f};
+                if (beta != 0.0f) {
+                    o0 = reinterpret_cast<float2 *>(p0)[0];
+                    o1 = reinterpret_cast<float2 *>(p1)[0];
+                }
+                // A column bias costs two floats per lane out of L1 here, and
+                // saves a read AND a write of the entire output tensor as a
+                // separate kernel. This is the one thing WMMA cannot express:
+                // applying a per-COLUMN value needs to know which accumulator
+                // register holds which column, which is exactly what the
+                // fragment abstraction hides.
+                float2 bv = {0.0f, 0.0f};
+                if (bias) bv = reinterpret_cast<const float2 *>(&bias[n0])[0];
+                o0.x = alpha * r[0] + beta * o0.x + bv.x;
+                o0.y = alpha * r[1] + beta * o0.y + bv.y;
+                o1.x = alpha * r[2] + beta * o1.x + bv.x;
+                o1.y = alpha * r[3] + beta * o1.y + bv.y;
                 reinterpret_cast<float2 *>(p0)[0] = o0;
                 reinterpret_cast<float2 *>(p1)[0] = o1;
             }
@@ -650,9 +673,17 @@ constexpr int TWM = 32, TWN = 64, TTHREADS = 256, TMINB = 2;
 // built to train in, but that is a decision for the caller to make explicitly.
 static bool g_tf32 = false;
 
+// Only reached by the GEMM_USE_WMMA comparison build. gemm_tc cannot fuse a
+// column bias -- see the note in gemm_mma's epilogue -- so that build pays for
+// it the old way, with a separate pass, which is what it is there to represent.
+__global__ void bias_only_k(float *C, const float *bias, int N, size_t total) {
+    const size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < total) C[i] += bias[i % (unsigned)N];
+}
+
 template <bool TA, bool TB>
 void dispatch(int M, int N, int K, float alpha, const float *A, const float *B,
-              float beta, float *C, cudaStream_t stream) {
+              float beta, float *C, cudaStream_t stream, const float *bias) {
     // Tensor cores when asked for and the shape lines up. BK is 32 here, not
     // the fp32 path's 16, so the alignment test is stricter and a shape that
     // misses it simply falls through to fp32 rather than to the slow path.
@@ -661,30 +692,35 @@ void dispatch(int M, int N, int K, float alpha, const float *A, const float *B,
 #ifdef GEMM_USE_WMMA
         gemm_tc<TA, TB, TBM, TBN, TBK, 32, 64, 256>
             <<<grid, 256, 0, stream>>>(M, N, K, alpha, A, B, beta, C);
+        if (bias) {
+            const size_t total = (size_t)M * N;
+            bias_only_k<<<(unsigned)((total + 255) / 256), 256, 0, stream>>>(
+                C, bias, N, total);
+        }
 #else
         gemm_mma<TA, TB, TBM, TBN, TBK, TWM, TWN, TTHREADS, TMINB>
-            <<<grid, TTHREADS, 0, stream>>>(M, N, K, alpha, A, B, beta, C);
+            <<<grid, TTHREADS, 0, stream>>>(M, N, K, alpha, A, B, beta, C, bias);
 #endif
     } else if (M % FBM == 0 && N % FBN == 0 && K % FBK == 0) {
         dim3 grid(N / FBN, M / FBM);
         gemm_fast<TA, TB, FBM, FBN, FBK, FWM, FWN, FWNITER, FTM, FTN, FTHREADS>
-            <<<grid, FTHREADS, 0, stream>>>(M, N, K, alpha, A, B, beta, C);
+            <<<grid, FTHREADS, 0, stream>>>(M, N, K, alpha, A, B, beta, C, bias);
     } else {
         constexpr int BS = 16;
         dim3 block(BS, BS);
         dim3 grid((N + BS - 1) / BS, (M + BS - 1) / BS);
-        gemm_generic<TA, TB, BS><<<grid, block, 0, stream>>>(M, N, K, alpha, A, B, beta, C);
+        gemm_generic<TA, TB, BS><<<grid, block, 0, stream>>>(M, N, K, alpha, A, B, beta, C, bias);
     }
 }
 }  // namespace
 
 void gemm(bool transA, bool transB, int M, int N, int K, float alpha,
           const float *A, const float *B, float beta, float *C,
-          cudaStream_t stream) {
-    if (!transA && !transB)      dispatch<false, false>(M, N, K, alpha, A, B, beta, C, stream);
-    else if (!transA && transB)  dispatch<false, true >(M, N, K, alpha, A, B, beta, C, stream);
-    else if (transA && !transB)  dispatch<true,  false>(M, N, K, alpha, A, B, beta, C, stream);
-    else                         dispatch<true,  true >(M, N, K, alpha, A, B, beta, C, stream);
+          cudaStream_t stream, const float *bias) {
+    if (!transA && !transB)      dispatch<false, false>(M, N, K, alpha, A, B, beta, C, stream, bias);
+    else if (!transA && transB)  dispatch<false, true >(M, N, K, alpha, A, B, beta, C, stream, bias);
+    else if (transA && !transB)  dispatch<true,  false>(M, N, K, alpha, A, B, beta, C, stream, bias);
+    else                         dispatch<true,  true >(M, N, K, alpha, A, B, beta, C, stream, bias);
 }
 
 void gemm_set_tf32(bool on) { g_tf32 = on; }

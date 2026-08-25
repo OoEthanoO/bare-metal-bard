@@ -31,7 +31,6 @@ void add_inplace(float *dst, const float *src, int n);
 // ---- bias handling ----
 // The GEMM has no bias term, so bias is a separate add; its gradient is a
 // column sum over the B*T dimension.
-void bias_forward(float *out, const float *bias, int N, int C);
 void bias_backward(float *dbias, const float *dout, int N, int C);
 
 // ---- loss ----
