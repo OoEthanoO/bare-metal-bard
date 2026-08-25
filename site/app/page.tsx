@@ -888,9 +888,10 @@ O' = O * exp(m - m') + exp(S_j - m') @ V_j`}</code>
       <h2>What I&rsquo;d do next</h2>
       <ol>
         <li>
-          <strong>Raw <code>mma.sync</code></strong> instead of WMMA. The remaining ~23% gap to
-          cuBLAS&rsquo;s tensor-core path is mostly fragment scheduling that WMMA&rsquo;s
-          abstraction does not expose.
+          <strong>Raw <code>mma.sync</code></strong> instead of WMMA — now the only candidate left
+          for the ~21% gap to cuBLAS&rsquo;s tensor-core path rather than one guess among several,
+          since block scheduling, tile size, <code>BK</code> and double buffering have each been
+          tried and measured worse.
         </li>
         <li>
           <strong>
@@ -909,8 +910,14 @@ O' = O * exp(m - m') + exp(S_j - m') @ V_j`}</code>
           sits at ~21%, so there is bandwidth to pay for the re-staging.
         </li>
         <li>
-          <strong>Multi-GPU</strong>, where communication rather than compute becomes the limit.
-          That one needs hardware this laptop does not have.
+          <strong>
+            <s>Multi-GPU</s>
+          </strong>{' '}
+          — started, above. The collective is correct and cheap; the data-parallel driver is not
+          yet good enough to profit from it. Two ranks need to genuinely overlap, which means one
+          process per GPU or a step with no blocking calls left in it. The blocking host transfers
+          are gone already — that fix is committed and unmeasured, because it needs a second GPU
+          and the pod is terminated.
         </li>
       </ol>
 
