@@ -833,6 +833,60 @@ __syncthreads()              <- and blocks again before overwriting`}</code>
         <strong>Code you do not execute is not free.</strong>
       </p>
 
+      <h3>One kernel was never going to be enough</h3>
+      <p>
+        Before starting on the attention backward I noticed the GEMM benchmark had never covered
+        three of the model&rsquo;s own shapes. Adding them showed the attention-projection weight
+        gradient running at <strong>1846 GF/s where every other shape reaches 7000&ndash;8000</strong>.
+        A 128&times;128 tile cuts 384&times;384 into <strong>nine blocks</strong> on a 36-SM card;
+        three quarters of the machine is idle and no amount of inner-loop work fixes that.
+      </p>
+      <p>
+        Two fixes, both shape-dependent &mdash; which is the point, and is why cuBLAS ships dozens
+        of kernels rather than one good one. A <strong>second, half-height tile</strong> (64&times;128,
+        4 blocks/SM) for grids that cannot fill the machine once: +25% on the nine-block shape,
+        &minus;3% on the 96-block ones, so it is chosen per shape. And <strong>split-K when the
+        output is small and K is long</strong>.
+      </p>
+      <p>
+        I had costed split-K before, for 4096&times;384&times;384, and correctly rejected it: the
+        output there is 6.3 MB, so every extra partial is another 6.3 MB of traffic to recover a
+        third of a wave. The weight gradients are the <em>opposite</em> shape &mdash; 590 KB of
+        output against K=4096 &mdash; so the partials are nearly free.{' '}
+        <strong>Same technique, opposite verdict, and the deciding quantity is K against M&middot;N,
+        not the wave count I had been staring at.</strong>
+      </p>
+      <div className="tablewrap">
+        <table>
+          <thead>
+            <tr><th>weight-gradient shape</th><th className="n">before</th><th className="n">after</th></tr>
+          </thead>
+          <tbody>
+            <tr className="hi"><td>384&times;384&times;4096</td><td className="n">1846</td><td className="n">6899</td></tr>
+            <tr><td>384&times;1152&times;4096</td><td className="n">4223</td><td className="n">7727</td></tr>
+            <tr><td>384&times;1536&times;4096</td><td className="n">5591</td><td className="n">7673</td></tr>
+            <tr><td>1536&times;384&times;4096</td><td className="n">5578</td><td className="n">7623</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        <strong>58.9 &rarr; 54.0 ms per step.</strong> The part worth dwelling on is that three of
+        the four largest matmuls in the backward pass had never been measured individually, so the
+        one running at a quarter speed was invisible &mdash; averaged into a GEMM category that
+        looked healthy at 65%.
+      </p>
+      <h3>The clock lock does not stay locked</h3>
+      <p>
+        Twice now a change has measured as a large speedup and been a clock ratio. <code>ncu</code>
+        {' '}resets the application clock when it detaches; the lock has also lapsed on its own. Both
+        times the number looked plausible &mdash; 59.9 &rarr; 38 ms is 1.58&times;, and so is
+        1900/1200. This project already had a rule saying never to quote a ratio on an unpinned
+        clock, and that rule does not survive a pin coming undone <em>silently, between the pinning
+        and the measurement</em>. Every timing run now reads the clock on both sides of itself and
+        labels the output UNPINNED if either reading is wrong.{' '}
+        <strong>A discipline that depends on remembering to check is not a discipline.</strong>
+      </p>
+
       <div className="note">
         <p style={{ margin: 0 }}>
           The two biggest wins available in a step I had spent months optimizing were a pass that

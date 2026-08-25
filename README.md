@@ -1137,6 +1137,7 @@ scripts/
   gpu_clocks.bat    the same on Windows; self-elevates for the UAC prompt
   profile_step.bat  per-kernel profile of a training step; re-pins the clock
   build_prev.bat    build an older commit's train_gpt for a same-session A/B
+  measure.bat       run a command with the SM clock verified on both sides
   build.bat         Windows build (nvcc + MSVC), the Makefile's equivalent
   probe.bat         build+run a one-off probe (used to find fragment layouts)
   sweep_k10.bat     kernel 10's tile sweep, one compile per config
@@ -1169,7 +1170,7 @@ four scalar stores.
    currently pins — and kernel 10 is now register-bound at 255, so those
    registers are the binding constraint on the warp tile that mattered most.
    This has gone from a tidy-up to the main event.
-3. **The attention backward**, which the profile now puts at 15.7% of a step —
+3. **The attention backward**, now the largest thing left after the matmuls —
    the largest single thing left after the matmuls. The cure and the one
    unmeasured piece of it are in item 4 below; the profile has just promoted it
    from "nice to have" to the next thing to do.
