@@ -35,8 +35,12 @@ template <bool TA, bool TB, int BM, int BN, int BK, int WM, int WN, int WNITER,
 __global__ __launch_bounds__(NUM_THREADS) void gemm_fast(
     int M, int N, int K, float alpha, const float *A, const float *B,
     float beta, float *C) {
-    __shared__ float As[BK * BM];
-    __shared__ float Bs[BK * BN];
+    // Double buffered, exactly as kernel 8 is. This GEMM was written against
+    // the kernel-7 structure and kernel 8 arrived afterwards, so the model
+    // never got the prefetch -- and measured at the shapes the model actually
+    // runs (see --mnk in bench), kernel 8 beats kernel 7 on every one of them.
+    __shared__ float As[2][BK * BM];
+    __shared__ float Bs[2][BK * BN];
 
     const int cRow = blockIdx.y * BM;
     const int cCol = blockIdx.x * BN;
@@ -67,47 +71,69 @@ __global__ __launch_bounds__(NUM_THREADS) void gemm_fast(
     const int bCol = TB ? tid % (BK / 4) : tid % (BN / 4);
     constexpr int bStride = TB ? (NUM_THREADS * 4) / BK : NUM_THREADS / (BN / 4);
 
-    for (int k0 = 0; k0 < K; k0 += BK) {
-        if constexpr (TA) {
-            // A is K x M. Read along m (contiguous), store straight down.
-#pragma unroll
-            for (int off = 0; off < BK; off += aStride) {
-                VEC4(As[(aRow + off) * BM + aCol * 4]) =
-                    CVEC4(A[(size_t)(k0 + aRow + off) * M + cRow + aCol * 4]);
-            }
-        } else {
-            // A is M x K. Read along k, scatter across BK rows of As.
-#pragma unroll
-            for (int off = 0; off < BM; off += aStride) {
-                const float4 a =
-                    CVEC4(A[(size_t)(cRow + aRow + off) * K + k0 + aCol * 4]);
-                As[(aCol * 4 + 0) * BM + aRow + off] = a.x;
-                As[(aCol * 4 + 1) * BM + aRow + off] = a.y;
-                As[(aCol * 4 + 2) * BM + aRow + off] = a.z;
-                As[(aCol * 4 + 3) * BM + aRow + off] = a.w;
-            }
-        }
+    // How many float4s each thread stages per tile, per operand. The count
+    // differs between the transpose cases because that decides which axis of
+    // the operand is walked.
+    constexpr int NA = TA ? BK / aStride : BM / aStride;
+    constexpr int NB = TB ? BN / bStride : BK / bStride;
+    float4 aPre[NA], bPre[NB];
 
-        if constexpr (TB) {
-            // B is N x K. Read along k, scatter across BK rows of Bs.
+    // ---- prologue: chunk 0 goes straight into buffer 0 ----
 #pragma unroll
-            for (int off = 0; off < BN; off += bStride) {
-                const float4 b =
-                    CVEC4(B[(size_t)(cCol + bRow + off) * K + k0 + bCol * 4]);
-                Bs[(bCol * 4 + 0) * BN + bRow + off] = b.x;
-                Bs[(bCol * 4 + 1) * BN + bRow + off] = b.y;
-                Bs[(bCol * 4 + 2) * BN + bRow + off] = b.z;
-                Bs[(bCol * 4 + 3) * BN + bRow + off] = b.w;
-            }
+    for (int i = 0; i < NA; ++i) {
+        const int off = i * aStride;
+        if constexpr (TA) {
+            VEC4(As[0][(aRow + off) * BM + aCol * 4]) =
+                CVEC4(A[(size_t)(aRow + off) * M + cRow + aCol * 4]);
         } else {
-            // B is K x N. Read along n (contiguous), store straight down.
+            const float4 a = CVEC4(A[(size_t)(cRow + aRow + off) * K + aCol * 4]);
+            As[0][(aCol * 4 + 0) * BM + aRow + off] = a.x;
+            As[0][(aCol * 4 + 1) * BM + aRow + off] = a.y;
+            As[0][(aCol * 4 + 2) * BM + aRow + off] = a.z;
+            As[0][(aCol * 4 + 3) * BM + aRow + off] = a.w;
+        }
+    }
 #pragma unroll
-            for (int off = 0; off < BK; off += bStride) {
-                VEC4(Bs[(bRow + off) * BN + bCol * 4]) =
-                    CVEC4(B[(size_t)(k0 + bRow + off) * N + cCol + bCol * 4]);
+    for (int i = 0; i < NB; ++i) {
+        const int off = i * bStride;
+        if constexpr (TB) {
+            const float4 b = CVEC4(B[(size_t)(cCol + bRow + off) * K + bCol * 4]);
+            Bs[0][(bCol * 4 + 0) * BN + bRow + off] = b.x;
+            Bs[0][(bCol * 4 + 1) * BN + bRow + off] = b.y;
+            Bs[0][(bCol * 4 + 2) * BN + bRow + off] = b.z;
+            Bs[0][(bCol * 4 + 3) * BN + bRow + off] = b.w;
+        } else {
+            VEC4(Bs[0][(bRow + off) * BN + bCol * 4]) =
+                CVEC4(B[(size_t)(bRow + off) * N + cCol + bCol * 4]);
+        }
+    }
+    __syncthreads();
+
+    int cur = 0;
+    for (int k0 = 0; k0 < K; k0 += BK) {
+        const int knext = k0 + BK;
+        const bool more = knext < K;
+
+        // Issue the next chunk of global loads BEFORE the arithmetic below, so
+        // the round trip overlaps the FMAs instead of stalling in front of them.
+        if (more) {
+#pragma unroll
+            for (int i = 0; i < NA; ++i) {
+                const int off = i * aStride;
+                if constexpr (TA)
+                    aPre[i] = CVEC4(A[(size_t)(knext + aRow + off) * M + cRow + aCol * 4]);
+                else
+                    aPre[i] = CVEC4(A[(size_t)(cRow + aRow + off) * K + knext + aCol * 4]);
+            }
+#pragma unroll
+            for (int i = 0; i < NB; ++i) {
+                const int off = i * bStride;
+                if constexpr (TB)
+                    bPre[i] = CVEC4(B[(size_t)(cCol + bRow + off) * K + knext + bCol * 4]);
+                else
+                    bPre[i] = CVEC4(B[(size_t)(knext + bRow + off) * N + cCol + bCol * 4]);
             }
         }
-        __syncthreads();
 
 #pragma unroll
         for (int k = 0; k < BK; ++k) {
@@ -116,15 +142,15 @@ __global__ __launch_bounds__(NUM_THREADS) void gemm_fast(
 #pragma unroll
                 for (int i = 0; i < TM; i += 4)
                     VEC4(regM[wSubRow * TM + i]) =
-                        CVEC4(As[k * BM + warpRow * WM + wSubRow * WSUBM +
-                                 threadRowInWarp * TM + i]);
+                        CVEC4(As[cur][k * BM + warpRow * WM + wSubRow * WSUBM +
+                                      threadRowInWarp * TM + i]);
 #pragma unroll
             for (int wSubCol = 0; wSubCol < WNITER; ++wSubCol)
 #pragma unroll
                 for (int j = 0; j < TN; j += 4)
                     VEC4(regN[wSubCol * TN + j]) =
-                        CVEC4(Bs[k * BN + warpCol * WN + wSubCol * WSUBN +
-                                 threadColInWarp * TN + j]);
+                        CVEC4(Bs[cur][k * BN + warpCol * WN + wSubCol * WSUBN +
+                                      threadColInWarp * TN + j]);
 #pragma unroll
             for (int wSubRow = 0; wSubRow < WMITER; ++wSubRow)
 #pragma unroll
@@ -136,7 +162,40 @@ __global__ __launch_bounds__(NUM_THREADS) void gemm_fast(
                             acc[wSubRow * TM + i][wSubCol * TN + j] +=
                                 regM[wSubRow * TM + i] * regN[wSubCol * TN + j];
         }
-        __syncthreads();
+
+        // Land the prefetched tile in the OTHER buffer. No leading barrier is
+        // needed: this iteration read buffer cur and writes cur^1, which no
+        // thread touches until the next iteration. The trailing barrier orders
+        // these writes against that iteration.
+        if (more) {
+            const int nxt = cur ^ 1;
+#pragma unroll
+            for (int i = 0; i < NA; ++i) {
+                const int off = i * aStride;
+                if constexpr (TA) {
+                    VEC4(As[nxt][(aRow + off) * BM + aCol * 4]) = aPre[i];
+                } else {
+                    As[nxt][(aCol * 4 + 0) * BM + aRow + off] = aPre[i].x;
+                    As[nxt][(aCol * 4 + 1) * BM + aRow + off] = aPre[i].y;
+                    As[nxt][(aCol * 4 + 2) * BM + aRow + off] = aPre[i].z;
+                    As[nxt][(aCol * 4 + 3) * BM + aRow + off] = aPre[i].w;
+                }
+            }
+#pragma unroll
+            for (int i = 0; i < NB; ++i) {
+                const int off = i * bStride;
+                if constexpr (TB) {
+                    Bs[nxt][(bCol * 4 + 0) * BN + bRow + off] = bPre[i].x;
+                    Bs[nxt][(bCol * 4 + 1) * BN + bRow + off] = bPre[i].y;
+                    Bs[nxt][(bCol * 4 + 2) * BN + bRow + off] = bPre[i].z;
+                    Bs[nxt][(bCol * 4 + 3) * BN + bRow + off] = bPre[i].w;
+                } else {
+                    VEC4(Bs[nxt][(bRow + off) * BN + bCol * 4]) = bPre[i];
+                }
+            }
+            __syncthreads();
+            cur = nxt;
+        }
     }
 
 #pragma unroll
@@ -196,7 +255,7 @@ __global__ void gemm_generic(int M, int N, int K, float alpha, const float *A,
     }
 }
 
-// Tile parameters of the fast path, matching kernel 7.
+// Tile parameters of the fast path, matching kernel 8.
 constexpr int FBM = 128, FBN = 128, FBK = 16;
 constexpr int FWM = 64, FWN = 64, FWNITER = 4;
 constexpr int FTM = 8, FTN = 4, FTHREADS = 128;
