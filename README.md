@@ -342,6 +342,29 @@ It stays opt-in here (`--tf32`) rather than becoming the default, because it
 changes what the model computes and one 5000-step run on 1 MB of Shakespeare is
 not enough evidence to make that choice silently for someone else.
 
+### How much is still on the table
+
+Against cuBLAS's own TF32 path at the same shapes:
+
+| shape | mine | cuBLAS TF32 | |
+|---|---:|---:|---:|
+| 4096×1152×384 | 7466 | 9192 | 81.2% |
+| 4096×1536×384 | 7384 | 9039 | 81.7% |
+| 4096×384×384 | 6209 | 8870 | 70.0% |
+| 4096×384×1536 | 6949 | 9955 | 69.8% |
+
+The split is by **N**, and the reason looks obvious: a 128-wide block tile gives
+only three block columns at N=384, so with ~72 blocks resident the grid is 1.33
+waves and the second wave runs a third full. The wide shapes are 4.0 and 5.3
+waves and land at ~81%.
+
+Narrowing `BN` to 64 doubles the block columns and is **worse everywhere** —
+6145 → 5644 GF/s at 4096×384×384. A 128×64 tile has an arithmetic intensity of
+21 FLOP/byte against 128×128's 32, and this far below the card's 43 ridge point
+the reuse lost costs more than the tail wasted. So the wave-quantisation story
+is true and is not the binding constraint, which is the sort of thing only a
+measurement tells you.
+
 ### The backward pass is gradient-checked
 
 A falling loss does not verify a backward pass — a dropped term in layernorm's

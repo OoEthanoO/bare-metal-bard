@@ -426,6 +426,11 @@ constexpr int FTM = 8, FTN = 4, FTHREADS = 128;
 // Tile parameters of the tensor-core path, matching kernel 9.
 constexpr int TBM = 128, TBN = 128, TBK = 32;
 constexpr int TWM = 32, TWN = 64, TTHREADS = 256;
+// Narrowing BN to 64 was tried, to cut the wave quantisation at N=384 where a
+// 128-wide tile leaves only three block columns and the second wave runs a
+// third full. It is worse everywhere -- 6144 -> 5644 GF/s at 4096x384x384 --
+// because a 128x64 tile has 21 FLOP/byte against 128x128's 32, and this far
+// below the 43 ridge point the lost reuse costs more than the tail does.
 
 // Off by default: TF32 keeps fp32 range but only 10 mantissa bits, so turning
 // it on changes what the model computes. It is the precision the hardware was
