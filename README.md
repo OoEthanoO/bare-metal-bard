@@ -206,6 +206,56 @@ compute phase the conversions hide behind independent work; in the staging
 path, between a global load and a barrier, there is nothing to hide behind.
 Counting operations is not the same as counting time.
 
+#### Putting it in the model, where it behaves differently
+
+The ladder kernel only does `NN`. The model needs all four transpose cases, and
+the lane-major layout ports cleanly because it is a function of the *logical*
+element `(m,k)`, not of how the operand is stored. All four cases share one map.
+What changes is only which axis the global `float4` runs along, and therefore
+which bits of the destination slot the four staged values step through — 1 for
+a read along `k`, 4 for a read along `m` or `n`.
+
+**Result: 67.7 → 65.2 ms/step, 3.7% off the training step**, replicated three
+times each way with the SM clock pinned, identical loss to four decimals.
+
+Two things had to be got right first, and neither was visible from the square
+benchmark.
+
+**The swizzle has to key on the axis staging walks.** The XOR swizzle must be
+uniform across a warp doing a fragment load and varying across a warp doing a
+staging store. Only one tile coordinate is both, and it is the one the staging
+warp actually walks — which the transpose flag decides:
+
+| | stages along | swizzle keys on |
+|---|---|---|
+| A, `transA=false` | k | `kt` |
+| A, `transA=true` | m | `mi` |
+| B, `transB=false` | n | `nj` |
+| B, `transB=true` | k | `kt` |
+
+I ported the untransposed key to all four. For the transposed cases that is
+warp-uniform during staging, so the swizzle does nothing and the stores go back
+to being 16-way conflicted. **This is not a correctness bug**, so every test
+passed; it showed up only as the transposed cases running 20% slower than the
+WMMA path they were replacing, while the untransposed ones were fine. Geomean
+over the model's twenty shape/transpose combinations: **0.887×**. With the key
+fixed, **1.044×**.
+
+The pattern in the numbers is what identified it — `NN` and `NT` near parity,
+`TN` and `TT` at 0.80–0.84 — because `TA=true` is the half where the key was
+wrong. `tools/smem_banks.py` now simulates all four orientations and would have
+caught it before the kernel was built.
+
+**The best tile on a square benchmark is not the best tile in the model.** A
+64×64 warp tile in 128-thread blocks is worth 8.7% at N=4096 because it halves
+shared-memory traffic per `mma`. In situ it *loses*, 1.034× against the
+32×64/256 shape's 1.044×. The model's GEMMs are 4096×384×384 and friends, so a
+128×128 block tile gives 96 blocks against 36 SMs — the machine is not full,
+and a 128-thread block brings half as many warps per SM to hide latency with.
+The extra reuse is real and there is nothing to spend it on. So the ladder and
+the model deliberately run different tiles, and both numbers are here rather
+than only the flattering one.
+
 ```bash
 python3 tools/smem_banks.py      # layout proofs, no GPU needed
 scripts\probe.bat <file.cu>      # discover a fragment layout on the hardware
@@ -469,12 +519,13 @@ Full 5000-step runs, same seed and configuration:
 | | step | tokens/s | best val | at step |
 |---|---:|---:|---:|---:|
 | fp32 | 75.1 ms | 54,516 | 1.5138 | 2400 |
-| TF32 | **67.6 ms** | **60,568** | 1.5178 | 2800 |
+| TF32, WMMA | 67.6 ms | 60,568 | 1.5178 | 2800 |
+| TF32, `mma.sync` | **65.2 ms** | **62,824** | — | — |
 
 The validation losses differ by 0.004 nats. That is comfortably inside the
 run-to-run spread this setup shows from fp32 summation order alone — across
 configurations I have measured 1.5035, 1.5056, 1.5138, 1.5147, 1.5178 and
-1.5194 on the same data and seed. So the honest reading is that **TF32 buys 10%
+1.5194 on the same data and seed. So the honest reading is that **TF32 buys 13%
 of training time and costs nothing measurable in quality**, which is exactly
 why every framework defaults to it on Ampere and later.
 
@@ -486,17 +537,19 @@ not enough evidence to make that choice silently for someone else.
 
 Against cuBLAS's own TF32 path at the same shapes:
 
-| shape | mine | cuBLAS TF32 | |
-|---|---:|---:|---:|
-| 4096×1152×384 | 7466 | 9192 | 81.2% |
-| 4096×1536×384 | 7384 | 9039 | 81.7% |
-| 4096×384×384 | 6209 | 8870 | 70.0% |
-| 4096×384×1536 | 6949 | 9955 | 69.8% |
+| shape | mine (WMMA) | mine (`mma.sync`) | cuBLAS TF32 | |
+|---|---:|---:|---:|---:|
+| 4096×1536×384 | 7327 | **7812** | 9074 | 86.1% |
+| 4096×384×1536 | 6919 | **7586** | 9976 | 76.0% |
+| 4096×384×384 | 6176 | 6176 | 8870 | 69.6% |
 
 The split is by **N**, and the reason looks obvious: a 128-wide block tile gives
 only three block columns at N=384, so with ~72 blocks resident the grid is 1.33
 waves and the second wave runs a third full. The wide shapes are 4.0 and 5.3
-waves and land at ~81%.
+waves and land far higher. Note the N=384 row is the one `mma.sync` does not
+improve at all — the same shape, the same instruction, and no gain, because
+what limits it is the tail of a 1.33-wave grid rather than anything inside the
+kernel.
 
 Narrowing `BN` to 64 doubles the block columns and is **worse everywhere** —
 6145 → 5644 GF/s at 4096×384×384. A 128×64 tile has an arithmetic intensity of
@@ -897,6 +950,13 @@ four scalar stores.
    currently pins — and kernel 10 is now register-bound at 255, so those
    registers are the binding constraint on the warp tile that mattered most.
    This has gone from a tidy-up to the main event.
+3. **The N=384 tail.** Every shape in the model where `mma.sync` gained nothing
+   is a shape whose grid is 1.33 waves. Neither a narrower tile (measured,
+   worse everywhere) nor a better inner loop can fix a grid that leaves two
+   thirds of the second wave empty; what can is **splitting K** so the same
+   output tile is computed by several blocks that reduce at the end. That
+   trades a bandwidth-bound reduction for occupancy, which on this card is a
+   trade worth measuring rather than assuming.
 3. ~~**Fuse attention** (FlashAttention-style)~~ — [done](#fused-attention-the-score-matrix-never-exists).
    Forward is 3.40x and activation memory is down 30%. The backward is only
    1.19x, `ncu` says shared-memory→register traffic, and the indicated cure —

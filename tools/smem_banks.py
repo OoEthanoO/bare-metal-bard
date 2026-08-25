@@ -140,6 +140,100 @@ for k in range(BK):
 check(bad == 0, "B hoisted staging address: %d mismatches" % bad)
 
 
+# ------------------- 2c. the transpose-aware staging in src/gemm.cu
+# The model GEMM stages the same layout from four operand orientations. The map
+# does not change -- it is a function of the logical (m,k), not of how the
+# operand is stored -- but two things do:
+#
+#   * which axis the global float4 runs along, and therefore which bits of the
+#     destination slot the four staged values step through (1 for a read along
+#     k, 4 for a read along m or n);
+#   * which tile coordinate the SWIZZLE must key on. It has to be uniform
+#     across a warp doing a fragment load and varying across a warp doing a
+#     staging store, and only the coordinate the staging warp actually walks is
+#     both. Key it on the other one and it is warp-uniform during staging, so
+#     it does nothing -- which is not a correctness bug and therefore does not
+#     show up in any test. It showed up as the transposed cases running 20%
+#     slower than the WMMA path they replaced.
+#
+# So this block checks both, for all four cases.
+NT = 256  # threads in the model kernel
+
+
+def swz(unit, kind, along_k):
+    """`along_k` is whether the staging read for this operand runs along k."""
+    per = (BM // MMA_M) if kind == "a" else (BN // 16)
+    return ((unit // per) if along_k else (unit % per)) & 7
+
+
+def off_a(m, k, along_k):
+    unit = (k // MMA_K) * (BM // MMA_M) + m // MMA_M
+    slot = ((m % 8) * 4 + (k % 4)) ^ swz(unit, "a", along_k)
+    return unit * UNIT + slot * 4 + ((k % MMA_K) // 4) * 2 + ((m % MMA_M) // 8)
+
+
+def off_b(k, n, along_k):
+    unit = (k // MMA_K) * (BN // 16) + n // 16
+    slot = ((n % 8) * 4 + (k % 4)) ^ swz(unit, "b", along_k)
+    return unit * UNIT + slot * 4 + ((k % MMA_K) // 4) + ((n % 16) // 8) * 2
+
+
+def stage(kind, trans):
+    """Replay one operand's staging loop; return (address errors, worst ways)."""
+    is_a = kind == "a"
+    # transA=True means A is stored K x M, so the read runs along m, not k.
+    along_k = (not trans) if is_a else trans
+    wide = BM if (is_a and trans) else (BK if (is_a or trans) else BN)
+    per = wide // 4
+    stride = NT // per
+    outer = (BK if is_a else BN) if trans else (BM if is_a else BK)
+    step = 1 if along_k else 4
+    bad, worst = 0, 0
+    for off in range(0, outer, stride):
+        for warp in range(NT // 32):
+            for j in range(4):
+                banks = {}
+                for l in range(32):
+                    tid = warp * 32 + l
+                    row, col = tid // per, tid % per
+                    if is_a:
+                        m = col * 4 + j if trans else row + off
+                        k = row + off if trans else col * 4 + j
+                        base_m = col * 4 if trans else m
+                        base_k = k if trans else col * 4
+                        unit = (base_k // MMA_K) * (BM // MMA_M) + base_m // MMA_M
+                        base = unit * UNIT + (((base_k % MMA_K) // 4) * 2 +
+                                              ((base_m % MMA_M) // 8))
+                        slot = ((base_m % 8) * 4 + (base_k % 4)) ^ swz(unit, "a", along_k)
+                        got = base + ((slot ^ (j * step)) * 4)
+                        bad += got != off_a(m, k, along_k)
+                    else:
+                        k = col * 4 + j if trans else row + off
+                        n = row + off if trans else col * 4 + j
+                        base_k = col * 4 if trans else k
+                        base_n = n if trans else col * 4
+                        unit = (base_k // MMA_K) * (BN // 16) + base_n // 16
+                        base = unit * UNIT + (((base_k % MMA_K) // 4) +
+                                              ((base_n % 16) // 8) * 2)
+                        slot = ((base_n % 8) * 4 + (base_k % 4)) ^ swz(unit, "b", along_k)
+                        got = base + ((slot ^ (j * step)) * 4)
+                        bad += got != off_b(k, n, along_k)
+                    banks[got % 32] = banks.get(got % 32, 0) + 1
+                worst = max(worst, max(banks.values()))
+    return bad, worst
+
+
+print("model GEMM staging, all four operand orientations:")
+print("%-24s %10s %14s" % ("", "addr errors", "worst bank way"))
+for kind, trans, label in (("a", False, "A  transA=false"), ("a", True, "A  transA=true"),
+                           ("b", False, "B  transB=false"), ("b", True, "B  transB=true")):
+    bad, ways = stage(kind, trans)
+    print("%-24s %10d %13dx" % (label, bad, ways))
+    check(bad == 0, "%s: %d staging addresses wrong" % (label, bad))
+    check(ways <= 2, "%s: staging is %d-way bank conflicted" % (label, ways))
+print()
+
+
 # --------------------------------------------------------- 3. bank conflicts
 def store_ways(is_a, swz):
     """Worst simultaneous hits on one bank across a warp of staging threads."""

@@ -522,6 +522,38 @@ __syncthreads()              <- and blocks again before overwriting`}</code>
         right register slots, and simulates the bank pattern of every access.
       </p>
 
+      <h3>Putting it in the model, where it behaves differently</h3>
+      <p>
+        The ladder kernel only does <code>NN</code>; the model needs all four transpose cases. The
+        layout ports cleanly, because it is a function of the <em>logical</em> element{' '}
+        <code>(m,k)</code> rather than of how the operand is stored — all four cases share one map,
+        and only the axis the global <code>float4</code> runs along changes.{' '}
+        <strong>67.7 → 65.2 ms per training step, 3.7%</strong>, replicated three times each way at
+        a pinned clock, with identical loss to four decimals.
+      </p>
+      <p>
+        <strong>But the swizzle has to key on the axis staging walks.</strong> It must be uniform
+        across a warp doing a fragment load and varying across a warp doing a staging store, and
+        only one tile coordinate is both — the one the staging warp walks, which the transpose flag
+        decides. I ported the untransposed key to all four cases. For the transposed ones that is
+        warp-uniform during staging, so the swizzle does nothing and the stores go back to 16-way
+        conflicted. <strong>It is not a correctness bug</strong>, so every test passed. It showed up
+        only as the transposed cases running 20% slower than the WMMA path they replaced: geomean
+        over the model&rsquo;s twenty shape/transpose combinations was <strong>0.887×</strong>, and{' '}
+        <strong>1.044×</strong> with the key fixed. What identified it was the pattern —{' '}
+        <code>NN</code> and <code>NT</code> near parity, <code>TN</code> and <code>TT</code> at
+        0.80–0.84, which is exactly the half where <code>transA</code> is true.
+      </p>
+      <p>
+        <strong>And the best tile on a square benchmark is not the best tile in the model.</strong>{' '}
+        The 64×64 warp tile that is worth 8.7% at N=4096 <em>loses</em> in situ, 1.034× against the
+        narrower shape&rsquo;s 1.044×. The model&rsquo;s GEMMs are 4096×384×384 and friends, so a
+        128×128 block tile gives 96 blocks against 36 SMs — the machine is not full, and a
+        128-thread block brings half as many warps per SM to hide latency with. The extra reuse is
+        real and there is nothing to spend it on. The ladder and the model deliberately run
+        different tiles.
+      </p>
+
       <h2>The compiler optimized the thing it could see</h2>
       <p>
         Kernel 9 sat at 8064 GF/s until a question about a version number. The writeup said CUDA
@@ -1169,8 +1201,9 @@ O' = O * exp(m - m') + exp(S_j - m') @ V_j`}</code>
           <strong>
             <s>Raw <code>mma.sync</code></s>
           </strong>{' '}
-          — done, above. 8318 → 9210 GF/s, and the gap to cuBLAS&rsquo;s tensor-core path is 12%
-          rather than 21%. The hypothesis behind it was wrong, which is the part worth keeping.
+          — done, above. 8318 → 9210 GF/s on the ladder, and 67.7 → 65.2 ms on the training
+          step once it was made transpose-aware. The hypothesis behind it was wrong, which is the
+          part worth keeping.
         </li>
         <li>
           <strong>

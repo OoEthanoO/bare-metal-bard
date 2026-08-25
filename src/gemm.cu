@@ -418,14 +418,227 @@ __global__ void gemm_generic(int M, int N, int K, float alpha, const float *A,
     }
 }
 
+// ------------------------------------------------- tensor-core path, raw PTX
+// Kernel 10's structure, made transpose-aware. See src/kernels/k10_mma.cu for
+// why the shared layout looks like this; the short version is that shared
+// memory holds each operand tile in the order the tensor core's registers
+// want it, so a fragment load is one 128-bit access instead of four 32-bit
+// ones, and a 64x64 warp tile becomes affordable in registers.
+//
+// The transpose story is the SAME as the fp32 path's and it costs even less
+// here. The lane-major layout is a function of the logical element (m,k), not
+// of how the operand is stored, so all four cases share one map. What changes
+// is only which axis the global float4 runs along, and therefore which bits of
+// the destination slot the four staged values step through:
+//
+//     A, transA=false: read along k -> k%4 varies -> slot steps by 1
+//     A, transA=true:  read along m -> m%8 varies -> slot steps by 4
+//     B, transB=false: read along n -> n%8 varies -> slot steps by 4
+//     B, transB=true:  read along k -> k%4 varies -> slot steps by 1
+//
+// So the transposed cases are not the expensive ones here. Both orientations
+// pay four scalar shared stores; the only difference is the stride between
+// them, and neither is a vector store. That is the price of the layout, and
+// it is charged evenly.
+constexpr int MMA_M = 16, MMA_N = 8, MMA_K = 8;
+constexpr int UNIT = 128;  // floats per operand tile: 32 lanes x 4
+
+__device__ __forceinline__ unsigned to_tf32(float x) {
+    unsigned r;
+    asm("cvt.rna.tf32.f32 %0, %1;" : "=r"(r) : "f"(x));
+    return r;
+}
+
+__device__ __forceinline__ void mma_m16n8k8(float (&d)[4],
+                                            const unsigned (&a)[4],
+                                            const unsigned *b) {
+    asm volatile(
+        "mma.sync.aligned.m16n8k8.row.col.f32.tf32.tf32.f32 "
+        "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};\n"
+        : "+f"(d[0]), "+f"(d[1]), "+f"(d[2]), "+f"(d[3])
+        : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), "r"(b[0]), "r"(b[1]));
+}
+
+// The XOR swizzle that keeps the staging stores from collapsing onto a handful
+// of banks. It permutes which lane slot inside a tile an element occupies, so
+// it must be uniform across a warp doing a FRAGMENT LOAD (which reads one whole
+// tile) and must VARY across a warp doing a STAGING STORE (which is what
+// spreads the banks). Both hold only if it keys on the tile coordinate the
+// staging warp actually walks -- and that is the axis the global read runs
+// along, which is exactly what the transpose flag decides:
+//
+//     A, transA=false  stages along k  ->  key on kt
+//     A, transA=true   stages along m  ->  key on mi
+//     B, transB=false  stages along n  ->  key on nj
+//     B, transB=true   stages along k  ->  key on kt
+//
+// Key it on the wrong one and it is warp-uniform during staging, so it does
+// nothing at all: the transposed cases were 16-way conflicted and 20% slower
+// than the WMMA path they replaced, while the untransposed ones were fine.
+// tools/smem_banks.py simulates all four.
+template <int BM, bool TA>
+__device__ __forceinline__ int a_swz(int unit) {
+    return (TA ? unit % (BM / MMA_M) : unit / (BM / MMA_M)) & 7;
+}
+template <int BN, bool TB>
+__device__ __forceinline__ int b_swz(int unit) {
+    return (TB ? unit / (BN / 16) : unit % (BN / 16)) & 7;
+}
+
+template <bool TA, bool TB, int BM, int BN, int BK, int WM, int WN,
+          int NUM_THREADS, int MINB>
+__global__ __launch_bounds__(NUM_THREADS, MINB) void gemm_mma(
+    int M, int N, int K, float alpha, const float *A, const float *B,
+    float beta, float *C) {
+    // No padding: the layout IS the fragment, so a fragment load is 32 lanes
+    // over 512 contiguous bytes and cannot conflict.
+    __shared__ float As[BM * BK];
+    __shared__ float Bs[BK * BN];
+
+    const int cRow = blockIdx.y * BM;
+    const int cCol = blockIdx.x * BN;
+    const int tid = threadIdx.x;
+    const int lane = tid % WARPSIZE;
+    const int warpIdx = tid / WARPSIZE;
+    const int warpCol = warpIdx % (BN / WN);
+    const int warpRow = warpIdx / (BN / WN);
+
+    constexpr int WMITER = WM / MMA_M;  // 16-row tiles this warp owns
+    constexpr int WNITER = WN / 16;     // 16-column (= 2 mma) units it owns
+
+    // Each operand reads along the contiguous axis of the layout it really
+    // has, so every global load stays coalesced in all four cases.
+    const int aRow = TA ? tid / (BM / 4) : tid / (BK / 4);
+    const int aCol = TA ? tid % (BM / 4) : tid % (BK / 4);
+    constexpr int aStride = TA ? NUM_THREADS / (BM / 4) : NUM_THREADS / (BK / 4);
+    constexpr int aIters = TA ? BK / aStride : BM / aStride;
+
+    const int bRow = TB ? tid / (BK / 4) : tid / (BN / 4);
+    const int bCol = TB ? tid % (BK / 4) : tid % (BN / 4);
+    constexpr int bStride = TB ? NUM_THREADS / (BK / 4) : NUM_THREADS / (BN / 4);
+    constexpr int bIters = TB ? BN / bStride : BK / bStride;
+
+    float acc[WMITER][WNITER][2][4] = {};
+
+    for (int k0 = 0; k0 < K; k0 += BK) {
+#pragma unroll
+        for (int it = 0; it < aIters; ++it) {
+            const int off = it * aStride;
+            // (m, k) of the FIRST of the four staged elements, and the axis
+            // the other three step along.
+            const int m = TA ? aCol * 4 : aRow + off;
+            const int k = TA ? aRow + off : aCol * 4;
+            const float4 v =
+                TA ? CVEC4(A[(size_t)(k0 + aRow + off) * M + cRow + aCol * 4])
+                   : CVEC4(A[(size_t)(cRow + aRow + off) * K + k0 + aCol * 4]);
+            const int unit = (k / MMA_K) * (BM / MMA_M) + m / MMA_M;
+            const int base =
+                unit * UNIT + (((k % MMA_K) / 4) * 2 + ((m % MMA_M) / 8));
+            const int slot = ((m % 8) * 4 + (k % 4)) ^ a_swz<BM, TA>(unit);
+            constexpr int S = TA ? 4 : 1;  // how the slot steps per element
+            As[base + ((slot ^ (0 * S)) * 4)] = v.x;
+            As[base + ((slot ^ (1 * S)) * 4)] = v.y;
+            As[base + ((slot ^ (2 * S)) * 4)] = v.z;
+            As[base + ((slot ^ (3 * S)) * 4)] = v.w;
+        }
+#pragma unroll
+        for (int it = 0; it < bIters; ++it) {
+            const int off = it * bStride;
+            const int k = TB ? bCol * 4 : bRow + off;
+            const int n = TB ? bRow + off : bCol * 4;
+            const float4 v =
+                TB ? CVEC4(B[(size_t)(cCol + bRow + off) * K + k0 + bCol * 4])
+                   : CVEC4(B[(size_t)(k0 + bRow + off) * N + cCol + bCol * 4]);
+            const int unit = (k / MMA_K) * (BN / 16) + n / 16;
+            const int base =
+                unit * UNIT + (((k % MMA_K) / 4) + ((n % 16) / 8) * 2);
+            const int slot = ((n % 8) * 4 + (k % 4)) ^ b_swz<BN, TB>(unit);
+            constexpr int S = TB ? 1 : 4;
+            Bs[base + ((slot ^ (0 * S)) * 4)] = v.x;
+            Bs[base + ((slot ^ (1 * S)) * 4)] = v.y;
+            Bs[base + ((slot ^ (2 * S)) * 4)] = v.z;
+            Bs[base + ((slot ^ (3 * S)) * 4)] = v.w;
+        }
+        __syncthreads();
+
+#pragma unroll
+        for (int kt = 0; kt < BK / MMA_K; ++kt) {
+            unsigned a[WMITER][4], b[WNITER][4];
+#pragma unroll
+            for (int i = 0; i < WMITER; ++i) {
+                const int unit = kt * (BM / MMA_M) + warpRow * WMITER + i;
+                const float4 v = CVEC4(
+                    As[unit * UNIT + (lane ^ a_swz<BM, TA>(unit)) * 4]);
+                a[i][0] = to_tf32(v.x);
+                a[i][1] = to_tf32(v.y);
+                a[i][2] = to_tf32(v.z);
+                a[i][3] = to_tf32(v.w);
+            }
+#pragma unroll
+            for (int j = 0; j < WNITER; ++j) {
+                const int unit = kt * (BN / 16) + warpCol * WNITER + j;
+                const float4 v = CVEC4(
+                    Bs[unit * UNIT + (lane ^ b_swz<BN, TB>(unit)) * 4]);
+                b[j][0] = to_tf32(v.x);
+                b[j][1] = to_tf32(v.y);
+                b[j][2] = to_tf32(v.z);
+                b[j][3] = to_tf32(v.w);
+            }
+#pragma unroll
+            for (int i = 0; i < WMITER; ++i)
+#pragma unroll
+                for (int j = 0; j < WNITER; ++j) {
+                    mma_m16n8k8(acc[i][j][0], a[i], &b[j][0]);
+                    mma_m16n8k8(acc[i][j][1], a[i], &b[j][2]);
+                }
+        }
+        __syncthreads();
+    }
+
+    // A lane's c0/c1 are adjacent columns, so the epilogue stores float2.
+    const int g = lane >> 2, t = lane & 3;
+#pragma unroll
+    for (int i = 0; i < WMITER; ++i) {
+#pragma unroll
+        for (int j = 0; j < WNITER; ++j) {
+#pragma unroll
+            for (int h = 0; h < 2; ++h) {
+                const int m0 = cRow + warpRow * WM + i * MMA_M;
+                const int n0 = cCol + warpCol * WN + j * 16 + h * MMA_N + t * 2;
+                float *p0 = &C[(size_t)(m0 + g) * N + n0];
+                float *p1 = &C[(size_t)(m0 + g + 8) * N + n0];
+                const float *r = acc[i][j][h];
+                float2 o0 = reinterpret_cast<float2 *>(p0)[0];
+                float2 o1 = reinterpret_cast<float2 *>(p1)[0];
+                o0.x = alpha * r[0] + beta * o0.x;
+                o0.y = alpha * r[1] + beta * o0.y;
+                o1.x = alpha * r[2] + beta * o1.x;
+                o1.y = alpha * r[3] + beta * o1.y;
+                reinterpret_cast<float2 *>(p0)[0] = o0;
+                reinterpret_cast<float2 *>(p1)[0] = o1;
+            }
+        }
+    }
+}
+
 // Tile parameters of the fast path, matching kernel 8.
 constexpr int FBM = 128, FBN = 128, FBK = 16;
 constexpr int FWM = 64, FWN = 64, FWNITER = 4;
 constexpr int FTM = 8, FTN = 4, FTHREADS = 128;
 
-// Tile parameters of the tensor-core path, matching kernel 9.
+// Tile parameters of the tensor-core path: kernel 10's instruction and layout,
+// but NOT kernel 10's tile. The ladder kernel uses a 64x64 warp tile in blocks
+// of 128 threads, which is worth 8.7% on a square N=4096 because it halves
+// shared-memory traffic per mma. In situ it LOSES, 1.034x against 1.044x, and
+// the reason is grid size: the model's GEMMs are 4096 x 384 x 384 and friends,
+// so a 128x128 block tile gives 96 blocks against 36 SMs. The machine is not
+// full, and a 128-thread block then brings half as many warps per SM to hide
+// latency with. The extra reuse is real and there is nothing to spend it on.
+//
+// So the best tile on a square benchmark is not the best tile in the model,
+// and both numbers are in the repo rather than just the flattering one.
 constexpr int TBM = 128, TBN = 128, TBK = 32;
-constexpr int TWM = 32, TWN = 64, TTHREADS = 256;
+constexpr int TWM = 32, TWN = 64, TTHREADS = 256, TMINB = 2;
 // Narrowing BN to 64 was tried, to cut the wave quantisation at N=384 where a
 // 128-wide tile leaves only three block columns and the second wave runs a
 // third full. It is worse everywhere -- 6144 -> 5644 GF/s at 4096x384x384 --
@@ -445,8 +658,13 @@ void dispatch(int M, int N, int K, float alpha, const float *A, const float *B,
     // misses it simply falls through to fp32 rather than to the slow path.
     if (g_tf32 && M % TBM == 0 && N % TBN == 0 && K % TBK == 0) {
         dim3 grid(N / TBN, M / TBM);
-        gemm_tc<TA, TB, TBM, TBN, TBK, TWM, TWN, TTHREADS>
+#ifdef GEMM_USE_WMMA
+        gemm_tc<TA, TB, TBM, TBN, TBK, 32, 64, 256>
+            <<<grid, 256, 0, stream>>>(M, N, K, alpha, A, B, beta, C);
+#else
+        gemm_mma<TA, TB, TBM, TBN, TBK, TWM, TWN, TTHREADS, TMINB>
             <<<grid, TTHREADS, 0, stream>>>(M, N, K, alpha, A, B, beta, C);
+#endif
     } else if (M % FBM == 0 && N % FBN == 0 && K % FBK == 0) {
         dim3 grid(N / FBN, M / FBM);
         gemm_fast<TA, TB, FBM, FBN, FBK, FWM, FWN, FWNITER, FTM, FTN, FTHREADS>
