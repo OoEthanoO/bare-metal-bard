@@ -19,7 +19,7 @@ OUT = sys.argv[2] if len(sys.argv) > 2 else "docs"
 # common colorblind confusion, and the ordering here is already carried by
 # position, so the hue only needs to show progression.
 RAMP = ["#b3543f", "#c07f3c", "#c9a63c", "#9aa845", "#6a9f5c", "#3f8f74",
-        "#2f7d8a", "#2f6f9a", "#5a5aa8"]
+        "#2f7d8a", "#2f6f9a", "#5a5aa8", "#7a4fa0"]
 CUBLAS = "#8a6fb0"
 FG, MUTED, GRID = "#2b2b2b", "#6b6b6b", "#d8d8d8"
 

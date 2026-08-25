@@ -1,7 +1,7 @@
 # A CUDA matmul, and a language model built on top of it
 
 A hand-written CUDA SGEMM taken from 1.2% of cuBLAS to **matching it in fp32**
-(95%) and **passing it with tensor cores** (117%), then used to train a GPT from
+(95%) and **passing it with tensor cores** (130%), then used to train a GPT from
 scratch — including a **fused FlashAttention-style kernel** that never
 materializes the score matrix, which doubled the context length this 8 GB card
 can train. No PyTorch, no cuBLAS, no cuDNN in the training path —
@@ -25,23 +25,25 @@ paranoia:
 | # | kernel | GFLOP/s | % of cuBLAS | what changed |
 |---|--------|--------:|------------:|--------------|
 | 1 | naive | 82.8 | 1.2% | one thread per output element |
-| 2 | coalesced | 648.0 | 9.2% | swapped which index maps to `threadIdx.x` |
-| 3 | smem | 814.7 | 11.5% | 32×32 shared-memory tile |
-| 4 | tile1d | 2600.3 | 36.8% | 8 outputs per thread |
-| 5 | tile2d | 5255.4 | 74.3% | 8×8 register tile (outer product) |
-| 6 | vectorized | 6244.1 | 88.3% | `float4` loads + transposed A tile |
-| 7 | warptile | 6398.9 | 90.5% | block → warp → thread blocking |
-| 8 | dbuffer | **6711.6** | **95.0%** | double-buffered SMEM, one barrier/chunk |
-| 9 | tensorcore | **8298.9** | **117.4%** | WMMA m16n16k8 TF32 tensor cores |
+| 2 | coalesced | 647.7 | 9.2% | swapped which index maps to `threadIdx.x` |
+| 3 | smem | 814.5 | 11.5% | 32×32 shared-memory tile |
+| 4 | tile1d | 2596.7 | 36.7% | 8 outputs per thread |
+| 5 | tile2d | 5262.2 | 74.4% | 8×8 register tile (outer product) |
+| 6 | vectorized | 6249.9 | 88.3% | `float4` loads + transposed A tile |
+| 7 | warptile | 6405.1 | 90.6% | block → warp → thread blocking |
+| 8 | dbuffer | **6711.2** | **95.0%** | double-buffered SMEM, one barrier/chunk |
+| 9 | tensorcore | 8323.6 | 117.6% | WMMA m16n16k8 TF32 tensor cores |
+| 10 | mma | **9215.8** | **130.3%** | raw `mma.sync` PTX, lane-major SMEM, 64×64 warp tile |
 
-**100× from first kernel to last.** Kernel 8 reaches 99.5% of cuBLAS at N=1024,
+**111× from first kernel to last.** Kernel 8 reaches 99.5% of cuBLAS at N=1024,
 and both top kernels do better still at sizes that divide the 128×128 block tile
 evenly, where no thread block is left partly idle: kernel 8 exceeds cuBLAS at
 N=1536 (104.0%) and N=6144 (104.2%), and kernel 9 reaches ~121% at both.
 
 These numbers were re-measured on the machine the GPU actually lives in. An
 earlier set, taken on a Linux box with CUDA 12.4, is in the git history, and all
-nine kernels reproduce across the two machines to within ~1%.
+nine kernels reproduce across the two machines to within ~1%. Kernel 10 was
+written after that move and exists only on this one.
 
 ### The tensor-core number, stated honestly
 
@@ -54,10 +56,11 @@ is not computing the same thing. Both comparisons, at N=4096:
 | cuBLAS, true fp32 (default) | 7069 | 100% | — |
 | cuBLAS, TF32 tensor cores | 10505 | 149% | 100% |
 | `dbuffer` (mine, fp32) | 6712 | 95.0% | 63.7% |
-| `tensorcore` (mine, TF32) | 8287 | 117.4% | 78.9% |
+| `tensorcore` (mine, WMMA TF32) | 8318 | 117.6% | 79.2% |
+| `mma` (mine, raw PTX TF32) | 9210 | 130.2% | 87.7% |
 
-So kernel 9 beats fp32 cuBLAS by 17% and trails cuBLAS's own tensor-core path
-by 21%. Quoting only the first would be the flattering half.
+So kernel 10 beats fp32 cuBLAS by 30% and trails cuBLAS's own tensor-core path
+by 12%. Quoting only the first would be the flattering half.
 
 TF32 is not free speed: it keeps fp32's 8-bit exponent but only 10 mantissa
 bits. Measured normwise error against an fp32 reference goes from **6.2e-08**
@@ -73,6 +76,142 @@ Reproduce the TF32 column with:
 
 ![scaling](docs/sgemm_scaling.svg)
 
+### Kernel 10: the hypothesis was wrong and the kernel got faster anyway
+
+Kernel 9 stopped 21% short of cuBLAS's own TF32 path, and five attempts to
+close that from the outside all made it slower — grouped block scheduling, a
+256×128 tile, `BK`=16, double buffering, rounding to TF32 at staging time. By
+elimination the README blamed the abstraction: WMMA fixes the fragment layout,
+so a fragment load is four separate 32-bit shared-memory reads, and raw
+`mma.sync` would let me lay shared memory out however the instruction wants it.
+That was a specific, falsifiable claim, so kernel 10 tests it.
+
+**Shared memory does not have to hold a matrix.** It only has to hold whatever
+makes the next read cheap. The `mma.m16n8k8` TF32 instruction requires each of
+the 32 lanes to hold four particular elements of A:
+
+```
+g = laneid >> 2,  t = laneid & 3
+a0 = (g, t)   a1 = (g+8, t)   a2 = (g, t+4)   a3 = (g+8, t+4)
+```
+
+In a row-major tile those four sit at four unrelated addresses. So kernel 10
+stores each 16×8 tile **lane-major** instead — lane `L`'s four elements at
+`L*4 .. L*4+3` — and the fragment load becomes one `LDS.128` at
+`base + laneid*16`, which is also the perfect shared-memory access pattern: 32
+lanes covering 512 contiguous bytes, no bank conflict possible.
+
+| per warp, per k-step of 8 | WMMA | kernel 10 |
+|---|---:|---:|
+| shared load instructions | 24 | **6** |
+| bytes read from shared | 3072 | 3072 |
+| `mma` issued | 16 | 16 |
+
+Four times fewer instructions to move exactly the same bytes. And that is a
+fair test, because it isolates the thing being blamed.
+
+**It bought 2.7%.** At kernel 9's own tile shape, 8540 against 8318 GF/s. The
+gap was never the abstraction. Instruction issue on the shared path was not the
+constraint, which means the bytes were — and WMMA moves exactly as many.
+
+#### Two things that went wrong on the way, both worth more than the result
+
+**A fragment layout is a fact to measure, not to recall.** I wrote the A
+register order from memory and got `a1` and `a2` swapped — that ordering is
+correct for the analogous f16 shape, but the TF32 shape concatenates two k4
+chunks instead of two row halves. The kernel compiled, ran at full speed, and
+returned garbage. Guessing produced a *silent* wrong answer, so
+[`scripts/probe.bat`](scripts/probe.bat) now runs a one-hot probe that
+discovers the mapping on the hardware: set one element of A to 1, make B the
+identity, see which lane and register light up.
+
+**Fewer instructions is worth nothing if the bytes arrive four at a time.** The
+first correct version ran 8% *slower* than the WMMA kernel it was meant to
+beat — on a layout whose entire justification was cheaper shared access. The
+lane-major store pattern is 8-way bank conflicted on A and 16-way on B, because
+a warp of staging threads varies only in bits the slot index scales by 4. The
+fix is an XOR swizzle: `slot ^= f(unit)`, where `f` depends only on which tile
+the element belongs to. Staging sees `f` vary across the warp and spreads out;
+a fragment load reads one whole tile per warp, so `f` is uniform there and the
+permutation is invisible. 8-way and 16-way become 2-way, and the load stays
+perfectly conflict-free.
+
+That is index arithmetic, not a hardware mystery, so it can be settled without
+a GPU — [`tools/smem_banks.py`](tools/smem_banks.py) derives both layouts,
+proves they are bijections, checks that a fragment load picks up exactly the
+elements `mma.m16n8k8` demands in exactly the right register slots, and
+simulates the bank pattern of every access:
+
+```
+                             no swizzle   swizzled
+A staging stores                     8x         2x
+B staging stores                    16x         2x
+A fragment loads                     1x         1x
+B fragment loads                     1x         1x
+```
+
+#### The actual win was somewhere else
+
+With the layout fixed, the tile sweep says what the kernel was really limited
+by. Let `B/mma` be bytes read from shared memory per `mma` issued — the reuse a
+warp gets out of what it loads:
+
+```
+bytes/mma = 4096 * (WM + WN) / (WM * WN)
+```
+
+At N=4096, clock pinned to 1200 MHz, median of three:
+
+| cfg | threads | WM×WN | B/mma | regs | spill | GF/s | |
+|---|---:|---|---:|---:|---:|---:|---|
+| 0 | 256 | 32×64 | 192 | 128 | 84 | 8540 | kernel 9's shape |
+| **1** | **128** | **64×64** | **128** | **255** | **4** | **9286** | **chosen** |
+| 7 | 128 | 32×128 | 160 | 255 | 4 | 9246 | |
+| 2 | 128 | 64×64 | 128 | 168 | 484 | 8698 | 3 blocks/SM |
+| 3 | 256 | 64×64 | 128 | 254 | 0 | 7838 | BN=256 |
+| 6 | 256 | 64×64 | 128 | 255 | 0 | 7832 | BM=256 |
+| 4 | 128 | 64×64 | 128 | 128 | 776 | 4433 | BK=16 |
+
+Config 0 → config 1 is the same instruction and the same layout with a warp
+tile twice as tall, and it is worth **8.7%** — three times what replacing WMMA
+with hand-written PTX was worth. **Shared-memory reuse was the constraint all
+along**, and reuse is a register-budget problem in disguise, since `bytes/mma`
+falls only when both warp-tile dimensions grow and the accumulator costs
+`WM*WN/32` registers per thread.
+
+So why couldn't kernel 9 do this? It tried: 128 threads at 64×64 is in its
+tuning table at 7783 GF/s, *slower* than the shape it settled on. WMMA at that
+warp tile needs 255 registers and spills; the hand-written version spills four
+bytes. **Raw PTX did matter — just indirectly, by making the tile affordable
+rather than by making the loads cheaper.** The stated hypothesis was wrong and
+the conclusion drawn from it was right, which is not the same thing as being
+right, and is why the sweep is in the repo.
+
+Configs 3 and 6 test the other lever — block-tile arithmetic intensity against
+DRAM — and lose 16%, exactly as they did on kernel 9. This kernel is not DRAM
+bound however much the DRAM counter looks like it.
+
+| | GF/s at N=4096 | vs cuBLAS TF32 |
+|---|---:|---:|
+| kernel 9, WMMA | 8318 | 79.2% |
+| kernel 10, raw `mma.sync`, same tile | 8540 | 81.3% |
+| kernel 10, 64×64 warp tile | **9210** | **87.7%** |
+
+Two things did *not* work and are recorded in
+[`k10_mma.cu`](src/kernels/k10_mma.cu) so they are not retried. `BK`=64
+overflows shared memory at this tile. And rounding to TF32 during staging —
+which replaces 96 `cvt` per thread per K-chunk with 32 — costs 4.4%, the same
+change that cost kernel 9 4.6% on a completely different loop structure. In the
+compute phase the conversions hide behind independent work; in the staging
+path, between a global load and a barrier, there is nothing to hide behind.
+Counting operations is not the same as counting time.
+
+```bash
+python3 tools/smem_banks.py      # layout proofs, no GPU needed
+scripts\probe.bat <file.cu>      # discover a fragment layout on the hardware
+scripts\sweep_k10.bat 4096       # the tile sweep above
+```
+
 ### The compiler optimized the thing it could see
 
 Kernel 9 was sitting at 8064 GF/s until a question about a version number: the
@@ -84,7 +223,8 @@ with both, same machine, same pinned clock, N=4096:
 | naive … dbuffer | — | — | agree within 1% |
 | tensorcore | **8064** | **6499** | **−19.4%** |
 
-Eight of nine kernels are indistinguishable. The tensor-core kernel loses a
+Eight of the nine kernels that existed then are indistinguishable. The
+tensor-core kernel loses a
 fifth of its throughput — three runs each, 8049/8051/8064 against
 6511/6505/6496 — at *identical* numerical error, so it is still genuinely TF32,
 just slower. `ptxas -v` gives the whole story in two lines:
@@ -704,7 +844,7 @@ around 1e-6, a real bug lands at 1e-1 or worse.
 
 ```
 src/
-  kernels/          the seven SGEMM stages, one file each, heavily commented
+  kernels/          the ten SGEMM stages, one file each, heavily commented
   gemm.cu           transpose-aware GEMM (NN/NT/TN/TT) built on kernel 7
   bgemm.cu          batched GEMM for attention
   nn.cu             layernorm, GELU, softmax+cross-entropy, AdamW, encoder
@@ -719,11 +859,15 @@ tools/
   test_grad.cu      directional-derivative gradient check
   device_query.cu   roofline numbers for this GPU
   merge_runs.py     median several sweeps, flag cells that disagree
+  smem_banks.py     proves kernel 10's shared layout, no GPU needed
   flash_memory.py   context-length memory sweep, fused vs unfused
   plot_results.py   CSV -> SVG charts
 scripts/
   gpu_clocks.sh     lock/unlock SM clock for reproducible benchmarks
+  gpu_clocks.bat    the same on Windows; self-elevates for the UAC prompt
   build.bat         Windows build (nvcc + MSVC), the Makefile's equivalent
+  probe.bat         build+run a one-off probe (used to find fragment layouts)
+  sweep_k10.bat     kernel 10's tile sweep, one compile per config
   profile_flash.bat ncu counters for the fused kernels; needs elevation
 ```
 
@@ -741,29 +885,18 @@ four scalar stores.
 
 ## What I'd do next
 
-1. **Raw `mma.sync`** instead of WMMA, and this is now the *only* candidate
-   left rather than a guess. Kernel 9 trails cuBLAS's own TF32 path by ~21%,
-   and four attempts to close it from the outside all failed, measured at
-   N=4096:
-
-   | attempt | result | |
-   |---|---:|---|
-   | grouped block scheduling | 8290 → 7677 | −7.4% |
-   | bigger tile, 256×128 | 8290 → 6930 | −16.4% |
-   | `BK` 32 → 16 | 8290 → 7899 | −4.7% |
-   | double buffering | 7899 → 7518 | −4.8% (both `BK`=16) |
-
-   `ncu` reads DRAM 64.6%, compute 36.9%, L2 hit 58%, occupancy 32.8% —
-   *neither* counter saturated, which is the latency signature kernel 7 had.
-   But unlike kernel 7 it does not respond to the cures. The bigger tile is the
-   informative failure: it lifts arithmetic intensity from 32 to 42.7
-   FLOP/byte, past the 43 ridge point, and made things 16% worse. So the kernel
-   is not bandwidth bound however much the DRAM counter looks like it, and
-   double buffering not helping says the latency is not on the global path
-   either. What is left is the abstraction: WMMA fixes the fragment layout and
-   forces a shared-memory round trip that `mma.sync` + `ldmatrix` would skip.
-2. **`cp.async`** for the staging copies, so kernel 8's prefetch bypasses
-   registers entirely rather than costing 32 of them per thread.
+1. ~~**Raw `mma.sync`** instead of WMMA~~ — [done](#kernel-10-the-hypothesis-was-wrong-and-the-kernel-got-faster-anyway),
+   and it was 8318 → 9210 GF/s, closing the gap to cuBLAS TF32 from 21% to 12%.
+   The hypothesis behind it was wrong, which is the interesting part: hand-
+   written PTX at kernel 9's own tile shape was worth only **2.7%**, and the
+   remaining 8% came from a wider warp tile that WMMA could not afford. See
+   below.
+2. **`cp.async`** for the staging copies. Kernel 10 stages through registers
+   into a scattered shared layout, four 32-bit stores per `float4`; `cp.async`
+   would write global→shared directly and free the 32 registers that staging
+   currently pins — and kernel 10 is now register-bound at 255, so those
+   registers are the binding constraint on the warp tile that mattered most.
+   This has gone from a tidy-up to the main event.
 3. ~~**Fuse attention** (FlashAttention-style)~~ — [done](#fused-attention-the-score-matrix-never-exists).
    Forward is 3.40x and activation memory is down 30%. The backward is only
    1.19x, `ncu` says shared-memory→register traffic, and the indicated cure —
