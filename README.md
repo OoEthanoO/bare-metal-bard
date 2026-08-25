@@ -520,12 +520,16 @@ Full 5000-step runs, same seed and configuration:
 |---|---:|---:|---:|---:|
 | fp32 | 75.1 ms | 54,516 | 1.5138 | 2400 |
 | TF32, WMMA | 67.6 ms | 60,568 | 1.5178 | 2800 |
-| TF32, `mma.sync` | **65.2 ms** | **62,824** | — | — |
+| TF32, `mma.sync` | 65.2 ms | 62,824 | — | — |
+| + fused bias, coalesced reduce | **59.9 ms** | **68,384** | — | — |
+
+The last two rows are 30-step timings on the same pinned clock rather than full
+5000-step runs; fp32 under the same changes is 70.1 ms.
 
 The validation losses differ by 0.004 nats. That is comfortably inside the
 run-to-run spread this setup shows from fp32 summation order alone — across
 configurations I have measured 1.5035, 1.5056, 1.5138, 1.5147, 1.5178 and
-1.5194 on the same data and seed. So the honest reading is that **TF32 buys 13%
+1.5194 on the same data and seed. So the honest reading is that **TF32 buys 15%
 of training time and costs nothing measurable in quality**, which is exactly
 why every framework defaults to it on Ampere and later.
 
@@ -575,6 +579,108 @@ layernorm backward makes 14 of 16 tensors fail.
 ---
 
 ---
+
+## What the profiler found that I never would have
+
+This repo had the tooling to profile a training step for two sessions before it
+ever ran one, because reading GPU performance counters needs administrator on
+Windows and it never seemed worth the interruption. It was worth the
+interruption. One click, thirty seconds, and it immediately said something I had
+not guessed — twice.
+
+TF32 path, four steps, shares only (`ncu` replays kernels to collect counters,
+so its absolute times are inflated and meaningless):
+
+| | before | after |
+|---|---:|---:|
+| GEMM | 62.4% | 64.9% |
+| attention backward | 14.4% | 15.7% |
+| **bias add / column reduce** | **8.2%** | **3.3%** |
+| GELU | 4.4% | 4.8% |
+| layernorm | 3.2% | 3.4% |
+| attention forward | 3.1% | 3.4% |
+| optimizer | 2.4% | 2.6% |
+| residual add | 1.2% | 1.3% |
+
+**67.7 → 59.9 ms per step, 11.5%**, across this session. Everything that grew as
+a share grew because the total shrank; in absolute terms the bias category fell
+2.7×, and the profile's own total fell 7.8% against 8.1% measured on the clock,
+which is a reasonable agreement for a replayed profile.
+
+A methodology note first, because the first profile was wrong and looked fine.
+`--eval 99999` still evaluated at step 0 and twice at the end, so a forward-only
+pass over 20 validation batches swamped a two-step profile. The tell is in the
+launch counts: forward kernels appearing 21× more often than their own backward
+kernels. If a profile shows that, it is measuring evaluation.
+
+### The bias add did not need to exist
+
+Second biggest thing in the step, and it is one add per element. As its own
+kernel it reads the entire output tensor and writes it back to do that. In the
+GEMM epilogue — which is already holding the value in a register, about to
+store it — the same add costs two floats per lane out of L1 and no global
+traffic at all.
+
+There is a reason it was a separate kernel, though, and it is not laziness.
+Adding a per-**column** value in an epilogue requires knowing which accumulator
+register holds which column, and that is exactly what WMMA's fragment type
+hides. Kernel 9 could not have done this. The raw-PTX kernel can, because the
+register mapping is the thing it was built around — so the abstraction that
+[turned out not to be the bottleneck](#kernel-10-the-hypothesis-was-wrong-and-the-kernel-got-faster-anyway)
+for arithmetic turned out to be a real constraint on what could be fused. That
+is a better argument for writing the PTX than the 2.7% was.
+
+While there: `beta == 0` now skips the *load* of C rather than multiplying it by
+zero. Every activation GEMM in the model passes `beta = 0`, so that load was a
+whole extra read pass over each output tensor.
+
+**65.2 → 62.0 ms.**
+
+### The column reduction read memory the wrong way round
+
+What was left in that category after fusing the forward was `bias_bwd_k`, at
+5.4% of a step, for an operation whose floor is a single streaming read.
+
+It ran **one block per column**, striding down the rows — under a comment of
+mine asserting the reads were coalesced *because consecutive blocks own
+consecutive columns*. They were not. Coalescing happens within a warp, and in
+that arrangement a warp's 32 threads read 32 different **rows** at the same
+column: 32 addresses `C` floats apart, so 32 separate transactions fetching 32
+bytes each to use 4.
+
+Neighbouring blocks do re-use those sectors out of L2, which is why it was bad
+rather than catastrophic — and why it survived. Nothing about the source looks
+wrong. It has the shape of a coalesced kernel and a comment explaining why it
+is one.
+
+The fix is the first thing anyone learns about CUDA. `threadIdx.x` walks
+columns, so a warp reads 32 consecutive floats of one row. `threadIdx.y` walks
+rows, and `gridDim.y` splits the rows again so narrow tensors still fill the
+machine — at C=384 the column axis alone is only 12 blocks against 36 SMs.
+Partials go to a workspace and are summed by a second kernel rather than
+atomically, because atomics would make the gradient depend on block scheduling
+order and this repo compares runs bit for bit.
+
+**62.0 → 59.9 ms**, gradient check still exact on all 16 tensors.
+
+### What I take from this
+
+The two biggest wins available in a step I had spent months optimizing were a
+pass that did not need to exist and a reduction that read memory backwards.
+Both were in code I wrote, read, and *commented*. Neither is subtle once seen,
+and I did not see either one — I spent the preceding sessions chasing 2–8%
+inside a matmul that was already at 88% of cuBLAS, because that was the part I
+found interesting.
+
+The profiler does not care what is interesting. That is the whole argument for
+running it before choosing what to optimize, and this project now has a
+three-for-three record of my intuitions losing to it.
+
+```bash
+scripts\profile_step.bat --tf32     # self-elevates; one UAC click
+python3 tools/step_profile.py bench/logs/step_ncu_tf32.csv
+```
+
 
 ## Fused attention: the score matrix never exists
 
@@ -950,7 +1056,11 @@ four scalar stores.
    currently pins — and kernel 10 is now register-bound at 255, so those
    registers are the binding constraint on the warp tile that mattered most.
    This has gone from a tidy-up to the main event.
-3. **The N=384 tail.** Every shape in the model where `mma.sync` gained nothing
+3. **The attention backward**, which the profile now puts at 15.7% of a step —
+   the largest single thing left after the matmuls. The cure and the one
+   unmeasured piece of it are in item 4 below; the profile has just promoted it
+   from "nice to have" to the next thing to do.
+4. **The N=384 tail.** Every shape in the model where `mma.sync` gained nothing
    is a shape whose grid is 1.33 waves. Neither a narrower tile (measured,
    worse everywhere) nor a better inner loop can fix a grid that leaves two
    thirds of the second wave empty; what can is **splitting K** so the same

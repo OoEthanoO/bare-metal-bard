@@ -735,6 +735,82 @@ __syncthreads()              <- and blocks again before overwriting`}</code>
       <p>Sampled from the best checkpoint at temperature 0.8:</p>
       <div className="sample">{t.sample}</div>
 
+      <h2>What the profiler found that I never would have</h2>
+      <p>
+        This repo had the tooling to profile a training step for two sessions before it ever ran
+        one, because reading GPU performance counters needs administrator on Windows and it never
+        seemed worth the interruption. It was worth the interruption. One click, thirty seconds,
+        and it said something I had not guessed &mdash; twice.
+      </p>
+      <div className="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>share of a training step</th>
+              <th className="n">before</th>
+              <th className="n">after</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>GEMM</td><td className="n">62.4%</td><td className="n">64.9%</td></tr>
+            <tr><td>attention backward</td><td className="n">14.4%</td><td className="n">15.7%</td></tr>
+            <tr className="hi"><td>bias add / column reduce</td><td className="n">8.2%</td><td className="n">3.3%</td></tr>
+            <tr><td>GELU</td><td className="n">4.4%</td><td className="n">4.8%</td></tr>
+            <tr><td>layernorm</td><td className="n">3.2%</td><td className="n">3.4%</td></tr>
+            <tr><td>attention forward</td><td className="n">3.1%</td><td className="n">3.4%</td></tr>
+            <tr><td>optimizer</td><td className="n">2.4%</td><td className="n">2.6%</td></tr>
+            <tr><td>residual add</td><td className="n">1.2%</td><td className="n">1.3%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        <strong>67.7 &rarr; 59.9 ms per step, 11.5%.</strong> Everything that grew as a share grew
+        because the total shrank.
+      </p>
+      <h3>The bias add did not need to exist</h3>
+      <p>
+        Second biggest thing in the step, for one add per element. As its own kernel it reads the
+        entire output tensor and writes it back to do that; in the GEMM epilogue &mdash; which is
+        already holding the value in a register, about to store it &mdash; the same add costs two
+        floats per lane out of L1 and no global traffic at all.
+      </p>
+      <p>
+        There is a reason it was a separate kernel, and it is not laziness. Adding a
+        per-<em>column</em> value in an epilogue requires knowing which accumulator register holds
+        which column, and that is exactly what WMMA&rsquo;s fragment type hides. Kernel 9 could not
+        have done this; the raw-PTX kernel can, because the register mapping is the thing it was
+        built around. <strong>The abstraction that turned out not to be the bottleneck for
+        arithmetic turned out to be a real constraint on what could be fused</strong> &mdash; a
+        better argument for writing the PTX than the 2.7% was.
+      </p>
+      <h3>The column reduction read memory the wrong way round</h3>
+      <p>
+        What was left after fusing the forward was the bias <em>backward</em>, at 5.4% of a step for
+        an operation whose floor is a single streaming read. It ran{' '}
+        <strong>one block per column</strong>, striding down the rows &mdash; under a comment of
+        mine asserting the reads were coalesced <em>because consecutive blocks own consecutive
+        columns</em>. They were not. Coalescing happens within a warp, and in that arrangement a
+        warp&rsquo;s 32 threads read 32 different <strong>rows</strong> at the same column: 32
+        addresses <code>C</code> floats apart, so 32 separate transactions fetching 32 bytes each to
+        use 4.
+      </p>
+      <p>
+        Neighbouring blocks do re-use those sectors out of L2, which is why it was bad rather than
+        catastrophic &mdash; and why it survived. Nothing about the source looks wrong. It has the
+        shape of a coalesced kernel and a comment explaining why it is one. The fix is the first
+        thing anyone learns about CUDA.
+      </p>
+      <div className="note">
+        <p style={{ margin: 0 }}>
+          The two biggest wins available in a step I had spent months optimizing were a pass that
+          did not need to exist and a reduction that read memory backwards. Both were in code I
+          wrote, read, and <em>commented</em>. Neither is subtle once seen, and I did not see either
+          one &mdash; I spent the preceding sessions chasing 2&ndash;8% inside a matmul that was
+          already at 88% of cuBLAS, because that was the part I found interesting. The profiler does
+          not care what is interesting.
+        </p>
+      </div>
+
       <h2>Fusing attention: the score matrix never exists</h2>
       <p>
         The table above says attention costs about 21% of a training step across three kernels.
