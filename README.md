@@ -766,11 +766,23 @@ four scalar stores.
    registers entirely rather than costing 32 of them per thread.
 3. ~~**Fuse attention** (FlashAttention-style)~~ — [done](#fused-attention-the-score-matrix-never-exists).
    Forward is 3.40x and activation memory is down 30%. The backward is only
-   1.19x and the profiler says why: shared-memory→register traffic, kernel 6's
-   problem at a different level. **Chunk the head dimension** the way a GEMM
-   chunks K, so that bigger register tiles and more blocks per SM stop
-   competing for the same shared memory. DRAM sits at 21%, so there is
-   bandwidth to pay for the re-staging.
+   1.19x, `ncu` says shared-memory→register traffic, and the indicated cure —
+   a bigger register tile — is **already in the config table and loses**:
+
+   | config | shared loads/FMA | blocks/SM | time |
+   |---|---:|---:|---:|
+   | 5 (default) | 0.75 | 2 | **1.61 ms** |
+   | 6 | 0.50 | 1 | 2.01 ms |
+
+   A third less shared-memory work per unit of arithmetic, 25% slower, because
+   the wider key tile costs the second resident block. Every arrangement that
+   improves the ratio spends shared memory to get it, so on this kernel the
+   block count is worth more — the opposite of what the identical counter
+   reading meant for kernel 7. A profile says which resource is saturated, not
+   which change is affordable. Getting both would need the head dimension
+   chunked so the tile and the block count stop competing, and the re-staging
+   that costs (K and V restaged once per query block) is the part that has not
+   been measured.
 4. **Multi-GPU** — started, and the first measurements are in
    [`bench/logs/multigpu_a40.txt`](bench/logs/multigpu_a40.txt). A ring
    all-reduce written from scratch (no NCCL), data-parallel training behind
