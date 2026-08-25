@@ -8,6 +8,7 @@
 // shuffle network does not pay the L1/MIO cost that shared memory does -- the
 // exact cost that was throttling GEMM kernel 6.
 #include "nn.h"
+#include "gelu.cuh"
 #include "reduce.cuh"
 #include <cstdio>
 #include <cmath>
@@ -115,10 +116,7 @@ __global__ void layernorm_bwd_k(float *dinp, float *dweight, float *dbias,
 // --------------------------------------------------------------------- gelu
 // GPT-2's tanh approximation, kept exactly because the model is compared
 // against reference implementations that use it.
-__device__ __forceinline__ float gelu_scalar(float x) {
-    const float s = 0.7978845608028654f;  // sqrt(2/pi)
-    return 0.5f * x * (1.0f + tanhf(s * (x + 0.044715f * x * x * x)));
-}
+
 
 __global__ void gelu_fwd_k(float *out, const float *inp, int n4) {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -129,14 +127,7 @@ __global__ void gelu_fwd_k(float *out, const float *inp, int n4) {
     VEC4(out[i * 4]) = v;
 }
 
-__device__ __forceinline__ float dgelu_scalar(float x, float g) {
-    const float s = 0.7978845608028654f;
-    const float inner = s * (x + 0.044715f * x * x * x);
-    const float t = tanhf(inner);
-    const float sech2 = 1.0f - t * t;
-    const float dinner = s * (1.0f + 3.0f * 0.044715f * x * x);
-    return g * (0.5f * (1.0f + t) + 0.5f * x * sech2 * dinner);
-}
+
 
 __global__ void gelu_bwd_k(float *dinp, const float *inp, const float *dout, int n4) {
     const int i = blockIdx.x * blockDim.x + threadIdx.x;

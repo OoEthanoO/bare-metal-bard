@@ -46,4 +46,11 @@ call "%NCU%" --csv --metrics gpu__time_duration.sum --target-processes all ^
   bench\train_gpt.exe -n 4 %~1 --eval 0 --eval-batches 0 --sample 99999 --len 0 ^
   > bench\logs\step_ncu_%TAG%.csv 2>&1
 
+REM ncu resets the application clock when it detaches, which silently unpins a
+REM clock locked earlier -- and an unpinned clock made a 1.8%% change measure as
+REM 37%% in this repo before the profile itself disagreed and gave it away. We
+REM are already elevated here, so put it back.
+nvidia-smi -lgc 1200,1200 >nul 2>&1
+nvidia-smi --query-gpu=clocks.sm --format=csv,noheader
+
 echo wrote bench\logs\step_ncu_%TAG%.csv

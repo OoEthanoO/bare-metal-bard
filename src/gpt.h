@@ -29,10 +29,10 @@ struct Parameters {
 struct Activations {
     float *encoded;
     float *ln1, *ln1_mean, *ln1_rstd;
-    float *qkv, *qkvr, *att, *atty, *attproj;
+    float *qkv, *qkvr, *att, *atty;
     float *lse;  // fused path: (B, NH, T) log-sum-exp, replaces att entirely
     float *residual2, *ln2, *ln2_mean, *ln2_rstd;
-    float *fch, *fch_gelu, *fcproj, *residual3;
+    float *fch, *fch_gelu, *residual3;
     float *lnf, *lnf_mean, *lnf_rstd;
     float *logits, *probs, *losses;
 };

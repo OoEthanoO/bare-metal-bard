@@ -20,6 +20,7 @@
 // transpose costs only the choice between a vector store and four scalar
 // stores into shared memory.
 #include "gemm.h"
+#include "gelu.cuh"
 #include <mma.h>
 #include <type_traits>
 
@@ -33,12 +34,22 @@ using namespace nvcuda;
 namespace {
 constexpr int WARPSIZE = 32;
 
+// Which epilogue features a given instantiation compiles in. This is a
+// TEMPLATE parameter rather than a runtime check on the pointers, and that is
+// not premature tidiness: with runtime `if (ep.gelu_out)`, the tanh expansion
+// sits in every GEMM whether it is used or not, and the fp32 kernel measured
+// 6% slower for carrying code it never executed. `if constexpr` makes the
+// unused branches -- and their instruction footprint -- actually disappear.
+namespace epi {
+constexpr int BIAS = 1, ADD = 2, GELU = 4;
+}
+
 // ---------------------------------------------------------------- fast path
 template <bool TA, bool TB, int BM, int BN, int BK, int WM, int WN, int WNITER,
-          int TM, int TN, int NUM_THREADS>
+          int TM, int TN, int NUM_THREADS, int EPI>
 __global__ __launch_bounds__(NUM_THREADS) void gemm_fast(
     int M, int N, int K, float alpha, const float *A, const float *B,
-    float beta, float *C, const float *bias) {
+    float beta, float *C, GemmEpilogue ep) {
     // Double buffered, exactly as kernel 8 is. This GEMM was written against
     // the kernel-7 structure and kernel 8 arrived afterwards, so the model
     // never got the prefetch -- and measured at the shapes the model actually
@@ -221,12 +232,22 @@ __global__ __launch_bounds__(NUM_THREADS) void gemm_fast(
                     float4 old = (beta != 0.0f) ? CVEC4(C[r * N + c])
                                                 : make_float4(0, 0, 0, 0);
                     float4 bv = make_float4(0, 0, 0, 0);
-                    if (bias) bv = CVEC4(bias[c]);
+                    if constexpr (EPI & epi::BIAS) bv = CVEC4(ep.bias[c]);
+                    if constexpr (EPI & epi::ADD) {
+                        const float4 av = CVEC4(ep.add[r * N + c]);
+                        bv.x += av.x; bv.y += av.y; bv.z += av.z; bv.w += av.w;
+                    }
                     old.x = alpha * acc[wSubRow * TM + i][wSubCol * TN + j + 0] + beta * old.x + bv.x;
                     old.y = alpha * acc[wSubRow * TM + i][wSubCol * TN + j + 1] + beta * old.y + bv.y;
                     old.z = alpha * acc[wSubRow * TM + i][wSubCol * TN + j + 2] + beta * old.z + bv.z;
                     old.w = alpha * acc[wSubRow * TM + i][wSubCol * TN + j + 3] + beta * old.w + bv.w;
                     VEC4(C[r * N + c]) = old;
+                    if constexpr (EPI & epi::GELU) {
+                        float4 gv;
+                        gv.x = gelu_scalar(old.x); gv.y = gelu_scalar(old.y);
+                        gv.z = gelu_scalar(old.z); gv.w = gelu_scalar(old.w);
+                        VEC4(ep.gelu_out[r * N + c]) = gv;
+                    }
                 }
             }
 }
@@ -394,10 +415,10 @@ __global__ __launch_bounds__(NUM_THREADS, 2) void gemm_tc(
 // Guarded, scalar, handles any M/N/K and any transpose combination. Used for
 // ragged shapes (e.g. an unpadded vocabulary). Correctness first; the fast
 // path is what the hot shapes are aligned to hit.
-template <bool TA, bool TB, int BS>
+template <bool TA, bool TB, int BS, int EPI>
 __global__ void gemm_generic(int M, int N, int K, float alpha, const float *A,
                              const float *B, float beta, float *C,
-                             const float *bias) {
+                             GemmEpilogue ep) {
     __shared__ float As[BS][BS];
     __shared__ float Bs[BS][BS + 1];  // +1 breaks the bank conflict on Bs[k][.]
 
@@ -423,7 +444,11 @@ __global__ void gemm_generic(int M, int N, int K, float alpha, const float *A,
     if (cRow + row < M && cCol + col < N) {
         const size_t idx = (size_t)(cRow + row) * N + cCol + col;
         const float old = (beta != 0.0f) ? C[idx] : 0.0f;
-        C[idx] = alpha * acc + beta * old + (bias ? bias[cCol + col] : 0.0f);
+        float y = alpha * acc + beta * old;
+        if constexpr (EPI & epi::BIAS) y += ep.bias[cCol + col];
+        if constexpr (EPI & epi::ADD) y += ep.add[idx];
+        C[idx] = y;
+        if constexpr (EPI & epi::GELU) ep.gelu_out[idx] = gelu_scalar(y);
     }
 }
 
@@ -495,10 +520,10 @@ __device__ __forceinline__ int b_swz(int unit) {
 }
 
 template <bool TA, bool TB, int BM, int BN, int BK, int WM, int WN,
-          int NUM_THREADS, int MINB>
+          int NUM_THREADS, int MINB, int EPI>
 __global__ __launch_bounds__(NUM_THREADS, MINB) void gemm_mma(
     int M, int N, int K, float alpha, const float *A, const float *B,
-    float beta, float *C, const float *bias) {
+    float beta, float *C, GemmEpilogue ep) {
     // No padding: the layout IS the fragment, so a fragment load is 32 lanes
     // over 512 contiguous bytes and cannot conflict.
     __shared__ float As[BM * BK];
@@ -632,13 +657,32 @@ __global__ __launch_bounds__(NUM_THREADS, MINB) void gemm_mma(
                 // register holds which column, which is exactly what the
                 // fragment abstraction hides.
                 float2 bv = {0.0f, 0.0f};
-                if (bias) bv = reinterpret_cast<const float2 *>(&bias[n0])[0];
-                o0.x = alpha * r[0] + beta * o0.x + bv.x;
-                o0.y = alpha * r[1] + beta * o0.y + bv.y;
-                o1.x = alpha * r[2] + beta * o1.x + bv.x;
-                o1.y = alpha * r[3] + beta * o1.y + bv.y;
+                if constexpr (EPI & epi::BIAS)
+                    bv = reinterpret_cast<const float2 *>(&ep.bias[n0])[0];
+                // The residual is a whole tensor, so unlike the bias it costs
+                // a real read -- but it replaces a kernel that read TWO
+                // tensors and wrote a third.
+                float2 a0v = {0.0f, 0.0f}, a1v = {0.0f, 0.0f};
+                if constexpr (EPI & epi::ADD) {
+                    const size_t i0 = (size_t)(m0 + g) * N + n0;
+                    const size_t i1 = (size_t)(m0 + g + 8) * N + n0;
+                    a0v = reinterpret_cast<const float2 *>(&ep.add[i0])[0];
+                    a1v = reinterpret_cast<const float2 *>(&ep.add[i1])[0];
+                }
+                o0.x = alpha * r[0] + beta * o0.x + bv.x + a0v.x;
+                o0.y = alpha * r[1] + beta * o0.y + bv.y + a0v.y;
+                o1.x = alpha * r[2] + beta * o1.x + bv.x + a1v.x;
+                o1.y = alpha * r[3] + beta * o1.y + bv.y + a1v.y;
                 reinterpret_cast<float2 *>(p0)[0] = o0;
                 reinterpret_cast<float2 *>(p1)[0] = o1;
+                if constexpr (EPI & epi::GELU) {
+                    const size_t i0 = (size_t)(m0 + g) * N + n0;
+                    const size_t i1 = (size_t)(m0 + g + 8) * N + n0;
+                    float2 g0 = {gelu_scalar(o0.x), gelu_scalar(o0.y)};
+                    float2 g1 = {gelu_scalar(o1.x), gelu_scalar(o1.y)};
+                    reinterpret_cast<float2 *>(&ep.gelu_out[i0])[0] = g0;
+                    reinterpret_cast<float2 *>(&ep.gelu_out[i1])[0] = g1;
+                }
             }
         }
     }
@@ -676,14 +720,20 @@ static bool g_tf32 = false;
 // Only reached by the GEMM_USE_WMMA comparison build. gemm_tc cannot fuse a
 // column bias -- see the note in gemm_mma's epilogue -- so that build pays for
 // it the old way, with a separate pass, which is what it is there to represent.
-__global__ void bias_only_k(float *C, const float *bias, int N, size_t total) {
+__global__ void epilogue_only_k(float *C, GemmEpilogue ep, int N, size_t total) {
     const size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < total) C[i] += bias[i % (unsigned)N];
+    if (i >= total) return;
+    float y = C[i];
+    if (ep.bias) y += ep.bias[i % (unsigned)N];
+    if (ep.add) y += ep.add[i];
+    C[i] = y;
+    if (ep.gelu_out) ep.gelu_out[i] = gelu_scalar(y);
 }
 
-template <bool TA, bool TB>
-void dispatch(int M, int N, int K, float alpha, const float *A, const float *B,
-              float beta, float *C, cudaStream_t stream, const float *bias) {
+template <bool TA, bool TB, int EPI>
+void dispatch_epi(int M, int N, int K, float alpha, const float *A,
+                  const float *B, float beta, float *C, cudaStream_t stream,
+                  GemmEpilogue ep) {
     // Tensor cores when asked for and the shape lines up. BK is 32 here, not
     // the fp32 path's 16, so the alignment test is stricter and a shape that
     // misses it simply falls through to fp32 rather than to the slow path.
@@ -692,35 +742,57 @@ void dispatch(int M, int N, int K, float alpha, const float *A, const float *B,
 #ifdef GEMM_USE_WMMA
         gemm_tc<TA, TB, TBM, TBN, TBK, 32, 64, 256>
             <<<grid, 256, 0, stream>>>(M, N, K, alpha, A, B, beta, C);
-        if (bias) {
+        if (ep.bias || ep.add || ep.gelu_out) {
             const size_t total = (size_t)M * N;
-            bias_only_k<<<(unsigned)((total + 255) / 256), 256, 0, stream>>>(
-                C, bias, N, total);
+            epilogue_only_k<<<(unsigned)((total + 255) / 256), 256, 0, stream>>>(
+                C, ep, N, total);
         }
 #else
-        gemm_mma<TA, TB, TBM, TBN, TBK, TWM, TWN, TTHREADS, TMINB>
-            <<<grid, TTHREADS, 0, stream>>>(M, N, K, alpha, A, B, beta, C, bias);
+        gemm_mma<TA, TB, TBM, TBN, TBK, TWM, TWN, TTHREADS, TMINB, EPI>
+            <<<grid, TTHREADS, 0, stream>>>(M, N, K, alpha, A, B, beta, C, ep);
 #endif
     } else if (M % FBM == 0 && N % FBN == 0 && K % FBK == 0) {
         dim3 grid(N / FBN, M / FBM);
-        gemm_fast<TA, TB, FBM, FBN, FBK, FWM, FWN, FWNITER, FTM, FTN, FTHREADS>
-            <<<grid, FTHREADS, 0, stream>>>(M, N, K, alpha, A, B, beta, C, bias);
+        gemm_fast<TA, TB, FBM, FBN, FBK, FWM, FWN, FWNITER, FTM, FTN, FTHREADS, EPI>
+            <<<grid, FTHREADS, 0, stream>>>(M, N, K, alpha, A, B, beta, C, ep);
     } else {
         constexpr int BS = 16;
         dim3 block(BS, BS);
         dim3 grid((N + BS - 1) / BS, (M + BS - 1) / BS);
-        gemm_generic<TA, TB, BS><<<grid, block, 0, stream>>>(M, N, K, alpha, A, B, beta, C, bias);
+        gemm_generic<TA, TB, BS, EPI><<<grid, block, 0, stream>>>(M, N, K, alpha, A, B, beta, C, ep);
     }
+}
+
+// All eight combinations are instantiated. Seven is not enough: an EPI mask
+// that claims a feature the caller did not supply would dereference a null
+// pointer, so the mask must always describe the pointers exactly.
+template <bool TA, bool TB>
+void dispatch(int M, int N, int K, float alpha, const float *A, const float *B,
+              float beta, float *C, cudaStream_t stream, GemmEpilogue ep) {
+    const int e = (ep.bias ? epi::BIAS : 0) | (ep.add ? epi::ADD : 0) |
+                  (ep.gelu_out ? epi::GELU : 0);
+#define CASE(m)                                                                    case (m):                                                                          dispatch_epi<TA, TB, (m)>(M, N, K, alpha, A, B, beta, C, stream, ep);          break;
+    switch (e) {
+        CASE(0)
+        CASE(epi::BIAS)
+        CASE(epi::ADD)
+        CASE(epi::GELU)
+        CASE(epi::BIAS | epi::ADD)
+        CASE(epi::BIAS | epi::GELU)
+        CASE(epi::ADD | epi::GELU)
+        CASE(epi::BIAS | epi::ADD | epi::GELU)
+    }
+#undef CASE
 }
 }  // namespace
 
 void gemm(bool transA, bool transB, int M, int N, int K, float alpha,
           const float *A, const float *B, float beta, float *C,
-          cudaStream_t stream, const float *bias) {
-    if (!transA && !transB)      dispatch<false, false>(M, N, K, alpha, A, B, beta, C, stream, bias);
-    else if (!transA && transB)  dispatch<false, true >(M, N, K, alpha, A, B, beta, C, stream, bias);
-    else if (transA && !transB)  dispatch<true,  false>(M, N, K, alpha, A, B, beta, C, stream, bias);
-    else                         dispatch<true,  true >(M, N, K, alpha, A, B, beta, C, stream, bias);
+          cudaStream_t stream, GemmEpilogue ep) {
+    if (!transA && !transB)      dispatch<false, false>(M, N, K, alpha, A, B, beta, C, stream, ep);
+    else if (!transA && transB)  dispatch<false, true >(M, N, K, alpha, A, B, beta, C, stream, ep);
+    else if (transA && !transB)  dispatch<true,  false>(M, N, K, alpha, A, B, beta, C, stream, ep);
+    else                         dispatch<true,  true >(M, N, K, alpha, A, B, beta, C, stream, ep);
 }
 
 void gemm_set_tf32(bool on) { g_tf32 = on; }

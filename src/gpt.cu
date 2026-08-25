@@ -109,13 +109,11 @@ void gpt_alloc(GPT &g) {
                            + s.BT3C    // qkv
                            + attn_mem  // qkvr + att, or just lse
                            + s.BTC     // atty
-                           + s.BTC     // attproj
                            + s.BTC     // residual2
                            + s.BTC     // ln2
                            + s.BT * 2  // ln2_mean, ln2_rstd
                            + s.BT4C    // fch
                            + s.BT4C    // fch_gelu
-                           + s.BTC     // fcproj
                            + s.BTC;    // residual3
     const size_t global = s.BTC        // encoded
                         + s.BTC        // lnf
@@ -136,14 +134,12 @@ void gpt_alloc(GPT &g) {
     g.acts.att       = g.use_flash ? nullptr : take(s.BTNHTT * L);
     g.acts.lse       = g.use_flash ? take(s.lse * L) : nullptr;
     g.acts.atty      = take(s.BTC * L);
-    g.acts.attproj   = take(s.BTC * L);
     g.acts.residual2 = take(s.BTC * L);
     g.acts.ln2       = take(s.BTC * L);
     g.acts.ln2_mean  = take(s.BT * L);
     g.acts.ln2_rstd  = take(s.BT * L);
     g.acts.fch       = take(s.BT4C * L);
     g.acts.fch_gelu  = take(s.BT4C * L);
-    g.acts.fcproj    = take(s.BTC * L);
     g.acts.residual3 = take(s.BTC * L);
     g.acts.lnf       = take(s.BTC);
     g.acts.lnf_mean  = take(s.BT);
@@ -246,11 +242,11 @@ float gpt_forward(GPT &g, const int *tokens, const int *targets) {
         float *ln1_mean = a.ln1_mean + l * s.BT, *ln1_rstd = a.ln1_rstd + l * s.BT;
         float *qkv = a.qkv + l * s.BT3C, *qkvr = a.qkvr + l * s.qkvr;
         float *att = a.att + l * s.BTNHTT, *atty = a.atty + l * s.BTC;
-        float *attproj = a.attproj + l * s.BTC, *residual2 = a.residual2 + l * s.BTC;
+        float *residual2 = a.residual2 + l * s.BTC;
         float *ln2 = a.ln2 + l * s.BTC;
         float *ln2_mean = a.ln2_mean + l * s.BT, *ln2_rstd = a.ln2_rstd + l * s.BT;
         float *fch = a.fch + l * s.BT4C, *fch_gelu = a.fch_gelu + l * s.BT4C;
-        float *fcproj = a.fcproj + l * s.BTC, *residual3 = a.residual3 + l * s.BTC;
+        float *residual3 = a.residual3 + l * s.BTC;
 
         const float *ln1w = p.ln1w + l * C, *ln1b = p.ln1b + l * C;
         const float *qkvw = p.qkvw + (size_t)l * 3 * C * C, *qkvb = p.qkvb + l * 3 * C;
@@ -261,22 +257,29 @@ float gpt_forward(GPT &g, const int *tokens, const int *targets) {
 
         layernorm_forward(ln1, ln1_mean, ln1_rstd, residual, ln1w, ln1b, N, C);
         // Weights are (out, in), so every forward matmul is the transB case.
-        // The bias rides in the GEMM epilogue. As its own kernel it read and
-        // wrote the whole (N, 3C) tensor to do one add per element, and the
-        // profile put all four of these together at 8.2% of a training step.
-        gemm(false, true, N, 3 * C, C, 1.0f, ln1, qkvw, 0.0f, qkv, 0, qkvb);
+        // Everything that can ride in the GEMM epilogue does. As separate
+        // kernels the bias, the residual add and GELU each read and write a
+        // whole activation tensor to do one operation per element, and the
+        // step profile had them at 8.2%, 1.3% and 4.8%.
+        gemm(false, true, N, 3 * C, C, 1.0f, ln1, qkvw, 0.0f, qkv, 0, {qkvb});
         if (g.use_flash)
             flash_attention_forward(atty, a.lse + l * s.lse, qkv, B, T, C, NH);
         else
             attention_forward(atty, qkvr, att, qkv, B, T, C, NH);
-        gemm(false, true, N, C, C, 1.0f, atty, apw, 0.0f, attproj, 0, apb);
-        residual_forward(residual2, residual, attproj, N * C);
+        // residual2 = attn_proj(atty) + bias + residual, in one pass. The
+        // `attproj` tensor it used to land in is never read again -- not even
+        // by the backward, which needs only d(residual2) -- so it is gone.
+        gemm(false, true, N, C, C, 1.0f, atty, apw, 0.0f, residual2, 0,
+             {apb, residual});
 
         layernorm_forward(ln2, ln2_mean, ln2_rstd, residual2, ln2w, ln2b, N, C);
-        gemm(false, true, N, 4 * C, C, 1.0f, ln2, fcw, 0.0f, fch, 0, fcb);
-        gelu_forward(fch_gelu, fch, N * 4 * C);
-        gemm(false, true, N, C, 4 * C, 1.0f, fch_gelu, fpw, 0.0f, fcproj, 0, fpb);
-        residual_forward(residual3, residual2, fcproj, N * C);
+        // Both fch and fch_gelu are written from the epilogue: the backward
+        // needs the pre-activation to differentiate GELU, so this saves the
+        // READ of fch rather than the write -- 25 MB per layer at this size.
+        gemm(false, true, N, 4 * C, C, 1.0f, ln2, fcw, 0.0f, fch, 0,
+             {fcb, nullptr, fch_gelu});
+        gemm(false, true, N, C, 4 * C, 1.0f, fch_gelu, fpw, 0.0f, residual3, 0,
+             {fpb, residual2});
 
         residual = residual3;
     }
