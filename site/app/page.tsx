@@ -778,6 +778,113 @@ O' = O * exp(m - m') + exp(S_j - m') @ V_j`}</code>
         </p>
       </div>
 
+      <h2>Two GPUs, and the lesson that turned out to be wrong</h2>
+      <p>
+        The received wisdom about multi-GPU training is that communication becomes the bottleneck.
+        Split the work across two cards and the interconnect, not the arithmetic, is what limits
+        you. I rented two A40s to see it happen.
+      </p>
+      <p>
+        First, the collective itself. No NCCL — for the same reason there is no cuBLAS here. A ring
+        all-reduce splits the gradient buffer into <em>n</em> chunks and runs two phases of{' '}
+        <em>n−1</em> steps, reduce-scatter then all-gather, with every device sending and receiving
+        at once. Each device moves <code>2(n−1)/n · S</code> bytes, which stops growing with{' '}
+        <em>n</em>, and every link stays busy. That is why bandwidth-optimal collectives are rings.
+      </p>
+
+      <h3>The driver said peer-to-peer worked. It did not.</h3>
+      <p>
+        <code>cudaDeviceCanAccessPeer</code> returned true both directions.{' '}
+        <code>cudaDeviceEnablePeerAccess</code> succeeded. Every <code>cudaMemcpyPeerAsync</code>{' '}
+        returned success, every stream synchronise returned success — and the bytes never arrived.
+        PCIe ACS or IOMMU misconfiguration on a virtualised host, which is most rented hardware.
+      </p>
+      <p>
+        It failed <em>silently</em>. The all-reduce reported error exactly 1.00 — the result was
+        exactly zero — at 0.2 GB/s. And before the test caught it, the training log had already
+        said so in a way I nearly missed: one rank reported a gradient norm of{' '}
+        <strong>15.023</strong>, two ranks reported <strong>7.672</strong>. Exactly half, because
+        each rank kept its own shard&rsquo;s gradient and then divided by the rank count. No sum
+        ever happened, and the loss curve looked entirely reasonable while it did not.
+      </p>
+      <div className="note">
+        <p style={{ margin: 0 }}>
+          So <code>ddp_init</code> now sends four bytes across every enabled pair and reads them
+          back before trusting the flag, falling back to host staging for any pair that fails.{' '}
+          <strong>A capability bit is a claim, not a measurement.</strong> With staging the
+          collective is correct: 43 MB in 8.65 ms, 5.0 GB/s — a round trip through host memory,
+          roughly a quarter of what the gen4 x16 link should manage directly.
+        </p>
+      </div>
+
+      <h3>Communication was 6%. Two GPUs were still slower than one.</h3>
+      <div className="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th className="n">ranks</th>
+              <th className="n">global batch</th>
+              <th className="n">per GPU</th>
+              <th className="n">step</th>
+              <th className="n">tokens/s</th>
+              <th className="n">comm</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td className="n">1</td>
+              <td className="n">16</td>
+              <td className="n">16</td>
+              <td className="n">40.9 ms</td>
+              <td className="n">100,206</td>
+              <td className="n">—</td>
+            </tr>
+            <tr>
+              <td className="n">1</td>
+              <td className="n">32</td>
+              <td className="n">32</td>
+              <td className="n">77.5 ms</td>
+              <td className="n">105,707</td>
+              <td className="n">—</td>
+            </tr>
+            <tr className="hi">
+              <td className="n">2</td>
+              <td className="n">32</td>
+              <td className="n">16</td>
+              <td className="n">149.1 ms</td>
+              <td className="n">54,951</td>
+              <td className="n">8.9 ms (6.0%)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        Two A40s deliver roughly <strong>half</strong> the throughput of one, and the interconnect
+        accounts for six percent of it. The wire is not the problem. The host loop is: one process
+        driving both devices, with blocking calls inside the step, so the two GPUs barely overlap.
+        Giving each rank its own thread — CUDA&rsquo;s current device is per-thread — moved it from
+        159 to 149 ms. Real, and nowhere near the ~85 ms two genuinely overlapped ranks should
+        reach.
+      </p>
+      <p>
+        Chasing that further turned up a bug worth the trip on its own. The loss reduction cached
+        its output scalar in a <code>static</code> device pointer, so every rank got the same
+        pointer, allocated on whichever device called first — one rank reducing into another
+        rank&rsquo;s memory, both racing to read one scalar. It produced plausible losses the whole
+        time.
+      </p>
+      <div className="note">
+        <p style={{ margin: 0 }}>
+          I went looking for the communication wall and found a scheduling problem wearing its
+          coat. That is worth more than confirming the slogan would have been:{' '}
+          <strong>&ldquo;communication is the bottleneck&rdquo; is a claim about a ratio</strong>,
+          and at 10.8M parameters on two cards the ratio is not what the slogan assumes. Knowing
+          which side of it you are on requires measuring both — and the measurement said the
+          collective was cheap and correct while my orchestration was neither. Full log:{' '}
+          <code>bench/logs/multigpu_a40.txt</code>.
+        </p>
+      </div>
+
       <h2>What I&rsquo;d do next</h2>
       <ol>
         <li>
