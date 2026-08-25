@@ -778,6 +778,195 @@ O' = O * exp(m - m') + exp(S_j - m') @ V_j`}</code>
         </p>
       </div>
 
+      <h2>Twenty percent that was hiding behind a square benchmark</h2>
+      <p>
+        The benchmark above measures square matrices. The model does not run square matrices — its
+        matmuls are 4096×384×384, 4096×1536×384, 384×384×4096. I had written that sentence in the
+        README months earlier as an explanation for why end-to-end throughput sits below the
+        headline GFLOP/s, and never measured it. So <code>./bench/sgemm</code> got{' '}
+        <code>--mnk M,N,K</code>, and two pieces of free performance fell out immediately.
+      </p>
+      <div className="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>shape (M×N×K)</th>
+              <th>what it is</th>
+              <th className="n">k7 (in use)</th>
+              <th className="n">k8</th>
+              <th className="n">k9 (TF32)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td className="n">4096×1152×384</td>
+              <td>qkv projection</td>
+              <td className="n">6112</td>
+              <td className="n">6517</td>
+              <td className="n">7482</td>
+            </tr>
+            <tr>
+              <td className="n">4096×384×384</td>
+              <td>attention out</td>
+              <td className="n">4068</td>
+              <td className="n">4353</td>
+              <td className="n">6176</td>
+            </tr>
+            <tr>
+              <td className="n">4096×1536×384</td>
+              <td>MLP up</td>
+              <td className="n">5651</td>
+              <td className="n">6026</td>
+              <td className="n">7396</td>
+            </tr>
+            <tr>
+              <td className="n">4096×384×1536</td>
+              <td>MLP down</td>
+              <td className="n">4377</td>
+              <td className="n">4658</td>
+              <td className="n">6929</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        First: <strong>the model&rsquo;s GEMM was built on kernel 7</strong>, and kernel 8 beats it
+        at every one of these shapes. The transpose-aware GEMM was written against the kernel-7
+        structure, kernel 8 added double buffering afterwards, and the model simply never got the
+        prefetch — on about 80% of a training step. Porting it across took <strong>11.4%</strong>{' '}
+        off the step, with the arithmetic untouched: loss and gradient norm identical to every
+        printed digit.
+      </p>
+      <p>
+        Nothing was broken. No bug, no regression, every test passing the whole time. It was
+        invisible because the benchmark measured a shape the model does not run.
+      </p>
+
+      <h3>The speedup that did not survive integration</h3>
+      <p>
+        Second: the tensor-core kernel is 1.22–1.58× faster than kernel 7 at these shapes — a{' '}
+        <em>wider</em> margin than the 1.30× it manages on square matrices, because skinny matmuls
+        starve the fp32 pipes harder than they starve the tensor cores. So I built a TF32 path for
+        the model&rsquo;s GEMM. Wired into training it was <strong>2.4% slower</strong>.
+      </p>
+      <p>
+        A speedup that does not survive integration is a measurement that has not finished. Timing
+        the same entry point both ways, per shape <em>and per transpose case</em>, gave a split so
+        clean it named the cause by itself:
+      </p>
+      <div className="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>case</th>
+              <th className="n">TF32 vs fp32</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>NN, NT — A not transposed</td>
+              <td className="n">1.10–1.47×</td>
+              <td>tensor cores win</td>
+            </tr>
+            <tr className="hi">
+              <td>TN, TT — A transposed</td>
+              <td className="n">0.64–0.87×</td>
+              <td>tensor cores lose</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        WMMA wants its A fragment stored m-major. Holding <code>As[m][k]</code> forces the
+        transposed case to scatter four scalars for every <code>float4</code> read, where the fp32
+        kernel stores <code>As[k][m]</code> and gets a straight vector copy. And{' '}
+        <strong>the backward pass computes every weight gradient as TN</strong> — so the forward
+        won, and the backward handed the winnings straight back.
+      </p>
+      <p>
+        The fix is not to pick a better tile. It is to stop insisting on one storage orientation:
+        keep each operand in whichever layout makes staging a vector copy, and choose the{' '}
+        <em>fragment layout</em> to match — <code>col_major</code> when the operand arrived
+        transposed. Same bytes, same <code>mma</code> instruction, no scatter.
+      </p>
+      <div className="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>case</th>
+              <th className="n">before</th>
+              <th className="n">after</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>TN</td>
+              <td className="n">0.64–0.84×</td>
+              <td className="n">0.96–1.33×</td>
+            </tr>
+            <tr>
+              <td>TT</td>
+              <td className="n">0.69–0.87×</td>
+              <td className="n">1.13–1.43×</td>
+            </tr>
+            <tr className="hi">
+              <td>end to end</td>
+              <td className="n">2.4% slower</td>
+              <td className="n">9.8% faster</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Does TF32 cost the model anything?</h3>
+      <p>Full 5000-step runs, same seed, same configuration, clock pinned:</p>
+      <div className="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th />
+              <th className="n">step</th>
+              <th className="n">tokens/s</th>
+              <th className="n">best val</th>
+              <th className="n">at step</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>fp32</td>
+              <td className="n">75.1 ms</td>
+              <td className="n">54,516</td>
+              <td className="n">1.5138</td>
+              <td className="n">2400</td>
+            </tr>
+            <tr className="hi">
+              <td>TF32</td>
+              <td className="n">67.6 ms</td>
+              <td className="n">60,568</td>
+              <td className="n">1.5178</td>
+              <td className="n">2800</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        The validation losses differ by 0.004 nats. That is comfortably inside the run-to-run spread
+        this setup shows from fp32 summation order alone — across configurations on the same data
+        and seed I have measured 1.5035, 1.5056, 1.5138, 1.5147, 1.5178 and 1.5194. So TF32 buys 10%
+        of training time and costs nothing I can distinguish from noise, which is why every
+        framework defaults to it on Ampere and later.
+      </p>
+      <div className="note">
+        <p style={{ margin: 0 }}>
+          It stays opt-in here rather than becoming the default, because it changes what the model
+          computes and one run on 1 MB of Shakespeare is not enough evidence to make that choice
+          silently for someone else. Together the two changes took a training step from{' '}
+          <strong>85.0 ms to 67.6 ms</strong> — and both were found by measuring the shapes the
+          model actually runs instead of the ones the benchmark happened to default to.
+        </p>
+      </div>
+
       <h2>Two GPUs, and the lesson that turned out to be wrong</h2>
       <p>
         The received wisdom about multi-GPU training is that communication becomes the bottleneck.
