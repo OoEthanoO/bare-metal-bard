@@ -171,6 +171,9 @@ static std::vector<int> parse_ints(const char *s) {
 
 int main(int argc, char **argv) {
     std::vector<int> ids, sizes;
+    // A shape is (M, N, K). Square sizes expand into these; --mnk appends one.
+    struct Shape { int m, n, k; };
+    std::vector<Shape> shapes;
     int iters = 20, warmup = 5;
     bool verify = true, tf32 = false;
     const char *csv_path = nullptr;
@@ -178,6 +181,11 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "-k") && i + 1 < argc)          ids = parse_ints(argv[++i]);
         else if (!strcmp(argv[i], "-s") && i + 1 < argc)     sizes = parse_ints(argv[++i]);
+        else if (!strcmp(argv[i], "--mnk") && i + 1 < argc) {
+            const std::vector<int> v = parse_ints(argv[++i]);
+            if (v.size() != 3) { fprintf(stderr, "--mnk wants M,N,K\n"); return 1; }
+            shapes.push_back({v[0], v[1], v[2]});
+        }
         else if (!strcmp(argv[i], "-i") && i + 1 < argc)     iters = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-w") && i + 1 < argc)     warmup = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--csv") && i + 1 < argc)  csv_path = argv[++i];
@@ -192,7 +200,10 @@ int main(int argc, char **argv) {
 
     if (ids.empty())
         for (int j = 0; j < NUM_KERNELS; ++j) ids.push_back(KERNELS[j].id);
-    if (sizes.empty()) sizes = {128, 256, 512, 1024, 2048, 4096};
+    // Explicit shapes suppress the square default; asking for one and silently
+    // getting six others back would be surprising.
+    if (sizes.empty() && shapes.empty()) sizes = {128, 256, 512, 1024, 2048, 4096};
+    for (int n : sizes) shapes.push_back({n, n, n});
 
     for (int id : ids) {
         if (!find_kernel(id)) {
@@ -219,8 +230,14 @@ int main(int argc, char **argv) {
                "TF32 has 10 mantissa bits, so it does not match fp32 to 1e-4)\n\n");
     }
 
-    int max_n = *std::max_element(sizes.begin(), sizes.end());
-    size_t max_elems = (size_t)max_n * max_n;
+    // Each operand is sized for the largest it needs to be across every shape,
+    // which is no longer just max(n)^2 now that shapes can be rectangular.
+    size_t max_elems = 1;
+    for (const Shape &sh : shapes) {
+        max_elems = std::max(max_elems, (size_t)sh.m * sh.k);
+        max_elems = std::max(max_elems, (size_t)sh.k * sh.n);
+        max_elems = std::max(max_elems, (size_t)sh.m * sh.n);
+    }
 
     std::vector<float> hA(max_elems), hB(max_elems), hC0(max_elems);
     fill_random(hA, 0x12345678u);
@@ -251,9 +268,12 @@ int main(int argc, char **argv) {
 
     for (int id : ids) {
         const KernelEntry *ke = find_kernel(id);
-        for (int n : sizes) {
-            const int M = n, N = n, K = n;
+        for (const Shape &sh : shapes) {
+            const int M = sh.m, N = sh.n, K = sh.k;
             size_t elems = (size_t)M * N;
+            char shapebuf[32];
+            if (M == N && N == K) snprintf(shapebuf, sizeof shapebuf, "%d", M);
+            else snprintf(shapebuf, sizeof shapebuf, "%dx%dx%d", M, N, K);
 
             // --- correctness, with a non-trivial epilogue ---
             Accuracy acc{0, 0, true};
@@ -290,13 +310,13 @@ int main(int argc, char **argv) {
             char errbuf[16];
             if (verify) snprintf(errbuf, sizeof errbuf, "%.1e", acc.norm_rel);
             else        snprintf(errbuf, sizeof errbuf, "%s", "-");
-            printf("%-4d %-20s %6d %11.1f %11.1f %11.1f %7.1f%%  %-9s %s\n",
-                   ke->id, ke->name, n, gf, gfm, gfb, pct, errbuf,
+            printf("%-4d %-20s %14s %11.1f %11.1f %11.1f %7.1f%%  %-9s %s\n",
+                   ke->id, ke->name, shapebuf, gf, gfm, gfb, pct, errbuf,
                    !verify ? "skipped" : (acc.pass ? "ok" : "FAIL"));
 
             if (csv)
-                fprintf(csv, "%d,%s,%d,%.2f,%.2f,%.2f,%.2f\n", ke->id, ke->name,
-                        n, gf, gfm, gfb, pct);
+                fprintf(csv, "%d,%s,%s,%.2f,%.2f,%.2f,%.2f\n", ke->id, ke->name,
+                        shapebuf, gf, gfm, gfb, pct);
         }
     }
 

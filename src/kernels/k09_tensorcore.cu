@@ -212,6 +212,15 @@ void sgemm_tensorcore(int M, int N, int K, float alpha, const float *A,
     //     WMMA's fragment loads appear to tolerate the latency already, so the
     //     extra shared-memory writes are pure cost.
     //
+    //   TF32 rounding at staging    8299 -> 7920   -4.6%
+    //     The conversion below runs on every fragment load, which is 96 per
+    //     thread per K-chunk against 32 if done once when staging into shared
+    //     memory. Three times less arithmetic, and slower -- because it moves
+    //     the work OUT of the compute phase, where there is enough independent
+    //     work to hide it, and INTO the staging path between the global load
+    //     and the barrier, where there is not. Counting operations is not the
+    //     same as counting time.
+    //
     // What that leaves is the abstraction itself. WMMA fixes the fragment
     // layout and forces a round trip through shared memory that raw mma.sync
     // plus ldmatrix would avoid, and the remaining ~21% gap to cuBLAS's own

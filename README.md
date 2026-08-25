@@ -269,9 +269,32 @@ is what a fused FlashAttention-style kernel would eliminate. That became
 [the next piece of work](#fused-attention-the-score-matrix-never-exists), and
 the three attention rows in this table (14.5 + 3.5 + 3.1 = 21.1%) are what it
 went after. Second, even the
-80% does not run at the 6802 GF/s headline: training's matmuls are far skinnier
+80% does not run at the headline number: training's matmuls are far skinnier
 than the square N=4096 benchmark (K=384 for the attention projections), and
 small K leaves less work to amortize each tile load against.
+
+That last point deserved measuring rather than asserting, so `./bench/sgemm`
+now takes `--mnk M,N,K`. At the four shapes the model actually runs, with the
+clock pinned:
+
+| shape (M×N×K) | what it is | k7 *(in use)* | k8 | k9 (TF32) |
+|---|---|---:|---:|---:|
+| 4096×1152×384 | qkv projection | 6112 | 6517 | **7482** |
+| 4096×384×384 | attention out | 4068 | 4353 | **6176** |
+| 4096×1536×384 | MLP up | 5651 | 6026 | **7396** |
+| 4096×384×1536 | MLP down | 4377 | 4658 | **6929** |
+
+Two things fall out, and both are free performance the model is not taking.
+**The model's GEMM is built on kernel 7, and kernel 8 beats it at every one of
+these shapes** by 5–8% — the double buffering that was worth 6% on square
+matrices is worth as much or more here. And **the tensor-core kernel is
+1.22–1.58× faster than kernel 7** at these shapes, a wider margin than the 1.30×
+it manages at square N=4096, because skinny matmuls punish the fp32 kernel more
+than they punish the tensor cores.
+
+Since GEMM is ~80% of a step, the second is worth something like 20% of
+end-to-end training time, and TF32 is the precision the hardware was built to
+train in. Both are next.
 
 ### The backward pass is gradient-checked
 
