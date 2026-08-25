@@ -65,6 +65,10 @@ struct GPT {
     size_t num_acts, num_grad_acts;
 
     int *d_tokens, *d_targets;
+    // Pinned staging for the two per-step uploads. A copy out of pageable
+    // memory blocks the calling thread and takes a driver-wide lock; from
+    // pinned memory it is a plain async DMA on the stream.
+    int *h_tokens, *h_targets;
 };
 
 void gpt_alloc(GPT &g);

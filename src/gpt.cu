@@ -3,6 +3,7 @@
 // Every matmul here routes through the hand-written GEMM in src/gemm.cu.
 // Nothing in this file links cuBLAS.
 #include <cstdio>
+#include <cstring>
 #include <cstdlib>
 #include <cmath>
 #include <vector>
@@ -175,6 +176,8 @@ void gpt_alloc(GPT &g) {
     g.gr.dlogits   = take((size_t)B * T * c.padded_vocab);
     g.gr.dlnf      = take(s.BTC);
 
+    CUDA_CHECK(cudaMallocHost(&g.h_tokens, (size_t)B * T * sizeof(int)));
+    CUDA_CHECK(cudaMallocHost(&g.h_targets, (size_t)B * T * sizeof(int)));
     CUDA_CHECK(cudaMalloc(&g.d_tokens, (size_t)B * T * sizeof(int)));
     CUDA_CHECK(cudaMalloc(&g.d_targets, (size_t)B * T * sizeof(int)));
     // Sampling reuses the loss kernel, which indexes probs[targets[row]]. Zero
@@ -228,8 +231,13 @@ float gpt_forward(GPT &g, const int *tokens, const int *targets) {
     Activations &a = g.acts;
     Parameters &p = g.params;
 
-    CUDA_CHECK(cudaMemcpy(g.d_tokens, tokens, (size_t)N * sizeof(int),
-                          cudaMemcpyHostToDevice));
+    // Stage through pinned memory, then hand the copy to the stream. The
+    // host-to-host memcpy is nearly free; the win is that the device copy no
+    // longer blocks this thread, which is what let one rank's forward pass
+    // stall another rank's on a different GPU entirely.
+    memcpy(g.h_tokens, tokens, (size_t)N * sizeof(int));
+    CUDA_CHECK(cudaMemcpyAsync(g.d_tokens, g.h_tokens, (size_t)N * sizeof(int),
+                               cudaMemcpyHostToDevice));
     encoder_forward(a.encoded, g.d_tokens, p.wte, p.wpe, B, T, C);
 
     float *residual = a.encoded;  // the running residual stream
@@ -280,8 +288,9 @@ float gpt_forward(GPT &g, const int *tokens, const int *targets) {
 
     if (!targets) return 0.0f;
 
-    CUDA_CHECK(cudaMemcpy(g.d_targets, targets, (size_t)N * sizeof(int),
-                          cudaMemcpyHostToDevice));
+    memcpy(g.h_targets, targets, (size_t)N * sizeof(int));
+    CUDA_CHECK(cudaMemcpyAsync(g.d_targets, g.h_targets, (size_t)N * sizeof(int),
+                               cudaMemcpyHostToDevice));
     softmax_crossentropy_forward(a.probs, a.losses, a.logits, g.d_targets, N, V, Vp);
     return reduce_mean(a.losses, N);
 }

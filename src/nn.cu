@@ -359,10 +359,25 @@ void zero_buffer(float *p, size_t n) { cudaMemset(p, 0, n * sizeof(float)); }
 float reduce_mean(const float *d_values, int n) {
     // One persistent scalar rather than a malloc/free pair per call; this runs
     // once per forward pass and cudaMalloc is not cheap.
-    static float *d_out = nullptr;
-    if (!d_out) cudaMalloc(&d_out, sizeof(float));
+    //
+    // THREAD_LOCAL, not static. Data-parallel training runs one host thread per
+    // GPU, and a plain `static` here would hand every rank the same pointer --
+    // allocated on whichever device happened to call first. Rank 1 would then
+    // reduce into rank 0's memory, and both would race to read the single
+    // scalar back. Thread-local storage gives each rank its own buffer on its
+    // own device, which is both correct and what makes the copy below cheap.
+    //
+    // The host side is PINNED. A device-to-host copy out of pageable memory
+    // goes through a driver staging buffer under a process-wide lock, so two
+    // ranks doing it at the same moment serialise against each other for
+    // reasons that have nothing to do with either GPU.
+    static thread_local float *d_out = nullptr;
+    static thread_local float *h_out = nullptr;
+    if (!d_out) {
+        cudaMalloc(&d_out, sizeof(float));
+        cudaMallocHost(&h_out, sizeof(float));
+    }
     reduce_mean_k<<<1, 256>>>(d_values, d_out, n);
-    float h;
-    cudaMemcpy(&h, d_out, sizeof(float), cudaMemcpyDeviceToHost);
-    return h;
+    cudaMemcpy(h_out, d_out, sizeof(float), cudaMemcpyDeviceToHost);
+    return *h_out;
 }
