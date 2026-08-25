@@ -16,9 +16,9 @@ total     0.91 GB resident (params+grads+adam+activations+scratch)
 
 | metric | median over 501 logged steps |
 |---|---:|
-| step time | 86.2 ms |
-| tokens/s | 47,531 |
-| end-to-end | 3,415 GFLOP/s |
+| step time | 75.1 ms |
+| tokens/s | 54,516 |
+| end-to-end | 3,917 GFLOP/s |
 
 The end-to-end figure counts `6*N*P` for the parameter matmuls plus the attention terms. It sits below the standalone GEMM peak (~6420 GFLOP/s) because a training step is not all GEMM: layernorm, softmax, GELU and the optimizer are all bandwidth-bound work at arithmetic intensity below 1. The attention score matrices no longer cost anything: the fused kernel keeps them in registers and never writes them to memory.
 
@@ -28,25 +28,25 @@ The end-to-end figure counts `6*N*P` for the parameter matmuls plus the attentio
 
 | step | val loss |
 |---:|---:|
-| 100 | 2.5258 |
-| 500 | 1.8895 |
-| 900 | 1.7124 |
-| 1300 | 1.5958 |
-| 1700 | 1.5613 |
-| 2100 | 1.5224 |
-| 2500 | 1.5132 |
-| 2900 | 1.5277 |
-| 3300 | 1.5501 |
-| 3700 | 1.6165 |
-| 4100 | 1.6972 |
-| 4500 | 1.8034 |
-| 4900 | 1.9245 |
+| 100 | 2.5259 |
+| 500 | 1.8929 |
+| 900 | 1.7072 |
+| 1300 | 1.6013 |
+| 1700 | 1.5605 |
+| 2100 | 1.5254 |
+| 2500 | 1.5190 |
+| 2900 | 1.5304 |
+| 3300 | 1.5620 |
+| 3700 | 1.6304 |
+| 4100 | 1.7116 |
+| 4500 | 1.8183 |
+| 4900 | 1.9330 |
 
-Best validation loss **1.5035** at step 2400.
+Best validation loss **1.5138** at step 2400.
 
 ```
-final  train loss 0.6463   val loss 1.9647   (20 batches each)
-best   val loss 1.5035 at step 2400 (checkpoint saved there)
+final  train loss 0.6344   val loss 1.9758   (20 batches each)
+best   val loss 1.5138 at step 2400 (checkpoint saved there)
 final sample:
 ```
 
@@ -57,19 +57,32 @@ A uniform guess over the 65-character vocabulary would score ln(65) = 4.174 nats
 Generated from the trained model at temperature 0.8:
 
 ```
-What say you?' be many thoughts and swords!
-Here one that were more in the cold forehead,
-And say that shall stand for.
+What say you?' lay down by me?
 
-Shepherd:
-Sometimes body,
-The sway do destroy the gates,
-That e'er spare not on thee, of the queen,
-And by the honour of Salisbury
-He was not so long without right:
-I would nothing our harm pleasure for that
-The people shall be satisfied. My son, good m
-Is all the best; where is
+CLARENCE:
+O, I will; and so heavens it too!
+
+CLARENCE:
+O, do not srew: in the king, may make is purged.
+
+GLOUCESTER:
+Must he needs die like to-morrow?
+
+BUCKINGHAM:
+Lord mayor, may strike, take to your hand.
+
+GLOUCESTER:
+
+HASTINGS:
+To, pardon the cause; I can read him to-night.
+
+GLOUCESTER:
+I see those be patient.
+
+BUCKINGHAM:
+Then know, is King Henry, Escape?
+
+LADY
 ```
 
 Reproduce with:

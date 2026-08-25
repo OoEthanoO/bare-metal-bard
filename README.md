@@ -199,13 +199,14 @@ repo.
 params    10.80M (41.2 MB; +41.2 MB grads, +82.4 MB adam state)
 memory    665.0 MB forward activations, 98.1 MB backward scratch
 batch     16 x 256 = 4096 tokens/step
-speed     86.2 ms/step, 47,531 tokens/s, ~3415 GFLOP/s end to end
-loss      4.174 (= ln 65, uniform guess) -> 1.5035 val at step 2400
+speed     75.1 ms/step, 54,516 tokens/s, ~3917 GFLOP/s end to end
+          (67.6 ms and 60,568 tok/s with --tf32; see below)
+loss      4.174 (= ln 65, uniform guess) -> 1.5138 val at step 2400
 ```
 
 ![training curve](docs/training_curve.svg)
 
-Validation bottoms at **1.5035** around step 2400 and then climbs -- 10.8M
+Validation bottoms at **1.5138** around step 2400 and then climbs -- 10.8M
 parameters on 1 MB of text overfits well before the LR schedule ends, so the
 best-validation checkpoint is the one kept, not the last. Full curve, config and
 sample: [`docs/training.md`](docs/training.md).
@@ -213,13 +214,13 @@ sample: [`docs/training.md`](docs/training.md).
 Sampled from that checkpoint at temperature 0.8:
 
 ```
-Lord Lord Hastings, and that hast the mark liken should.
-
-CAMILLO:
-I quarrel of Ebborn to my sail of usure
-I will part a born of those in Rosaling,
-Is it an art to slike the fairer of this.
-
+Is carried an old for Sirrah Paris' in Edward's blood,
+When I, that remember'd up my soul,
+With manner which we say twelve pass into the king,
+Off his limbs and unto the wars' garden,
+To steal the first alone, in this word,
+Such a thought broughts dead, and thou like a doit
+To unsistake the tongue of the higher.
 ```
 
 This run uses the [fused attention](#fused-attention-the-score-matrix-never-exists)
@@ -238,7 +239,7 @@ trajectory that differs in the last digits and then diverges chaotically over
 5000 steps. What matters is that neither the shape of the curve nor the quality
 of the model moved. The fused kernels are faster and smaller, not different.
 
-The end-to-end 3415 GFLOP/s sits below the standalone GEMM peak because a
+The end-to-end 3917 GFLOP/s sits below the standalone GEMM peak because a
 training step is not all GEMM. Profiling every kernel launch with `ncu` and
 aggregating by category — this is the **unfused** path, and it is the
 measurement that motivated the fused attention below:
@@ -294,7 +295,52 @@ than they punish the tensor cores.
 
 Since GEMM is ~80% of a step, the second is worth something like 20% of
 end-to-end training time, and TF32 is the precision the hardware was built to
-train in. Both are next.
+train in. Both were done, and together they took **85.0 ms/step to 67.6 ms**.
+
+Double buffering the model GEMM was the easy half: same tile parameters as
+kernel 8, arithmetic untouched (loss and gradient norm identical to every
+printed digit), 11.4% off the step.
+
+The tensor cores took two attempts, and the second is the instructive one.
+Standalone they are 1.22–1.58x faster at these shapes; wired into training the
+first version was **2.4% slower**. Timing the same entry point per transpose
+case (`./bench/test_gemm --bench`) said why, and the split was perfectly clean:
+
+| case | first version |
+|---|---|
+| NN, NT (A not transposed) | 1.10–1.47x — tensor cores win |
+| TN, TT (A transposed) | 0.64–0.87x — tensor cores lose |
+
+WMMA wants A stored m-major, so `As[m][k]` forces the transposed case to
+scatter four scalars per `float4` read, where the fp32 kernel stores `As[k][m]`
+and gets a straight vector copy. **The backward pass computes every weight
+gradient as TN**, so the forward won and the backward handed it straight back.
+
+The fix is to store each operand in whichever orientation makes staging a
+vector copy and choose the *fragment layout* to match — `col_major` when the
+operand arrived transposed. Same data, same `mma`, no scatter. TN went to
+0.96–1.33x, TT to 1.13–1.43x, and end-to-end TF32 went from 2.4% slower to
+**9.8% faster**.
+
+### Does TF32 cost the model anything?
+
+Full 5000-step runs, same seed and configuration:
+
+| | step | tokens/s | best val | at step |
+|---|---:|---:|---:|---:|
+| fp32 | 75.1 ms | 54,516 | 1.5138 | 2400 |
+| TF32 | **67.6 ms** | **60,568** | 1.5178 | 2800 |
+
+The validation losses differ by 0.004 nats. That is comfortably inside the
+run-to-run spread this setup shows from fp32 summation order alone — across
+configurations I have measured 1.5035, 1.5056, 1.5138, 1.5147, 1.5178 and
+1.5194 on the same data and seed. So the honest reading is that **TF32 buys 10%
+of training time and costs nothing measurable in quality**, which is exactly
+why every framework defaults to it on Ampere and later.
+
+It stays opt-in here (`--tf32`) rather than becoming the default, because it
+changes what the model computes and one 5000-step run on 1 MB of Shakespeare is
+not enough evidence to make that choice silently for someone else.
 
 ### The backward pass is gradient-checked
 
