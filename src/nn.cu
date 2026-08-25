@@ -174,16 +174,58 @@ __global__ void add_inplace_k(float *dst, const float *src, int n4) {
 // of them together at 8.2% of a training step. The backward stays, because a
 // column reduction is not something an epilogue can do -- it needs every row.
 
-// dbias[c] = sum over all N rows of dout[n][c]. One block per output column,
-// striding down the rows: each thread reads a coalesced run because
-// consecutive blocks own consecutive c.
-__global__ void bias_bwd_k(float *dbias, const float *dout, int N, int C) {
-    const int c = blockIdx.x;
+// dbias[c] = sum over all N rows of dout[n][c].
+//
+// The first version of this put ONE BLOCK PER COLUMN and strode down the rows,
+// with a comment claiming the reads were coalesced because consecutive blocks
+// own consecutive columns. They are not. Coalescing happens within a warp, and
+// in that arrangement a warp's 32 threads read 32 different ROWS at the same
+// column -- 32 addresses C floats apart, so 32 separate memory transactions
+// fetching 32 bytes each to use 4. Neighbouring blocks do re-use those sectors
+// out of L2, which is why it was merely bad rather than catastrophic, and why
+// it survived: nothing about the source looks wrong.
+//
+// The step profile is what found it. At 5.4% of a training step for an
+// operation whose floor is a single streaming read of dout, it was the second
+// biggest non-matmul item left.
+//
+// So: threadIdx.x walks COLUMNS, and a warp reads 32 consecutive floats of one
+// row. threadIdx.y walks rows, and gridDim.y splits the rows again so narrow
+// tensors still fill the machine -- at C=384 the column axis alone is only 12
+// blocks. The partials are written to a workspace and summed by a second
+// kernel rather than atomically, because atomics would make the gradient
+// depend on block scheduling order and this repo compares runs bit for bit.
+constexpr int BIAS_COLS = 32, BIAS_ROWS = 8;
+
+__global__ void bias_bwd_k(float *partial, const float *dout, int N, int C) {
+    const int c = blockIdx.x * BIAS_COLS + threadIdx.x;
     float acc = 0.0f;
-    for (int n = threadIdx.x; n < N; n += blockDim.x)
-        acc += dout[(size_t)n * C + c];
-    acc = block_reduce<false>(acc);
-    if (threadIdx.x == 0) dbias[c] += acc;
+    if (c < C) {
+        for (int n = blockIdx.y * BIAS_ROWS + threadIdx.y; n < N;
+             n += gridDim.y * BIAS_ROWS)
+            acc += dout[(size_t)n * C + c];
+    }
+    // Reduce down the row axis. s[y][x] with x contiguous, so no bank conflict.
+    __shared__ float s[BIAS_ROWS][BIAS_COLS];
+    s[threadIdx.y][threadIdx.x] = acc;
+    __syncthreads();
+#pragma unroll
+    for (int r = BIAS_ROWS / 2; r > 0; r >>= 1) {
+        if (threadIdx.y < r)
+            s[threadIdx.y][threadIdx.x] += s[threadIdx.y + r][threadIdx.x];
+        __syncthreads();
+    }
+    if (threadIdx.y == 0 && c < C) partial[(size_t)blockIdx.y * C + c] = s[0][threadIdx.x];
+}
+
+// Fixed number of partials, summed in a fixed order: deterministic.
+__global__ void bias_bwd_reduce_k(float *dbias, const float *partial, int C,
+                                  int splits) {
+    const int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= C) return;
+    float acc = 0.0f;
+    for (int i = 0; i < splits; ++i) acc += partial[(size_t)i * C + c];
+    dbias[c] += acc;
 }
 
 // ------------------------------------------------------- softmax + xent
@@ -311,7 +353,27 @@ void add_inplace(float *dst, const float *src, int n) {
 }
 
 void bias_backward(float *dbias, const float *dout, int N, int C) {
-    bias_bwd_k<<<C, 256>>>(dbias, dout, N, C);
+    // Enough row-splits to keep every SM busy on the narrow tensors, capped so
+    // the second pass stays trivial. thread_local for the same reason
+    // reduce_mean is: one host thread per GPU, one workspace per device.
+    const int cols = ceil_div(C, BIAS_COLS);
+    int splits = ceil_div(144, cols);        // ~4 blocks per SM at 36 SMs
+    if (splits < 1) splits = 1;
+    const int max_splits = ceil_div(N, BIAS_ROWS);
+    if (splits > max_splits) splits = max_splits;
+
+    static thread_local float *partial = nullptr;
+    static thread_local size_t cap = 0;
+    const size_t need = (size_t)splits * C;
+    if (need > cap) {
+        if (partial) cudaFree(partial);
+        cudaMalloc(&partial, need * sizeof(float));
+        cap = need;
+    }
+
+    dim3 block(BIAS_COLS, BIAS_ROWS);
+    bias_bwd_k<<<dim3(cols, splits), block>>>(partial, dout, N, C);
+    bias_bwd_reduce_k<<<ceil_div(C, 256), 256>>>(dbias, partial, C, splits);
 }
 
 void softmax_crossentropy_forward(float *probs, float *losses,
