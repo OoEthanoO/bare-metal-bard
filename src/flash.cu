@@ -887,6 +887,21 @@ bool launch_bwd(float *dqkv, float *dsum, const float *dout, const float *qkv,
 // BR == BC for no reason but notation, and BR != BC turns out to be the
 // interesting region.
 //
+// WHAT THE SWEEP SETTLED, and it is not what the profiler implied. ncu says
+// these kernels are bound on shared-memory-to-register traffic (L1/TEX ~88%,
+// DRAM ~21%), so the indicated cure is a bigger register tile -- fewer shared
+// loads per FMA. Two entries below test exactly that:
+//
+//   config 5   RT4 CT2   0.75 shared loads per FMA   2 blocks/SM   1.61 ms
+//   config 6   RT4 CT4   0.50 shared loads per FMA   1 block /SM   2.01 ms
+//
+// Config 6 does a third less shared-memory work per unit of arithmetic and is
+// 25% SLOWER, because the wider key tile costs the second resident block. On
+// this kernel every arrangement that improves the ratio spends shared memory
+// to get it, and the block count is worth more than the ratio -- the opposite
+// of what the same counter reading meant for kernel 7. A profile says which
+// resource is saturated. It does not say which change is affordable.
+//
 // (id, BR, BC, NT, RT, CT, kv: AT, BT, dQ: QAT, QBT, name)
 #define BWD_CONFIGS(X)                                                         \
     X(0, 64, 32, 128, 4, 4, 4, 4, 8, 4, "br64 bc32 t128 kv4x4 q8x4")           \
