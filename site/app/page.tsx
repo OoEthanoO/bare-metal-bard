@@ -800,6 +800,39 @@ __syncthreads()              <- and blocks again before overwriting`}</code>
         shape of a coalesced kernel and a comment explaining why it is one. The fix is the first
         thing anyone learns about CUDA.
       </p>
+      <h3>The residual and GELU go the same way, and cost three detours</h3>
+      <p>
+        Same waste, same fix &mdash; and two activation buffers that then had nothing left to hold,
+        since <code>attproj</code> and <code>fcproj</code> are never read again, not even by the
+        backward. <strong>fp32 70.1 &rarr; 69.1 ms, TF32 59.8 &rarr; 58.9 ms, 0.91 &rarr; 0.84 GB
+        resident.</strong> About 1.5% &mdash; and getting to an honest 1.5% took three detours that
+        are worth more than the number.
+      </p>
+      <p>
+        <strong>It measured as 37% first.</strong> The profile said total kernel time had barely
+        moved, which is the only reason I looked: <code>ncu</code> resets the application clock when
+        it detaches, so an earlier clock lock had been silently undone and the card was boosting.
+        59.9 &rarr; 38 ms is 1.58&times;; it was a clock ratio wearing a speedup&rsquo;s clothes.
+        This project already had a rule about never quoting a ratio on an unpinned clock. What it
+        did not have was a way to notice the pin coming undone <em>mid-session</em>.
+      </p>
+      <p>
+        <strong>Then the loss started varying in the fourth decimal</strong>, which looked exactly
+        like a race I had just introduced. It is not mine and it is not new: two backward kernels
+        accumulate through global atomics, so floating-point summation order varies between runs.
+        The parent commit does it too &mdash; 1 run in 14. I was one plausible story away from
+        attributing a pre-existing property of the model to my own change, and what prevented it was
+        building the parent and running it fourteen times.
+      </p>
+      <p>
+        <strong>And the fp32 path came out 6% slower.</strong> Not register pressure &mdash; 219
+        against 221, essentially unchanged. The epilogue tested <code>if (ep.gelu_out)</code> at
+        runtime, and <code>tanhf</code> expands to a substantial block of code that sits in the
+        kernel whether or not the branch is taken. Making the feature set a template parameter and
+        testing it with <code>if constexpr</code> turned a 6% regression into a 1.4% gain.{' '}
+        <strong>Code you do not execute is not free.</strong>
+      </p>
+
       <div className="note">
         <p style={{ margin: 0 }}>
           The two biggest wins available in a step I had spent months optimizing were a pass that

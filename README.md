@@ -521,10 +521,11 @@ Full 5000-step runs, same seed and configuration:
 | fp32 | 75.1 ms | 54,516 | 1.5138 | 2400 |
 | TF32, WMMA | 67.6 ms | 60,568 | 1.5178 | 2800 |
 | TF32, `mma.sync` | 65.2 ms | 62,824 | — | — |
-| + fused bias, coalesced reduce | **59.9 ms** | **68,384** | — | — |
+| + fused bias, coalesced reduce | 59.9 ms | 68,384 | — | — |
+| + fused residual and GELU | **58.9 ms** | **69,566** | — | — |
 
-The last two rows are 30-step timings on the same pinned clock rather than full
-5000-step runs; fp32 under the same changes is 70.1 ms.
+The last three rows are 30-step timings on the same pinned clock rather than
+full 5000-step runs; fp32 under the same changes is 69.1 ms, down from 75.1.
 
 The validation losses differ by 0.004 nats. That is comfortably inside the
 run-to-run spread this setup shows from fp32 summation order alone — across
@@ -662,6 +663,54 @@ atomically, because atomics would make the gradient depend on block scheduling
 order and this repo compares runs bit for bit.
 
 **62.0 → 59.9 ms**, gradient check still exact on all 16 tensors.
+
+### The residual and GELU go the same way, and cost three detours
+
+Same shape of waste, same fix: a whole read and write of an activation tensor
+for one operation per element. Folded into the epilogue along with two buffers
+that then had nothing left to hold — `attproj` and `fcproj` are never read
+again, not even by the backward, which needs only `d(residual2)`.
+
+| | before | after |
+|---|---:|---:|
+| step, fp32 | 70.1 ms | **69.1 ms** |
+| step, TF32 | 59.8 ms | **58.9 ms** |
+| resident memory | 0.91 GB | **0.84 GB** |
+
+1.5%. Getting to an honest 1.5% took three detours, and they are the part worth
+keeping.
+
+**It measured as 37% first.** The profile said total kernel time had barely
+moved, which is the only reason I looked: `ncu` resets the application clock
+when it detaches, so an earlier `nvidia-smi -lgc 1200` had been silently undone
+and the card was boosting. 59.9 → 38 ms is 1.58×, and 1605/1200 is 1.34 at
+idle — it was a clock ratio wearing a speedup's clothes. This repo already had
+a rule about never quoting a ratio on an unpinned clock; what it did not have
+was a way to notice the pin *coming undone mid-session*. Now
+`profile_step.bat` re-applies the lock before it exits, since it is already
+elevated, and prints the clock so the log carries it.
+
+**Then the loss started varying in the fourth decimal**, which looked exactly
+like a race I had just introduced. It is not mine and it is not new:
+`encoder_backward` and `layernorm_backward` accumulate through global atomics,
+so floating-point summation order varies between runs. The parent commit does
+it too — 1 run in 14. I was one plausible story away from attributing a
+pre-existing property of the model to my own change, and the only thing that
+prevented it was building the parent and running it fourteen times.
+
+**And the fp32 path got 6% SLOWER.** Not register pressure — 219 against 221,
+essentially unchanged. The epilogue tested `if (ep.gelu_out)` at runtime, and
+`tanhf` expands to a substantial block of code that sits in the kernel whether
+or not the branch is ever taken. Making the feature set a template parameter
+and testing it with `if constexpr` turns a 6% regression into a 1.4% gain:
+
+```cpp
+if constexpr (EPI & epi::GELU) { ... }   // vanishes when unused
+```
+
+All eight combinations are instantiated rather than seven and a general
+fallback, because a mask claiming a feature the caller did not supply would
+dereference null. **Code you do not execute is not free.**
 
 ### What I take from this
 
@@ -1019,11 +1068,14 @@ tools/
   device_query.cu   roofline numbers for this GPU
   merge_runs.py     median several sweeps, flag cells that disagree
   smem_banks.py     proves kernel 10's shared layout, no GPU needed
+  step_profile.py   aggregate an ncu dump into where a step spends its time
   flash_memory.py   context-length memory sweep, fused vs unfused
   plot_results.py   CSV -> SVG charts
 scripts/
   gpu_clocks.sh     lock/unlock SM clock for reproducible benchmarks
   gpu_clocks.bat    the same on Windows; self-elevates for the UAC prompt
+  profile_step.bat  per-kernel profile of a training step; re-pins the clock
+  build_prev.bat    build an older commit's train_gpt for a same-session A/B
   build.bat         Windows build (nvcc + MSVC), the Makefile's equivalent
   probe.bat         build+run a one-off probe (used to find fragment layouts)
   sweep_k10.bat     kernel 10's tile sweep, one compile per config
