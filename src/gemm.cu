@@ -523,7 +523,7 @@ template <bool TA, bool TB, int BM, int BN, int BK, int WM, int WN,
           int NUM_THREADS, int MINB, int EPI>
 __global__ __launch_bounds__(NUM_THREADS, MINB) void gemm_mma(
     int M, int N, int K, float alpha, const float *A, const float *B,
-    float beta, float *C, GemmEpilogue ep) {
+    float beta, float *C, GemmEpilogue ep, int kBegin, int kEnd) {
     // No padding: the layout IS the fragment, so a fragment load is 32 lanes
     // over 512 contiguous bytes and cannot conflict.
     __shared__ float As[BM * BK];
@@ -536,6 +536,16 @@ __global__ __launch_bounds__(NUM_THREADS, MINB) void gemm_mma(
     const int warpIdx = tid / WARPSIZE;
     const int warpCol = warpIdx % (BN / WN);
     const int warpRow = warpIdx / (BN / WN);
+
+    // gridDim.z is the K-split count. Each z owns a slice of K and its own
+    // plane of the output workspace; with no split it is 1 and this is a no-op.
+    if (gridDim.z > 1) {
+        const int chunk = kEnd;  // the caller passes the chunk size here
+        kBegin = blockIdx.z * chunk;
+        kEnd = kBegin + chunk;
+        if (kEnd > K) kEnd = K;
+        C += (size_t)blockIdx.z * M * N;
+    }
 
     constexpr int WMITER = WM / MMA_M;  // 16-row tiles this warp owns
     constexpr int WNITER = WN / 16;     // 16-column (= 2 mma) units it owns
@@ -554,7 +564,7 @@ __global__ __launch_bounds__(NUM_THREADS, MINB) void gemm_mma(
 
     float acc[WMITER][WNITER][2][4] = {};
 
-    for (int k0 = 0; k0 < K; k0 += BK) {
+    for (int k0 = kBegin; k0 < kEnd; k0 += BK) {
 #pragma unroll
         for (int it = 0; it < aIters; ++it) {
             const int off = it * aStride;
@@ -704,8 +714,36 @@ constexpr int FTM = 8, FTN = 4, FTHREADS = 128;
 //
 // So the best tile on a square benchmark is not the best tile in the model,
 // and both numbers are in the repo rather than just the flattering one.
+// TWO tensor-core tiles, chosen per shape at launch.
+//
+// A 128x128 block tile is the right default: it has the arithmetic intensity
+// (32 FLOP/byte) and it is what the square benchmark is tuned on. But the
+// weight-gradient matmuls in the backward are 384x384x4096 and friends -- tall
+// K, tiny output -- and a 128x128 tile cuts that into a grid of NINE blocks
+// against 36 SMs. Three quarters of the machine is idle no matter how good the
+// kernel is.
+//
+// So there is a second tile, half as tall, which doubles the block count and
+// fits more of them per SM. Measured at the model's own shapes, clock pinned:
+//
+//   shape                    blocks   128x128   64x128
+//   4096x384x384  (fwd)          96      7149     6898     wide tile wins
+//   4096x384x1536 (fwd)          96      7851     7722     wide tile wins
+//   384x384x4096  (dW)            9      1846     2313     +25%
+//
+// That is not a tuning accident, it is the roofline meeting the grid: below
+// about one wave the block count is what limits you, and above it the reuse
+// is. cuBLAS ships dozens of kernels for exactly this reason.
 constexpr int TBM = 128, TBN = 128, TBK = 32;
 constexpr int TWM = 32, TWN = 64, TTHREADS = 256, TMINB = 2;
+
+constexpr int SBM = 64, SBN = 128, SBK = 32;
+constexpr int SWM = 32, SWN = 64, STHREADS = 128, SMINB = 4;
+
+// Switch below this many 128x128 blocks. 72 is two blocks per SM across 36
+// SMs -- one full wave -- so the rule reads: if the default tile cannot fill
+// the machine once, prefer the tile that makes more blocks.
+constexpr int TILE_SWITCH_BLOCKS = 72;
 // Narrowing BN to 64 was tried, to cut the wave quantisation at N=384 where a
 // 128-wide tile leaves only three block columns and the second wave runs a
 // third full. It is worse everywhere -- 6144 -> 5644 GF/s at 4096x384x384 --
@@ -730,6 +768,43 @@ __global__ void epilogue_only_k(float *C, GemmEpilogue ep, int N, size_t total) 
     if (ep.gelu_out) ep.gelu_out[i] = gelu_scalar(y);
 }
 
+// Sum the per-split partials and apply alpha/beta/epilogue exactly once.
+// Deterministic: a fixed number of partials in a fixed order, rather than
+// atomics, for the same reason the bias backward avoids them.
+template <int EPI>
+__global__ void splitk_reduce_k(float *C, const float *partial, int N,
+                                size_t total, int splits, float alpha,
+                                float beta, GemmEpilogue ep) {
+    const size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= total) return;
+    float acc = 0.0f;
+    for (int sp = 0; sp < splits; ++sp) acc += partial[sp * total + i];
+    float y = alpha * acc;
+    if (beta != 0.0f) y += beta * C[i];
+    if constexpr (EPI & epi::BIAS) y += ep.bias[i % (unsigned)N];
+    if constexpr (EPI & epi::ADD) y += ep.add[i];
+    C[i] = y;
+    if constexpr (EPI & epi::GELU) ep.gelu_out[i] = gelu_scalar(y);
+}
+
+// How many K-splits this shape wants. Zero or one means "do not split".
+//
+// SPLIT-K IS ABOUT THE OUTPUT, NOT THE GRID. I talked myself out of this once
+// by costing it for 4096x384x384, where the output is 6.3 MB and every extra
+// partial is another 6.3 MB of traffic -- correctly, it loses there. The
+// weight gradients are the opposite shape: 384x384 output, K=4096. The output
+// is 590 KB, the partials are free, and the grid is NINE blocks on a 36-SM
+// card. Same technique, opposite verdict, and the deciding quantity is the
+// ratio of K to M*N rather than anything about waves.
+inline int splitk_for(int blocks, int K, int BK) {
+    constexpr int TARGET_BLOCKS = 144;  // 4 blocks/SM x 36 SMs
+    if (blocks >= TARGET_BLOCKS) return 1;
+    int s = TARGET_BLOCKS / blocks;
+    const int max_by_k = K / (BK * 4);  // keep >=4 K-chunks per split
+    if (s > max_by_k) s = max_by_k;
+    return s < 2 ? 1 : s;
+}
+
 template <bool TA, bool TB, int EPI>
 void dispatch_epi(int M, int N, int K, float alpha, const float *A,
                   const float *B, float beta, float *C, cudaStream_t stream,
@@ -748,8 +823,50 @@ void dispatch_epi(int M, int N, int K, float alpha, const float *A,
                 C, ep, N, total);
         }
 #else
-        gemm_mma<TA, TB, TBM, TBN, TBK, TWM, TWN, TTHREADS, TMINB, EPI>
-            <<<grid, TTHREADS, 0, stream>>>(M, N, K, alpha, A, B, beta, C, ep);
+        const bool narrow =
+            (M / TBM) * (N / TBN) < TILE_SWITCH_BLOCKS && M % SBM == 0;
+        const int bm = narrow ? SBM : TBM, bn = narrow ? SBN : TBN;
+        const int bk = narrow ? SBK : TBK;
+        const int blocks = (M / bm) * (N / bn);
+        const int splits = splitk_for(blocks, K, bk);
+        dim3 g2(N / bn, M / bm, splits);
+
+        if (splits > 1) {
+            // Partials live in a workspace, one plane per split. thread_local
+            // for the same reason reduce_mean's scalar is: one host thread per
+            // GPU, one workspace per device.
+            static thread_local float *ws = nullptr;
+            static thread_local size_t cap = 0;
+            const size_t total = (size_t)M * N;
+            const size_t need = total * splits;
+            if (need > cap) {
+                if (ws) cudaFree(ws);
+                cudaMalloc(&ws, need * sizeof(float));
+                cap = need;
+            }
+            const int chunk = ((K / splits + bk - 1) / bk) * bk;
+            // The split kernels compute raw partials: alpha, beta and the
+            // epilogue are applied once, by the reduction.
+            if (narrow)
+                gemm_mma<TA, TB, SBM, SBN, SBK, SWM, SWN, STHREADS, SMINB, 0>
+                    <<<g2, STHREADS, 0, stream>>>(M, N, K, 1.0f, A, B, 0.0f, ws,
+                                                  GemmEpilogue(), 0, chunk);
+            else
+                gemm_mma<TA, TB, TBM, TBN, TBK, TWM, TWN, TTHREADS, TMINB, 0>
+                    <<<g2, TTHREADS, 0, stream>>>(M, N, K, 1.0f, A, B, 0.0f, ws,
+                                                  GemmEpilogue(), 0, chunk);
+            splitk_reduce_k<EPI><<<(unsigned)((total + 255) / 256), 256, 0, stream>>>(
+                C, ws, N, total, splits, alpha, beta, ep);
+        } else if (narrow) {
+            dim3 sgrid(N / SBN, M / SBM);
+            gemm_mma<TA, TB, SBM, SBN, SBK, SWM, SWN, STHREADS, SMINB, EPI>
+                <<<sgrid, STHREADS, 0, stream>>>(M, N, K, alpha, A, B, beta, C,
+                                                 ep, 0, K);
+        } else {
+            gemm_mma<TA, TB, TBM, TBN, TBK, TWM, TWN, TTHREADS, TMINB, EPI>
+                <<<grid, TTHREADS, 0, stream>>>(M, N, K, alpha, A, B, beta, C,
+                                                ep, 0, K);
+        }
 #endif
     } else if (M % FBM == 0 && N % FBN == 0 && K % FBK == 0) {
         dim3 grid(N / FBN, M / FBM);
