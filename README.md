@@ -522,7 +522,8 @@ Full 5000-step runs, same seed and configuration:
 | TF32, WMMA | 67.6 ms | 60,568 | 1.5178 | 2800 |
 | TF32, `mma.sync` | 65.2 ms | 62,824 | — | — |
 | + fused bias, coalesced reduce | 59.9 ms | 68,384 | — | — |
-| + fused residual and GELU | **58.9 ms** | **69,566** | — | — |
+| + fused residual and GELU | 58.9 ms | 69,566 | — | — |
+| + two tiles and split-K | **54.0 ms** | **75,905** | — | — |
 
 The last three rows are 30-step timings on the same pinned clock rather than
 full 5000-step runs; fp32 under the same changes is 69.1 ms, down from 75.1.
@@ -711,6 +712,66 @@ if constexpr (EPI & epi::GELU) { ... }   // vanishes when unused
 All eight combinations are instantiated rather than seven and a general
 fallback, because a mask claiming a feature the caller did not supply would
 dereference null. **Code you do not execute is not free.**
+
+### One kernel was never going to be enough
+
+The profile said attention backward was next. Before starting that I noticed
+the GEMM benchmark had never covered three of the model's own shapes — it had
+`dW (TN)` as a single 384×384×4096 entry and nothing for the other three weight
+gradients. Adding them showed the attention-projection weight gradient running
+at **1846 GF/s where every other shape reaches 7000–8000**. A 128×128 tile cuts
+384×384 into **nine blocks** on a 36-SM card. Three quarters of the machine is
+idle and no amount of inner-loop work fixes that.
+
+Two fixes, both shape-dependent — which is the point, and is why cuBLAS ships
+dozens of kernels rather than one good one.
+
+**A second, half-height tile** (64×128, 4 blocks/SM) for grids that cannot fill
+the machine once. It is worth +25% on the nine-block shape and −3% on the
+96-block ones, so it is selected per shape rather than adopted globally.
+
+**Split-K when the output is small and K is long.** I had costed this before,
+for 4096×384×384, and correctly rejected it: the output there is 6.3 MB, so
+every extra partial is another 6.3 MB of traffic to recover a third of a wave.
+The weight gradients are the *opposite* shape — 590 KB of output against
+K=4096 — so the partials are nearly free. Same technique, opposite verdict, and
+the deciding quantity is **K against M·N**, not the wave count I had been
+staring at. Partials go to a workspace and are summed in a fixed order rather
+than through atomics, and alpha/beta/the fused epilogue are applied once by the
+reduction rather than per split.
+
+| shape | before | after | |
+|---|---:|---:|---:|
+| `dW attnproj` 384×384×4096 | 1846 | **6899** | 3.7× |
+| `dW qkv` 384×1152×4096 | 4223 | **7727** | 1.8× |
+| `dW fc` 384×1536×4096 | 5591 | **7673** | 1.4× |
+| `dW fcproj` 1536×384×4096 | 5578 | **7623** | 1.4× |
+
+**58.9 → 54.0 ms**, six runs spanning 53.9–54.0, gradient check exact.
+
+The benchmark not covering these shapes is the part worth dwelling on. Three of
+the four largest matmuls in the backward pass had never been measured
+individually, so the one running at a quarter speed was invisible — averaged
+into a GEMM category that looked healthy at 65%.
+
+### The clock lock does not stay locked
+
+Twice now a change has measured as a large speedup and been a clock ratio.
+`ncu` resets the application clock when it detaches; the lock has also lapsed on
+its own. Both times the number looked plausible — 59.9 → 38 ms is 1.58×, and so
+is 1900/1200.
+
+This repo already had a rule saying never to quote a ratio on an unpinned clock.
+That rule does not survive a pin that comes undone *silently, between the
+pinning and the measurement*. So there is now `scripts/measure.bat`, which reads
+the clock on both sides of whatever it runs and labels the output UNPINNED if
+either reading is wrong:
+
+```
+[clock] 1200 MHz before and after -- timings above are comparable
+```
+
+A discipline that depends on remembering to check is not a discipline.
 
 ### What I take from this
 
