@@ -10,8 +10,10 @@ const KernelEntry KERNELS[] = {
     {6, "vectorized",sgemm_vectorized,"float4 loads + transposed As", 1e-4},
     {7, "warptile",  sgemm_warptile,  "warp-level tiling, BK=16", 1e-4},
     {8, "dbuffer",   sgemm_doublebuffer, "double-buffered SMEM, 1 barrier/chunk", 1e-4},
+#if BMB_TF32
     {9, "tensorcore",sgemm_tensorcore,   "WMMA m16n16k8 TF32 tensor cores", 4e-3},
     {10,"mma",       sgemm_mma,          "raw mma.sync, lane-major SMEM, 64x64 warp tile", 4e-3},
+#endif
 };
 
 const int NUM_KERNELS = sizeof(KERNELS) / sizeof(KERNELS[0]);

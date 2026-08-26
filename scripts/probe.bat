@@ -7,5 +7,5 @@ if not defined VSCMD_ARG_HOST_ARCH (
 )
 set "NVCC=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.3\bin\nvcc.exe"
 if not exist bench mkdir bench
-"%NVCC%" -arch=sm_89 -O2 -std=c++17 -allow-unsupported-compiler "%~1" -o bench\probe.exe || exit /b 1
+"%NVCC%" -arch=sm_89 -DBMB_TF32=1 -O2 -std=c++17 -allow-unsupported-compiler "%~1" -o bench\probe.exe || exit /b 1
 bench\probe.exe %2 %3 %4 %5

@@ -72,6 +72,7 @@
 // independent work, and in the staging path, between a global load and a
 // barrier, there is nothing to hide behind.
 #include "../kernels.h"
+#if BMB_TF32
 
 namespace {
 constexpr int WARPSIZE = 32;
@@ -351,3 +352,14 @@ void sgemm_mma(int M, int N, int K, float alpha, const float *A, const float *B,
     mma_kernel<BM, BN, BK, WM, WN, NUM_THREADS, MINB>
         <<<grid, NUM_THREADS>>>(M, N, K, alpha, A, B, beta, C);
 }
+
+#else
+// Pre-Ampere: TF32 tensor cores do not exist, so this stage of the ladder
+// is not built. The entry stays so the registry and the benchmark harness
+// do not have to change shape per architecture; it runs the best fp32
+// kernel instead, and reports as such.
+void sgemm_mma(int M, int N, int K, float alpha, const float *A,
+             const float *B, float beta, float *C) {
+    sgemm_tile2d(M, N, K, alpha, A, B, beta, C);
+}
+#endif

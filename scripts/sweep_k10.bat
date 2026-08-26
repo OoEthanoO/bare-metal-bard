@@ -13,7 +13,7 @@ if not defined VSCMD_ARG_HOST_ARCH (
   call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
 )
 set "NVCC=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.3\bin\nvcc.exe"
-set "FLAGS=-arch=sm_89 -O3 -lineinfo -std=c++17 -allow-unsupported-compiler -Xcompiler /wd4819 -diag-suppress 177"
+set "FLAGS=-arch=sm_89 -DBMB_TF32=1 -O3 -lineinfo -std=c++17 -allow-unsupported-compiler -Xcompiler /wd4819 -diag-suppress 177"
 set "SIZE=%~1"
 if "%SIZE%"=="" set "SIZE=4096"
 shift

@@ -21,10 +21,16 @@
 // stores into shared memory.
 #include "gemm.h"
 #include "gelu.cuh"
+// Tensor cores here are TF32, which is Ampere and newer. BMB_TF32 is set by
+// the build when the target arch is sm_80+; without it the whole tensor-core
+// half of this file compiles out and every GEMM takes the fp32 path. That is
+// not a hypothetical: the brief this project came from suggests a free Colab
+// T4, which is sm_75, and until now the repo would not build there at all.
+#if BMB_TF32
 #include <mma.h>
-#include <type_traits>
-
 using namespace nvcuda;
+#endif
+#include <type_traits>
 #include "kernels.h"
 #include <cstdio>
 
@@ -252,6 +258,7 @@ __global__ __launch_bounds__(NUM_THREADS) void gemm_fast(
             }
 }
 
+#if BMB_TF32
 // ------------------------------------------------------- tensor-core path
 //
 // The same transpose-aware idea as gemm_fast, but the inner product runs on the
@@ -411,6 +418,8 @@ __global__ __launch_bounds__(NUM_THREADS, 2) void gemm_tc(
     }
 }
 
+#endif  // BMB_TF32
+
 // --------------------------------------------------------------- slow path
 // Guarded, scalar, handles any M/N/K and any transpose combination. Used for
 // ragged shapes (e.g. an unpadded vocabulary). Correctness first; the fast
@@ -452,6 +461,7 @@ __global__ void gemm_generic(int M, int N, int K, float alpha, const float *A,
     }
 }
 
+#if BMB_TF32
 // ------------------------------------------------- tensor-core path, raw PTX
 // Kernel 10's structure, made transpose-aware. See src/kernels/k10_mma.cu for
 // why the shared layout looks like this; the short version is that shared
@@ -698,6 +708,8 @@ __global__ __launch_bounds__(NUM_THREADS, MINB) void gemm_mma(
     }
 }
 
+#endif  // BMB_TF32
+
 // Tile parameters of the fast path, matching kernel 8.
 constexpr int FBM = 128, FBN = 128, FBK = 16;
 constexpr int FWM = 64, FWN = 64, FWNITER = 4;
@@ -812,6 +824,10 @@ void dispatch_epi(int M, int N, int K, float alpha, const float *A,
     // Tensor cores when asked for and the shape lines up. BK is 32 here, not
     // the fp32 path's 16, so the alignment test is stricter and a shape that
     // misses it simply falls through to fp32 rather than to the slow path.
+    //
+    // Below sm_80 there is no TF32 path at all and g_tf32 can never be true,
+    // so this whole branch compiles out and the fp32 kernels carry everything.
+#if BMB_TF32
     if (g_tf32 && M % TBM == 0 && N % TBN == 0 && K % TBK == 0) {
         dim3 grid(N / TBN, M / TBM);
 #ifdef GEMM_USE_WMMA
@@ -868,7 +884,9 @@ void dispatch_epi(int M, int N, int K, float alpha, const float *A,
                                                 ep, 0, K);
         }
 #endif
-    } else if (M % FBM == 0 && N % FBN == 0 && K % FBK == 0) {
+    } else
+#endif  // BMB_TF32
+        if (M % FBM == 0 && N % FBN == 0 && K % FBK == 0) {
         dim3 grid(N / FBN, M / FBM);
         gemm_fast<TA, TB, FBM, FBN, FBK, FWM, FWN, FWNITER, FTM, FTN, FTHREADS, EPI>
             <<<grid, FTHREADS, 0, stream>>>(M, N, K, alpha, A, B, beta, C, ep);
@@ -912,5 +930,21 @@ void gemm(bool transA, bool transB, int M, int N, int K, float alpha,
     else                         dispatch<true,  true >(M, N, K, alpha, A, B, beta, C, stream, ep);
 }
 
-void gemm_set_tf32(bool on) { g_tf32 = on; }
+void gemm_set_tf32(bool on) {
+#if BMB_TF32
+    g_tf32 = on;
+#else
+    // Pre-Ampere: asking for TF32 is not an error, it just has no effect. The
+    // caller gets fp32, which is what the hardware can do.
+    (void)on;
+#endif
+}
+
+bool gemm_tf32_available() {
+#if BMB_TF32
+    return true;
+#else
+    return false;
+#endif
+}
 bool gemm_tf32() { return g_tf32; }

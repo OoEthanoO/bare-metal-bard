@@ -30,6 +30,7 @@
 // instead of each thread issuing scalar FMAs over its own register tile, the
 // whole warp cooperatively issues one 16x16x8 matrix multiply.
 #include "../kernels.h"
+#if BMB_TF32
 #include <mma.h>
 
 using namespace nvcuda;
@@ -244,3 +245,14 @@ void sgemm_tensorcore(int M, int N, int K, float alpha, const float *A,
     tensorcore_kernel<BM, BN, BK, WM, WN, NUM_THREADS>
         <<<grid, NUM_THREADS>>>(M, N, K, alpha, A, B, beta, C);
 }
+
+#else
+// Pre-Ampere: TF32 tensor cores do not exist, so this stage of the ladder
+// is not built. The entry stays so the registry and the benchmark harness
+// do not have to change shape per architecture; it runs the best fp32
+// kernel instead, and reports as such.
+void sgemm_tensorcore(int M, int N, int K, float alpha, const float *A,
+                    const float *B, float beta, float *C) {
+    sgemm_tile2d(M, N, K, alpha, A, B, beta, C);
+}
+#endif

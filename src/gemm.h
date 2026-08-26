@@ -53,3 +53,7 @@ void batched_gemm(bool transA, bool transB, int batch, int M, int N, int K,
 // every framework makes by default on Ampere and later.
 void gemm_set_tf32(bool on);
 bool gemm_tf32();
+
+// False on pre-Ampere hardware, where the TF32 kernels are not compiled in
+// at all. gemm_set_tf32(true) is then a no-op rather than an error.
+bool gemm_tf32_available();

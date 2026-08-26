@@ -71,7 +71,8 @@ if not exist "%NVCC%" (
   echo no nvcc at "%NVCC%" -- pass --cuda ^<version^> for an installed toolkit
   exit /b 1
 )
-set "FLAGS=-arch=sm_89 -O3 -lineinfo -std=c++17 -allow-unsupported-compiler"
+REM sm_89 has TF32 tensor cores; the Makefile detects this, here it is fixed.
+set "FLAGS=-arch=sm_89 -DBMB_TF32=1 -O3 -lineinfo -std=c++17 -allow-unsupported-compiler"
 set "FLAGS=%FLAGS% -Xcompiler /wd4819 -diag-suppress 177"
 
 if not exist bench mkdir bench

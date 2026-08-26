@@ -12,7 +12,13 @@ ARCH ?= sm_$(shell nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/d
 CCBIN     := $(shell command -v g++-13 2>/dev/null)
 CCBIN_FLAG := $(if $(CCBIN),-ccbin $(CCBIN),)
 
-NVCCFLAGS := $(CCBIN_FLAG) -arch=$(ARCH) -O3 -lineinfo -std=c++17 -Xcompiler -pthread \
+# TF32 tensor cores are Ampere and newer. Detected rather than assumed, so a
+# clone builds on a T4 or a V100 -- it just builds without the tensor-core half
+# and every GEMM takes the fp32 path.
+ARCH_NUM  := $(patsubst sm_%,%,$(ARCH))
+TF32      := $(shell [ "$(ARCH_NUM)" -ge 80 ] 2>/dev/null && echo 1 || echo 0)
+
+NVCCFLAGS := $(CCBIN_FLAG) -arch=$(ARCH) -DBMB_TF32=$(TF32) -O3 -lineinfo -std=c++17 -Xcompiler -pthread \
              -Xcompiler -Wall -Xcompiler -Wno-unused-function
 LDFLAGS   := -lcublas
 
