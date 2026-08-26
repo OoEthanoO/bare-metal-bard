@@ -10,6 +10,12 @@ kernel here is written from scratch.
 
 **Hardware:** RTX 4070 Laptop (Ada, sm_89) — 36 SMs, 256 GB/s, 8 GB, 55 W.
 
+Builds and runs on anything from **sm_70 upward**. The tensor-core kernels
+are TF32, which is Ampere and newer, so below sm_80 they are not compiled in
+and every matmul takes the fp32 path — the ladder then runs kernels 1-8 and
+`--tf32` is a no-op rather than an error. That matters because the obvious
+free hardware for this project is a Colab or Kaggle T4, which is sm_75.
+
 **Writeup:** <https://bare-metal-bard.vercel.app>
 
 ---
