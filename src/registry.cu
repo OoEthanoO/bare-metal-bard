@@ -13,6 +13,7 @@ const KernelEntry KERNELS[] = {
 #if BMB_TF32
     {9, "tensorcore",sgemm_tensorcore,   "WMMA m16n16k8 TF32 tensor cores", 4e-3},
     {10,"mma",       sgemm_mma,          "raw mma.sync, lane-major SMEM, 64x64 warp tile", 4e-3},
+    {11,"cpasync",   sgemm_cpasync,      "cp.async staging, multi-stage SMEM pipeline", 4e-3},
 #endif
 };
 

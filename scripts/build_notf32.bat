@@ -10,11 +10,8 @@ REM
 REM   scripts\build_notf32.bat
 setlocal enabledelayedexpansion
 cd /d "%~dp0.."
-if not defined VSCMD_ARG_HOST_ARCH (
-  call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
-)
-set "NVCC=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.3\bin\nvcc.exe"
-set "FLAGS=-arch=sm_89 -DBMB_TF32=0 -O3 -std=c++17 -allow-unsupported-compiler -Xcompiler /wd4819 -diag-suppress 177"
+call "%~dp0env.bat" || exit /b 1
+set "FLAGS=%FLAGS_BASE% -DBMB_TF32=0"
 set "GPT_SRC=src\gpt.cu src\gemm.cu src\bgemm.cu src\nn.cu src\attention.cu src\flash.cu src\ddp.cu"
 set "KERNELS="
 for %%f in (src\kernels\*.cu) do set "KERNELS=!KERNELS! %%f"

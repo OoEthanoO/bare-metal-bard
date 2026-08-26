@@ -14,69 +14,19 @@ REM     host_config.h, not a real incompatibility -- hence the override flag.
 
 cd /d "%~dp0.."
 
-if not defined VSCMD_ARG_HOST_ARCH (
-  call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
-)
-
-REM Toolkits install side by side and this builds with the NEWEST one present.
-REM That matters because nvcc's version determines the generated SASS and the
-REM cuBLAS beside it is the denominator of every percentage in the README, so
-REM which toolkit built a binary is part of the measurement, not a detail.
-REM
-REM To pin an older one on purpose:
+REM The toolkit, host compiler and architecture all come from env.bat, which is
+REM the one place any of them is decided. To pin an older toolkit on purpose:
 REM   scripts\build.bat --cuda 12.5 sgemm
-set "CUDA_ROOT=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA"
 if /i "%~1"=="--cuda" (
-  set "CUDA_PIN=%CUDA_ROOT%\v%~2"
+  set "CUDA_PIN=%ProgramFiles%\NVIDIA GPU Computing Toolkit\CUDA\v%~2"
   shift
   shift
 )
-
-REM Default to the newest COMPLETE toolkit installed, compared numerically so
-REM v10 beats v9 rather than losing a string compare.
-REM
-REM The ambient CUDA_PATH is deliberately IGNORED. It records whichever
-REM installer ran last, not the newest toolkit present -- installing 13.3
-REM alongside 12.5 left it pointing at 12.5 -- and trusting it is what caused
-REM this repo to benchmark on the old toolkit for a whole session without
-REM anyone noticing. Pass --cuda <version> to pin one on purpose.
-REM
-REM "Complete" is checked rather than assumed, because a toolkit can be
-REM installed and still not compile: CUDA 13 ships crt and nvvm as separate
-REM installer components, and a partial install has an nvcc that fails on the
-REM first #include. Silently defaulting to that is worse than not finding it.
-if not defined CUDA_PIN (
-  set /a BEST_NUM=0
-  for /d %%d in ("%CUDA_ROOT%\v*") do (
-    set "VER=%%~nxd"
-    set "VER=!VER:~1!"
-    for /f "tokens=1,2 delims=." %%a in ("!VER!.0") do (
-      set /a NUM=%%a*1000+%%b
-      if exist "%%~fd\bin\nvcc.exe" if exist "%%~fd\include\crt\host_config.h" if exist "%%~fd\nvvm" (
-        if !NUM! GTR !BEST_NUM! (
-          set /a BEST_NUM=!NUM!
-          set "CUDA_PIN=%%~fd"
-        )
-      )
-    )
-  )
-)
-if not defined CUDA_PIN (
-  echo no complete CUDA toolkit found under "%CUDA_ROOT%"
-  exit /b 1
-)
-set "CUDA_PATH=%CUDA_PIN%"
-set "NVCC=%CUDA_PATH%\bin\nvcc.exe"
-if not exist "%NVCC%" (
-  echo no nvcc at "%NVCC%" -- pass --cuda ^<version^> for an installed toolkit
-  exit /b 1
-)
-REM sm_89 has TF32 tensor cores; the Makefile detects this, here it is fixed.
-set "FLAGS=-arch=sm_89 -DBMB_TF32=1 -O3 -lineinfo -std=c++17 -allow-unsupported-compiler"
-set "FLAGS=%FLAGS% -Xcompiler /wd4819 -diag-suppress 177"
+call "%~dp0env.bat" || exit /b 1
 
 if not exist bench mkdir bench
 echo [toolkit] %CUDA_PATH%
+echo [arch]    %ARCH% (BMB_TF32=%TF32%)
 
 set "KERNELS="
 for %%f in (src\kernels\*.cu) do set "KERNELS=!KERNELS! %%f"
@@ -102,7 +52,7 @@ for %%t in (%TARGETS%) do (
   if "%%t"=="test_grad"    "%NVCC%" %FLAGS% tools\test_grad.cu %GPT_SRC% -o bench\test_grad.exe
   if "%%t"=="test_flash"   "%NVCC%" %FLAGS% tools\test_flash.cu src\flash.cu src\attention.cu src\bgemm.cu src\gemm.cu -o bench\test_flash.exe
   if "%%t"=="test_ddp"     "%NVCC%" %FLAGS% tools\test_ddp.cu src\ddp.cu -o bench\test_ddp.exe
-  if "%%t"=="device_query" "%NVCC%" -arch=sm_89 -O2 -std=c++17 -allow-unsupported-compiler tools\device_query.cu -o bench\device_query.exe
+  if "%%t"=="device_query" "%NVCC%" -arch=%ARCH% -O2 -std=c++17 -allow-unsupported-compiler tools\device_query.cu -o bench\device_query.exe
   if errorlevel 1 exit /b 1
 )
 echo [build] ok

@@ -41,3 +41,4 @@ void sgemm_warptile(int M, int N, int K, float alpha, const float *A, const floa
 void sgemm_doublebuffer(int M, int N, int K, float alpha, const float *A, const float *B, float beta, float *C);
 void sgemm_tensorcore(int M, int N, int K, float alpha, const float *A, const float *B, float beta, float *C);
 void sgemm_mma(int M, int N, int K, float alpha, const float *A, const float *B, float beta, float *C);
+void sgemm_cpasync(int M, int N, int K, float alpha, const float *A, const float *B, float beta, float *C);

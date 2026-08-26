@@ -29,7 +29,7 @@ TOOLS   := bench/device_query bench/test_gemm
 .PHONY: all clean run tools test
 all: $(BIN)
 
-$(BIN): $(SRC) src/kernels.h | bench
+$(BIN): $(SRC) src/kernels.h src/kernels/lane_major.cuh | bench
 	$(NVCC) $(NVCCFLAGS) $(SRC) -o $@ $(LDFLAGS)
 
 tools: $(TOOLS)

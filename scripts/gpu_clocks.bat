@@ -8,12 +8,25 @@ REM   scripts\gpu_clocks.bat lock [MHz]     (default 1200; prompts for UAC)
 REM   scripts\gpu_clocks.bat unlock
 REM   scripts\gpu_clocks.bat counters       (one-time; needs a reboot after)
 REM
-REM Why 1200: this is a 55 W mobile RTX 4070. Left alone it boosts to 3105 MHz
-REM and then falls back as it hits the power cap. Measured cuBLAS SGEMM at
-REM N=2048 swung between 9.0 and 12.3 TFLOP/s across runs in one session purely
-REM from thermal state -- a 37% swing in the DENOMINATOR of every "% of cuBLAS"
-REM claim in this repo. 1200 MHz is the highest round clock the card holds
-REM without deviating under a sustained dense-GEMM load.
+REM Why 1200: the card this project started on was a 55 W mobile RTX 4070. Left
+REM alone it boosts to 3105 MHz and then falls back as it hits the power cap.
+REM Measured cuBLAS SGEMM at N=2048 swung between 9.0 and 12.3 TFLOP/s across
+REM runs in one session purely from thermal state -- a 37% swing in the
+REM DENOMINATOR of every "% of cuBLAS" claim in this repo. 1200 MHz is the
+REM highest round clock that card holds without deviating under a sustained
+REM dense-GEMM load.
+REM
+REM The card is now a mobile RTX 5070 Ti (Blackwell, sm_120), which boosts to
+REM 3090 and has the same problem. 1200 is kept -- not because it is that
+REM card's ceiling, but because it holds there too (measured: 1192 MHz on every
+REM busy sample of a 20-second GEMM, at 49 W), and every number in this repo is
+REM a ratio against a cuBLAS measured at the same clock. Changing the pin would
+REM buy larger absolute numbers and cost the ability to compare anything to
+REM anything.
+REM
+REM What DID change is how the pin is verified: this card idles at 0-600 MHz
+REM with the lock applied, so reading the clock before and after a run says
+REM nothing. See measure.ps1.
 REM
 REM The lock and the registry key both need administrator rights, so this
 REM re-launches itself elevated and Windows shows a UAC prompt. That prompt is
@@ -43,13 +56,13 @@ if /i "%ACTION%"=="lock" (
   nvidia-smi -lgc %CLOCK%,%CLOCK%
   echo SM clock locked to %CLOCK% MHz
   nvidia-smi --query-gpu=clocks.sm --format=csv
-  pause
+  if not defined BMB_NOPAUSE pause
   exit /b 0
 )
 if /i "%ACTION%"=="unlock" (
   nvidia-smi -rgc
   echo SM clock lock released
-  pause
+  if not defined BMB_NOPAUSE pause
   exit /b 0
 )
 if /i "%ACTION%"=="counters" (
@@ -59,7 +72,7 @@ if /i "%ACTION%"=="counters" (
       /v RmProfilingAdminOnly /t REG_DWORD /d 0 /f
   echo.
   echo Set. This takes effect after a reboot.
-  pause
+  if not defined BMB_NOPAUSE pause
   exit /b 0
 )
 echo usage: %~nx0 {status^|lock [MHz]^|unlock^|counters}
