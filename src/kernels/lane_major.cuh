@@ -77,11 +77,41 @@ __device__ __forceinline__ int a_swz(int unit) { return (unit / (BM / MMA_M)) & 
 template <int BN>
 __device__ __forceinline__ int b_swz(int unit) { return unit % (BN / 16); }
 
+// AND A PERMUTATION OF THE SLOT INDEX, which the swizzle above cannot replace.
+//
+// A logical slot is `(m % 8) * 4 + (k % 4)`: the low two bits come from k, the
+// top three from m. An address is `slot * 4 + elem` floats, so the k bits
+// stride banks by 4 and the m bits stride them by 16 -- which is 2 banks, not
+// 8. Whichever of the two a staging warp VARIES therefore decides whether its
+// stores spread or pile up, and the swizzle cannot fix the bad case because it
+// is uniform inside a unit and the variation is inside a unit.
+//
+// Kernel 10 never meets this: each of its threads stores four elements and
+// steps the slot itself, so both bit groups move. `cp.async` stores ONE element
+// per thread, so only the axis the warp walks moves -- and when that is m (or n
+// for B), the whole warp lands on 4 banks. Measured by tools/smem_banks.py:
+// 4-way, against 2-way for the other two orientations.
+//
+// The cure is to rotate the slot so the bits that vary end up where they
+// stride banks. It applies to the store AND the load, so it is invisible to
+// correctness: the fragment load reads whole units, and any bijection on slots
+// leaves 32 lanes covering 32 distinct 16-byte chunks.
+//
+//     ROT = !(the warp walks k)
+//
+// which is why it is a parameter and not a constant: A and B can walk
+// different axes in the same kernel, and do, in three of the four transpose
+// cases the model needs.
+__device__ __forceinline__ int slot_rot(int s, bool on) {
+    return on ? (((s & 3) << 3) | (s >> 2)) : s;
+}
+
 // A element (m, k) within a BM x BK block tile.
-template <int BM>
+template <int BM, bool ROT = false>
 __device__ __forceinline__ int a_off(int m, int k) {
     const int unit = (k / MMA_K) * (BM / MMA_M) + m / MMA_M;
-    const int slot = ((m % 8) * 4 + (k % 4)) ^ a_swz<BM>(unit);  // owning lane
+    const int slot =
+        slot_rot((m % 8) * 4 + (k % 4), ROT) ^ a_swz<BM>(unit);  // owning lane
     const int elem = ((k % MMA_K) / 4) * 2 + ((m % MMA_M) / 8);  // a0..a3
     return unit * UNIT + slot * 4 + elem;
 }
@@ -89,10 +119,10 @@ __device__ __forceinline__ int a_off(int m, int k) {
 // B element (k, n) within a BK x BN block tile. Registers b0,b1 of the n8 tile
 // containing n come first, then b0,b1 of its neighbour, so a lane's four
 // floats span two mma's worth of B and load as one float4.
-template <int BN>
+template <int BN, bool ROT = false>
 __device__ __forceinline__ int b_off(int k, int n) {
     const int unit = (k / MMA_K) * (BN / 16) + n / 16;
-    const int slot = ((n % 8) * 4 + (k % 4)) ^ b_swz<BN>(unit);
+    const int slot = slot_rot((n % 8) * 4 + (k % 4), ROT) ^ b_swz<BN>(unit);
     const int elem = ((k % MMA_K) / 4) + ((n % 16) / 8) * 2;
     return unit * UNIT + slot * 4 + elem;
 }

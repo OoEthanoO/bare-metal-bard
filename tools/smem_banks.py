@@ -234,6 +234,133 @@ for kind, trans, label in (("a", False, "A  transA=false"), ("a", True, "A  tran
 print()
 
 
+# ---------------------------------------------- 2b. the cp.async staging map
+#
+# `cp.async` copies 4 bytes at a time here (cp_async.cuh says why the size is
+# forced), so a staging thread no longer writes four consecutive elements. It
+# writes ONE, and consecutive lanes take consecutive positions along whichever
+# axis the operand is contiguous in. That keeps each individual copy a coalesced
+# 128-byte warp read on the GLOBAL side -- and completely changes which bits
+# vary across a warp on the SHARED side.
+#
+# WHICH BREAKS TWO OF THE FOUR CASES ON THE STORE SIDE. A logical slot is
+# (m%8)*4 + (k%4): the low two bits come from k, the top three from m. An
+# address is slot*4 + elem floats, so the k bits stride banks by 4 and the m
+# bits stride them by 16 -- which is 2 banks, not 8. Kernel 10 never meets this
+# because each of its threads writes four elements and steps the slot itself,
+# moving both bit groups. With one element per thread, only the axis the warp
+# walks moves:
+#
+#     A transA=false  walks k  ->  2-way
+#     A transA=true   walks m  ->  8-way      <- and the XOR swizzle cannot
+#     B transB=false  walks n  ->  8-way         help, because it is uniform
+#     B transB=true   walks k  ->  2-way         inside a unit
+#
+# Rotating the slot so the varying bits land where they stride banks fixes that
+# exactly, and is invisible to correctness -- the fragment load reads whole
+# units, so any bijection on slots still has 32 lanes covering 32 distinct
+# 16-byte chunks.
+#
+# AND IT IS 7% SLOWER ON THE GPU (11994 -> 11152 GF/s, kernel 11 at N=4096).
+# The reason is the column this table did not have when the rotation was
+# written: a permutation of slots applies to the LOAD as well, and a 128-bit
+# load is serviced eight lanes at a time, so each octet must cover 32 banks by
+# itself. The rotation gives the store side 32 lanes over 32 banks and takes the
+# load side from 1-way to 4-way. It does not remove a conflict, it MOVES one.
+#
+# Which is why both columns are printed and neither is asserted alone. The
+# store side is asynchronous under `cp.async` and has a whole k-chunk of
+# arithmetic to hide behind; the load side stalls the warp that issued it. A
+# tool that had only ever counted stores would have recommended the slower
+# kernel with total confidence -- it did, and this comment is the repair.
+CP_BK = 16  # the pipelined kernels trade BK for stages; see gemm.cu
+
+
+def rot(s, on):
+    return (((s & 3) << 3) | (s >> 2)) if on else s
+
+
+def cp_off_a(m, k, along_k):
+    unit = (k // MMA_K) * (BM // MMA_M) + m // MMA_M
+    slot = rot((m % 8) * 4 + (k % 4), not along_k) ^ swz(unit, "a", along_k)
+    return unit * UNIT + slot * 4 + ((k % MMA_K) // 4) * 2 + ((m % MMA_M) // 8)
+
+
+def cp_off_b(k, n, along_k):
+    unit = (k // MMA_K) * (BN // 16) + n // 16
+    slot = rot((n % 8) * 4 + (k % 4), not along_k) ^ swz(unit, "b", along_k)
+    return unit * UNIT + slot * 4 + ((k % MMA_K) // 4) + ((n % 16) // 8) * 2
+
+
+def cp_elems(kind, trans, bk):
+    """The (element index) -> (m,k) or (k,n) map the cp.async staging uses."""
+    is_a = kind == "a"
+    along_k = (not trans) if is_a else trans
+    inner = bk if along_k else (BM if is_a else BN)
+    total = (BM if is_a else BN) * bk
+    for e in range(total):
+        if is_a:
+            yield e, ((e % inner) if trans else (e // inner),
+                      (e // inner) if trans else (e % inner))
+        else:
+            yield e, ((e // inner) if not trans else (e % inner),
+                      (e % inner) if not trans else (e // inner))
+
+
+def cp_stage(kind, trans, nt, bk=CP_BK, rotate=True):
+    """Worst simultaneous hits on one bank across a warp of cp.async stores."""
+    is_a = kind == "a"
+    along_k = (not trans) if is_a else trans
+    ak = along_k if rotate else True  # rotate=False models the unfixed version
+    worst, seen = 0, {}
+    banks = {}
+    for e, (x, y) in cp_elems(kind, trans, bk):
+        o = cp_off_a(x, y, ak) if is_a else cp_off_b(x, y, ak)
+        seen[o] = seen.get(o, 0) + 1
+        banks.setdefault(e // 32, {}).setdefault(o % 32, 0)
+        banks[e // 32][o % 32] += 1
+    for w in banks.values():
+        worst = max(worst, max(w.values()))
+    total = (BM if is_a else BN) * bk
+    return worst, len(seen) == total
+
+
+def cp_load_ways(rotate):
+    """A fragment load is 128-bit: eight lanes per phase, 32 banks per phase."""
+    worst = 0
+    for unit in range(BK // MMA_K * (BN // 16)):
+        f = unit % 8
+        for phase in range(4):
+            banks = {}
+            for l in range(phase * 8, phase * 8 + 8):
+                p = rot(l, rotate) ^ f
+                for e in range(4):
+                    banks[(p * 4 + e) % 32] = banks.get((p * 4 + e) % 32, 0) + 1
+            worst = max(worst, max(banks.values()))
+    return worst
+
+
+print("cp.async staging (BK=%d), all four operand orientations:" % CP_BK)
+print("%-24s %7s %12s %10s %8s" % ("", "walks", "stores u/r", "loads u/r", "onto"))
+for kind, trans, label in (("a", False, "A  transA=false"), ("a", True, "A  transA=true"),
+                           ("b", False, "B  transB=false"), ("b", True, "B  transB=true")):
+    is_a = kind == "a"
+    along_k = (not trans) if is_a else trans
+    axis = "k" if along_k else ("m" if is_a else "n")
+    unrot, _ = cp_stage(kind, trans, NT, rotate=False)
+    rotd, bij = cp_stage(kind, trans, NT, rotate=True)
+    # The load side depends only on whether the permutation is applied.
+    lu, lr = cp_load_ways(False), cp_load_ways(not along_k)
+    print("%-24s %7s %6dx /%3dx %5dx /%3dx %8s"
+          % (label, axis, unrot, rotd, lu, lr, "1:1" if bij else "COLLIDES"))
+    check(bij, "cp.async %s: staging map is not a bijection" % label)
+    # What IS asserted: whichever variant ships, the exposed side stays clean.
+    # The kernels ship unrotated, so the load column is the one that binds.
+    check(lu <= 2, "cp.async %s: fragment load is %d-way conflicted" % (label, lu))
+print("(u = unrotated, r = rotated. The kernels ship unrotated: the store")
+print(" column is worse and the load column, which is the exposed one, is not.)")
+print()
+
 # --------------------------------------------------------- 3. bank conflicts
 def store_ways(is_a, swz):
     """Worst simultaneous hits on one bank across a warp of staging threads."""

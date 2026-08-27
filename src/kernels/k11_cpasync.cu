@@ -117,6 +117,39 @@ __global__ __launch_bounds__(NUM_THREADS, MINB) void cpasync_kernel(
     float acc[WMITER][WNITER][2][4] = {};
     const int nchunks = K / BK;
 
+    // A is M x K, so a staging warp walks k; B is K x N, so it walks n. With
+    // one element per thread only the walked axis varies across the warp, and
+    // for B that axis is the one the slot index scales by 4, so B's stores land
+    // on a quarter of the banks: `tools/smem_banks.py` says 8-way, against A's
+    // 2-way. Rotating the slot index fixes it exactly (lane_major.cuh).
+    //
+    // AND COSTS 7%. 11994 -> 11152 GF/s at N=4096, interleaved A/B, three runs
+    // each, clock verified 1185-1192 throughout. The reason is the half of the
+    // ledger I did not simulate before writing it: the permutation applies to
+    // the FRAGMENT LOAD as well, and a 128-bit load is serviced eight lanes at
+    // a time, so each octet has to cover all 32 banks by itself.
+    //
+    //     lanes 0-7, physical slot          banks touched
+    //       unrotated  0  1  2  3 4 5 6 7   0 4 8 12 16 20 24 28   1-way
+    //       rotated    0  8 16 24 1 9 17 25 0 0 0  0  4  4  4  4   4-way
+    //
+    // So the rotation does not remove a conflict, it MOVES one -- 8-way on the
+    // stores becomes 4-way on the loads -- and the loads are the side that
+    // cannot afford it, for two compounding reasons. Kernel 10's founding
+    // observation is that loads outnumber stores three to one. And the pipeline
+    // adds a second: `cp.async` stores are asynchronous and have a whole
+    // k-chunk of arithmetic to hide behind, while a fragment load stalls the
+    // warp that issued it. A conflict on an overlapped path is nearly free; the
+    // same conflict on an exposed one is not.
+    //
+    // Left unrotated, and switchable with -DK11_ROT=1 because a result this
+    // counterintuitive should stay re-checkable rather than becoming a claim.
+#ifndef K11_ROT
+#define K11_ROT 0
+#endif
+    constexpr bool ROT_A = false;      // walks k: nothing to rotate either way
+    constexpr bool ROT_B = K11_ROT;    // walks n
+
     // One chunk of A and of B into buffer `buf`. Note what is NOT here: no
     // value, no float4, no register. Only a pair of addresses per element.
     auto fetch = [&](int buf, int k0) {
@@ -124,14 +157,14 @@ __global__ __launch_bounds__(NUM_THREADS, MINB) void cpasync_kernel(
         for (int i = 0; i < A_PER; ++i) {
             const int e = tid + i * NUM_THREADS;
             const int m = e / BK, k = e % BK;
-            cp_async4(smem_u32(&As[buf * (BM * BK) + a_off<BM>(m, k)]),
+            cp_async4(smem_u32(&As[buf * (BM * BK) + a_off<BM, ROT_A>(m, k)]),
                       &A[(size_t)(cRow + m) * K + k0 + k]);
         }
 #pragma unroll
         for (int i = 0; i < B_PER; ++i) {
             const int e = tid + i * NUM_THREADS;
             const int k = e / BN, n = e % BN;
-            cp_async4(smem_u32(&Bs[buf * (BK * BN) + b_off<BN>(k, n)]),
+            cp_async4(smem_u32(&Bs[buf * (BK * BN) + b_off<BN, ROT_B>(k, n)]),
                       &B[(size_t)(k0 + k) * N + cCol + n]);
         }
     };
@@ -147,7 +180,8 @@ __global__ __launch_bounds__(NUM_THREADS, MINB) void cpasync_kernel(
             for (int i = 0; i < WMITER; ++i) {
                 const int unit = kt * (BM / MMA_M) + warpRow * WMITER + i;
                 const float4 v = reinterpret_cast<const float4 *>(
-                    &Ab[unit * UNIT + (lane ^ a_swz<BM>(unit)) * 4])[0];
+                    &Ab[unit * UNIT +
+                        (slot_rot(lane, ROT_A) ^ a_swz<BM>(unit)) * 4])[0];
                 a[i][0] = to_tf32(v.x);
                 a[i][1] = to_tf32(v.y);
                 a[i][2] = to_tf32(v.z);
@@ -157,7 +191,8 @@ __global__ __launch_bounds__(NUM_THREADS, MINB) void cpasync_kernel(
             for (int j = 0; j < WNITER; ++j) {
                 const int unit = kt * (BN / 16) + warpCol * WNITER + j;
                 const float4 v = reinterpret_cast<const float4 *>(
-                    &Bb[unit * UNIT + (lane ^ b_swz<BN>(unit)) * 4])[0];
+                    &Bb[unit * UNIT +
+                        (slot_rot(lane, ROT_B) ^ b_swz<BN>(unit)) * 4])[0];
                 b[j][0] = to_tf32(v.x);
                 b[j][1] = to_tf32(v.y);
                 b[j][2] = to_tf32(v.z);
