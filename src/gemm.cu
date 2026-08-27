@@ -752,6 +752,46 @@ constexpr int TWM = 32, TWN = 64, TTHREADS = 256, TMINB = 2;
 constexpr int SBM = 64, SBN = 128, SBK = 32;
 constexpr int SWM = 32, SWN = 64, STHREADS = 128, SMINB = 4;
 
+// WHAT `cp.async` DID HERE, measured and then reverted, recorded so it is not
+// retried on the same reasoning.
+//
+// Kernel 11 replaces this kernel's register staging with a `cp.async` pipeline
+// and is +8.1% at square N=4096. Doing the same to this kernel -- same layout,
+// same swizzle keys, same four transpose cases, BK cut from 32 to 16 to pay for
+// the stages -- is SLOWER AT EVERY SHAPE THE MODEL RUNS:
+//
+//   shape (NN)                    register-staged   cp.async, 3 stages
+//   4096x1536x384   mlp up               10469            9818    -6.2%
+//   4096x1152x384   qkv proj              9937            9246    -7.0%
+//   4096x384x384    attn proj             7276            6823    -6.2%
+//   4096x384x1536   mlp down              7898            7480    -5.3%
+//   1536x384x4096   dW fcproj             8827            8481    -3.9%
+//   384x384x4096    dW attnproj           7825            7545    -3.6%
+//   384x1536x4096   dW fc                 8804            8531    -3.1%
+//   384x1152x4096   dW qkv                8473            8292    -2.1%
+//
+// End to end that is 46.1 -> 47.4 ms/step. The fp32 path is untouched and reads
+// the same to within noise in both builds, which is what makes this a clean
+// measurement rather than a drifting machine.
+//
+// AND THE FOOTPRINT IS NOT THE REASON, which was the obvious suspect: three
+// stages at BK=16 is 48 KB against the 32 KB here, and on a 100 KiB SM that
+// still fits two blocks. Two stages at BK=16 is 32 KB -- byte for byte what
+// this kernel uses today -- and it loses by the same ~6% (mlp up 9802, attn
+// proj 6878). So the cost is BK itself, not the pipeline it was paying for.
+//
+// The difference from kernel 11 that survives is reuse per barrier. Kernel 11
+// runs a 64x64 warp tile: 128 bytes of shared traffic per mma, and BK=16 still
+// leaves it two k-steps of independent arithmetic to hide a barrier behind.
+// This kernel runs 32x64 -- 192 bytes per mma, chosen when the epilogue and the
+// four transpose cases mattered more than the tile did -- so halving BK doubles
+// the barrier count against arithmetic that was already thinner. A pipeline
+// cannot pay for itself out of a k-chunk that does not have enough work in it.
+//
+// Which makes the next thing to try the warp tile, not the staging: 64x64 here
+// costs 128 threads instead of 256 and would have to be measured against the
+// epilogue and split-K paths that the current shape was picked for.
+
 // Switch below this many 128x128 blocks. 72 is two blocks per SM across 36
 // SMs -- one full wave -- so the rule reads: if the default tile cannot fill
 // the machine once, prefer the tile that makes more blocks.

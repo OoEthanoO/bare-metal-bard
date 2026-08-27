@@ -477,11 +477,48 @@ pipeline cost the second resident block and lose by the same 18% each. A
 profile says which resource is saturated. It does not say which change is
 affordable.
 
-**Not yet done:** kernel 11 is in the benchmark ladder but not yet wired into
-the model's GEMM (`src/gemm.cu` still calls kernel 10), so the training-step
-numbers further down are unaffected by it. GEMM is ~80% of a step, so 8% of
-GEMM is worth roughly 6% of training time — a prediction, not a measurement,
-and the next thing to check.
+### It does not transfer to the model, and that is the useful part
+
+GEMM is ~80% of a training step, so 8% of GEMM predicts ~6% of training time.
+The prediction was worth exactly what predictions here are usually worth: the
+same change applied to `src/gemm.cu` — same layout, same swizzle keys, all four
+transpose cases, `BK` cut 32 → 16 to pay for the stages — is **slower at every
+shape the model runs**, and 46.1 → 47.4 ms/step end to end.
+
+| shape (NN) | | register-staged | `cp.async` | |
+|---|---|---:|---:|---:|
+| 4096×1536×384 | mlp up | 10469 | 9818 | −6.2% |
+| 4096×1152×384 | qkv proj | 9937 | 9246 | −7.0% |
+| 4096×384×384 | attn proj | 7276 | 6823 | −6.2% |
+| 4096×384×1536 | mlp down | 7898 | 7480 | −5.3% |
+| 1536×384×4096 | dW fcproj | 8827 | 8481 | −3.9% |
+| 384×384×4096 | dW attnproj | 7825 | 7545 | −3.6% |
+| 384×1536×4096 | dW fc | 8804 | 8531 | −3.1% |
+| 384×1152×4096 | dW qkv | 8473 | 8292 | −2.1% |
+
+The fp32 path is untouched by the change and reads the same in both builds to
+within noise, which is what makes this a measurement rather than a drifting
+machine.
+
+The obvious suspect is the footprint — three stages at `BK=16` is 48 KB against
+32 KB — but it is wrong: **two** stages at `BK=16` is 32 KB, byte for byte what
+the kernel already uses, and loses by the same 6%. So the cost is `BK` itself,
+not the pipeline it was buying.
+
+What separates the two kernels is reuse per barrier. Kernel 11 runs a 64×64
+warp tile — 128 bytes of shared traffic per `mma` — and at `BK=16` still has two
+k-steps of independent arithmetic to hide a barrier behind. The model's GEMM
+runs 32×64, which is 192 bytes per `mma`, a tile chosen back when the fused
+epilogue and the four transpose cases mattered more than the tile did. Halving
+`BK` there doubles the barrier count against arithmetic that was already
+thinner. A pipeline cannot pay for itself out of a k-chunk that has too little
+work in it.
+
+So the change is reverted, the numbers above are recorded in
+[`src/gemm.cu`](src/gemm.cu) so it is not retried on the same reasoning, and
+the next thing to try in the model is **the warp tile rather than the staging**.
+This is the third time a GEMM gain that was real at square sizes has been eaten
+by the shapes the model actually runs.
 
 ---
 
@@ -1282,12 +1319,20 @@ four scalar stores.
    nothing to do with either: any configuration whose shared footprint costs the
    second resident block loses 18%, whatever it buys.
 
-   Still to do, and now the concrete next step: **wire kernel 11 into the model
-   GEMM**. `src/gemm.cu` still calls kernel 10, so none of the training-step
-   numbers below include it. GEMM is ~80% of a step, which predicts ~6% of
-   end-to-end training time — and kernel 10 taught this project not to trust
-   that arithmetic without the shapes the model actually runs, since the
-   1.33-wave `N=384` tail is where every previous GEMM gain went to die.
+   **Wiring it into the model GEMM was tried, and lost.** Same layout, same
+   swizzle keys, all four transpose cases, `BK` cut 32 → 16 to pay for the
+   stages: slower at *every* shape the model runs, by 2–7%, and 46.1 → 47.4
+   ms/step end to end. The fp32 path is untouched and reads identically in both
+   builds, so the machine was not drifting. The suspected cause — 48 KB of
+   shared costing a resident block — is wrong: two stages at 32 KB, byte for
+   byte what the kernel uses today, loses by the same 6%. It is `BK` itself.
+   What survives is reuse per barrier: kernel 11 runs a 64×64 warp tile (128
+   bytes of shared traffic per `mma`), the model runs 32×64 (192), so halving
+   `BK` doubles the barrier count against arithmetic that was already thinner.
+   Full table and the reasoning in [`src/gemm.cu`](src/gemm.cu). So the next
+   thing to try here is **the warp tile, not the staging** — and this is the
+   third time the `N=384`-shaped part of the model has eaten a GEMM gain that
+   was real at square sizes.
 3. **The attention backward**, now the largest thing left after the matmuls —
    the largest single thing left after the matmuls. The cure and the one
    unmeasured piece of it are in item 4 below; the profile has just promoted it
