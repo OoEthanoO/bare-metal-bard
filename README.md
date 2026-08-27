@@ -9,6 +9,11 @@ every matmul, layernorm, softmax, attention, GELU, cross-entropy and AdamW
 kernel here is written from scratch.
 
 **Hardware:** RTX 4070 Laptop (Ada, sm_89) — 36 SMs, 256 GB/s, 8 GB, 55 W.
+Everything below the [kernel 11 section](#kernel-11-cpasync-and-the-wrong-reason-for-a-right-answer)
+was measured there. The project has since moved to an RTX 5070 Ti Laptop
+(Blackwell, sm_120) — 46 SMs, 12 GB, 100 KiB shared/SM — and numbers taken on
+that card say so explicitly wherever they appear. The two are **not**
+comparable and no table here mixes them.
 
 Builds and runs on anything from **sm_70 upward**. The tensor-core kernels
 are TF32, which is Ampere and newer, so below sm_80 they are not compiled in
@@ -382,6 +387,101 @@ kernel:
 Every optimization in the list is the same move applied at a different level of
 the hierarchy: *load a value once, then spend it on as much arithmetic as
 possible before letting it go.*
+
+---
+
+## Kernel 11: `cp.async`, and the wrong reason for a right answer
+
+**Everything in this section was measured on the RTX 5070 Ti Laptop (Blackwell,
+sm_120), not the 4070 the table above uses.** The two cards share no numbers.
+Kernel 10 was re-measured on the new card in the same process, in the same
+sweeps, so the comparison below is internally valid even though it cannot be
+placed next to anything higher up the page.
+
+Kernel 10 stages through registers: 16 `LDG.128` into registers, then 64
+`STS.32` to scatter them into the lane-major layout, then a barrier, then the
+arithmetic. `cp.async` moves global→shared without the value entering a register
+file, and it is asynchronous. The [next-steps list](#what-id-do-next) called
+this "the main event" on the grounds that kernel 10 is register-bound at 255
+with a spill, so the ~64 registers the staging pins are taken out of the same
+budget as the warp tile that produced most of its speedup.
+
+First, a constraint that turned out to be structural rather than an
+implementation detail. `cp.async` copies a **contiguous** 4, 8 or 16 bytes of
+global to a **contiguous** 4, 8 or 16 bytes of shared. The lane-major layout
+exists precisely so that one lane's four `mma` operands are contiguous in
+shared — and those four operands are `A[g][t]`, `A[g+8][t]`, `A[g][t+4]`,
+`A[g+8][t+4]`, four unrelated addresses in a row-major A. So no 16-byte global
+chunk maps to a 16-byte shared chunk, ever, and no rearrangement of the tile
+fixes it, because the fragment mapping and the contiguity requirement are both
+fixed by hardware. That leaves 4-byte `cp.async`: 64 instructions per thread per
+chunk against kernel 10's 16 + 64, and zero staging registers.
+
+Median of three sweeps, clock pinned to 1200 MHz, CUDA 13.3
+([`bench/results_sm120.csv`](bench/results_sm120.csv), worst spread 0.9%):
+
+| N | kernel 10 | kernel 11 | |
+|---|---:|---:|---:|
+| 2048 | 10077 | **10627** | +5.5% |
+| 4096 | 11100 | **11994** | +8.1% |
+
+Same arithmetic — same `mma` sequence in the same k order, only the staging
+moved — and the error against the fp32 reference is identical to two figures
+for both kernels.
+
+### The stated reason was worth a quarter of the answer
+
+The configuration sweep separates the two claims, because one entry runs
+`cp.async` with **no pipeline at all** — the same schedule kernel 10 runs, with
+the staging replaced. One sweep at N=4096, enough to rank configurations 18%
+apart:
+
+| cfg | BK | stages | shared | blocks/SM | GF/s |
+|---|---:|---:|---:|---:|---:|
+| — | 32 | *(k10)* | 32 KB | 2 | 11100 |
+| 0 | 32 | 1 | 32 KB | 2 | 11329 |
+| 1 | 16 | 2 | 32 KB | 2 | 11667 |
+| **2** | **16** | **3** | **48 KB** | **2** | **11911** |
+| 7 | 16 | 3 | 48 KB | 2 | 11875 |
+| 6 | 8 | 4 | 32 KB | 2 | 10736 |
+| 3 | 16 | 4 | 64 KB | 1 | 8910 |
+| 4 | 32 | 2 | 64 KB | 1 | 9156 |
+| 5 | 32 | 3 | 96 KB | 1 | 9152 |
+
+Config 0 is the register argument on its own, and it is worth **2.1%**. The
+overlap takes it the rest of the way. So the reason this kernel was written —
+freeing the staging registers — accounts for about a quarter of what it
+delivered, and the asynchrony, which the next-steps note treated as a bonus,
+was the point. The prediction was right about the outcome and wrong about the
+mechanism, which is the third time in this project that has happened (see
+[kernel 10](#kernel-10-the-hypothesis-was-wrong-and-the-kernel-got-faster-anyway)).
+
+### The cliff is sharper than anything else in this repo
+
+Every configuration at 32 or 48 KB beats kernel 10. Every configuration at
+64 KB or more loses to it by 18% — and they all land on the *same* number
+(8910, 9156, 9152) regardless of `BK` or pipeline depth. That is not a tuning
+curve, it is a step. `bench/device_query` reports **100 KiB of shared memory per
+SM**, so two 48 KB blocks fit and two 64 KB blocks cannot, and a 128-thread
+block alone on an SM is four warps with nothing to switch to.
+
+The deepest pipeline measured — config 3, four stages — is the **worst** entry
+in the table. Depth is worth having and never worth the second block, so the
+axis to tune is not stages but `STAGES * (BM*BK + BK*BN) * 4`, which has to stay
+under half the SM's supply. Every stage past the first comes out of `BK`.
+
+This is the same shape as the occupancy cliff kernel 9 hit, arrived at from the
+opposite direction: there, a change that improved a profiler counter cost the
+second resident block and lost; here, three changes that all improve the
+pipeline cost the second resident block and lose by the same 18% each. A
+profile says which resource is saturated. It does not say which change is
+affordable.
+
+**Not yet done:** kernel 11 is in the benchmark ladder but not yet wired into
+the model's GEMM (`src/gemm.cu` still calls kernel 10), so the training-step
+numbers further down are unaffected by it. GEMM is ~80% of a step, so 8% of
+GEMM is worth roughly 6% of training time — a prediction, not a measurement,
+and the next thing to check.
 
 ---
 
@@ -1119,7 +1219,8 @@ around 1e-6, a real bug lands at 1e-1 or worse.
 
 ```
 src/
-  kernels/          the ten SGEMM stages, one file each, heavily commented
+  kernels/          the eleven SGEMM stages, one file each, heavily commented
+  kernels/lane_major.cuh  the mma fragment layout, shared by kernels 10 and 11
   gemm.cu           transpose-aware GEMM (NN/NT/TN/TT) built on kernel 7
   bgemm.cu          batched GEMM for attention
   nn.cu             layernorm, GELU, softmax+cross-entropy, AdamW, encoder
@@ -1143,10 +1244,13 @@ scripts/
   gpu_clocks.bat    the same on Windows; self-elevates for the UAC prompt
   profile_step.bat  per-kernel profile of a training step; re-pins the clock
   build_prev.bat    build an older commit's train_gpt for a same-session A/B
-  measure.bat       run a command with the SM clock verified on both sides
+  env.bat           toolkit, host compiler and arch, decided in one place
+  measure.bat       run a command with the SM clock sampled while it runs
+  measure.ps1       the sampler, and why before-and-after stopped working
   build.bat         Windows build (nvcc + MSVC), the Makefile's equivalent
   probe.bat         build+run a one-off probe (used to find fragment layouts)
   sweep_k10.bat     kernel 10's tile sweep, one compile per config
+  sweep_k11.bat     the same for kernel 11 (stages x BK x warp tile)
   profile_flash.bat ncu counters for the fused kernels; needs elevation
 ```
 
@@ -1170,12 +1274,20 @@ four scalar stores.
    written PTX at kernel 9's own tile shape was worth only **2.7%**, and the
    remaining 8% came from a wider warp tile that WMMA could not afford. See
    below.
-2. **`cp.async`** for the staging copies. Kernel 10 stages through registers
-   into a scattered shared layout, four 32-bit stores per `float4`; `cp.async`
-   would write global→shared directly and free the 32 registers that staging
-   currently pins — and kernel 10 is now register-bound at 255, so those
-   registers are the binding constraint on the warp tile that mattered most.
-   This has gone from a tidy-up to the main event.
+2. ~~**`cp.async`** for the staging copies~~ — [done](#kernel-11-cpasync-and-the-wrong-reason-for-a-right-answer),
+   and worth 8.1% at N=4096 on the new card. The reasoning that promoted it to
+   "the main event" — that freeing the staging registers would unblock the warp
+   tile — was worth 2.1% of that 8.1%; the asynchrony it treated as a bonus was
+   the rest. What the sweep actually established is a hard ceiling that has
+   nothing to do with either: any configuration whose shared footprint costs the
+   second resident block loses 18%, whatever it buys.
+
+   Still to do, and now the concrete next step: **wire kernel 11 into the model
+   GEMM**. `src/gemm.cu` still calls kernel 10, so none of the training-step
+   numbers below include it. GEMM is ~80% of a step, which predicts ~6% of
+   end-to-end training time — and kernel 10 taught this project not to trust
+   that arithmetic without the shapes the model actually runs, since the
+   1.33-wave `N=384` tail is where every previous GEMM gain went to die.
 3. **The attention backward**, now the largest thing left after the matmuls —
    the largest single thing left after the matmuls. The cure and the one
    unmeasured piece of it are in item 4 below; the profile has just promoted it

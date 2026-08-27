@@ -1,0 +1,5 @@
+kernel_id,kernel,size,gflops_best,gflops_median,cublas_gflops_best,pct_of_cublas
+10,mma,2048,10119.33,10077.54,8604.25,117.52
+10,mma,4096,11131.62,11099.60,9478.67,117.57
+11,cpasync,2048,10704.66,10626.90,8601.22,124.49
+11,cpasync,4096,12022.71,11994.37,9474.53,126.77

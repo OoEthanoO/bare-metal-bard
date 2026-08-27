@@ -49,6 +49,14 @@
 // shallower reuse per barrier is exactly what the config sweep below measures,
 // and it is not obvious in advance -- kernel 10's own sweep found BK=16
 // catastrophic (4433 GF/s) when there was no pipeline to pay for it.
+//
+// THE RESULT, in front rather than buried: 11100 -> 11994 GF/s at N=4096,
+// +8.1% at N=4096 and +5.5% at N=2048, with the same arithmetic (the error
+// against the fp32 reference is 2.4e-04 for both kernels at N=4096 and 2.7e-04
+// at N=2048 -- same mma sequence in the same k order, only the staging moved).
+// The sweep table below carries the interesting half, which is that the
+// register argument above -- the reason this kernel was written -- accounts
+// for a quarter of that, and shared memory capacity decides everything else.
 #include "../kernels.h"
 #if BMB_TF32
 #include "lane_major.cuh"
@@ -234,16 +242,53 @@ __global__ __launch_bounds__(NUM_THREADS, MINB) void cpasync_kernel(
 
 void sgemm_cpasync(int M, int N, int K, float alpha, const float *A,
                    const float *B, float beta, float *C) {
-    // The sweep lives in scripts\sweep_k11.bat. Each entry is a separate
+    // WHAT THE SWEEP FOUND. N=4096, clock pinned to 1200 MHz (nvidia-smi reads
+    // 1185-1192), CUDA 13.3, sm_120, median GF/s of 20 iterations, ONE sweep --
+    // enough to rank configurations 18% apart, not enough to separate 2 from 7.
+    // The published k10-vs-k11 numbers are the median of three sweeps
+    // (bench/results_sm120.csv, worst spread 0.9%).
+    // scripts\sweep_k11.bat runs the whole table; each entry is a separate
     // compile, because STAGES and BK decide both the register allocation and
     // the shared footprint, so neither can be a runtime switch without changing
     // what is being measured.
     //
-    // The axis that matters is shared memory: STAGES * (BM*BK + BK*BN) * 4.
-    // Kernel 10 fits two blocks per SM in 32 KB, and every stage beyond the
-    // first has to come out of that same budget or out of BK.
+    //     cfg  BK  STAGES   smem   blocks/SM    GF/s
+    //       -  32    (k10)  32 KB      2       11100   <- kernel 10, for scale
+    //       0  32      1    32 KB      2       11329
+    //       1  16      2    32 KB      2       11667
+    //       2  16      3    48 KB      2       11911   <- chosen
+    //       7  16      3    48 KB      2       11875   (WM=32, WN=128)
+    //       6   8      4    32 KB      2       10736
+    //       3  16      4    64 KB      1        8910
+    //       4  32      2    64 KB      1        9156
+    //       5  32      3    96 KB      1        9152
+    //
+    // Two clean readings, and one of them settles the question this kernel was
+    // written to ask.
+    //
+    // FIRST, THE DECOMPOSITION. Config 0 is `cp.async` with no pipeline at all
+    // -- the same schedule kernel 10 runs -- and it is worth 2.1%. So freeing
+    // the ~64 staging registers, which the previous next-steps list called
+    // "the main event", is worth 2%. Configs 1 and 2 add the overlap at the
+    // same or slightly larger footprint and take it to 5.1% and 7.4%. The
+    // registers were the smaller half; the asynchrony was the point, and the
+    // stated reason for doing this was the wrong one.
+    //
+    // SECOND, THE CLIFF, which is sharper than anything else in this repo.
+    // Every configuration at 32 or 48 KB beats kernel 10. Every configuration
+    // at 64 KB or more loses to it by 18%, and they all land on the same
+    // number (8910, 9156, 9152) regardless of BK or depth. That is not a tuning
+    // curve, it is a step: `device_query` reports 100 KiB of shared memory per
+    // SM, so two 48 KB blocks fit and two 64 KB blocks cannot, and a 128-thread
+    // block alone on an SM is four warps with nothing to switch to. Depth
+    // bought with the second block is never worth it -- the deepest pipeline
+    // measured here (config 3, four stages) is the WORST entry in the table.
+    //
+    // The axis that matters is therefore shared memory, not stages:
+    // STAGES * (BM*BK + BK*BN) * 4 must stay under half the SM's supply, and
+    // every stage beyond the first has to come out of BK to do it.
 #ifndef K11_CFG
-#define K11_CFG 1
+#define K11_CFG 2
 #endif
 #if K11_CFG == 0      // no pipeline: isolates what the registers alone are worth
     constexpr int NUM_THREADS = 128, BM = 128, BN = 128, BK = 32;

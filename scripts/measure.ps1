@@ -19,6 +19,12 @@
 # So the clock is sampled WHILE the command runs, and only samples taken with
 # the GPU actually busy are judged. That is the population the timing came
 # from, and it is the only one worth checking.
+#
+# The sampler runs in a background job and the command runs in the FOREGROUND,
+# so its output reaches the terminal untouched. The other way round -- command
+# in Start-Process, sampler in the loop -- swallows the output, which makes the
+# clock check useless in the only way that matters: nobody uses a wrapper that
+# hides the numbers it is vouching for.
 param(
     [Parameter(Mandatory = $true, ValueFromRemainingArguments = $true)]
     [string[]]$Command
@@ -33,20 +39,32 @@ $tol = 0.02
 # clock says nothing about the clock the kernels ran at.
 $busyPct = 40
 
-$exe = $Command[0]
-$rest = if ($Command.Length -gt 1) { $Command[1..($Command.Length - 1)] } else { @() }
-
-$proc = Start-Process -FilePath $exe -ArgumentList $rest -NoNewWindow -PassThru
-$samples = [System.Collections.Generic.List[int]]::new()
-while (-not $proc.HasExited) {
-    Start-Sleep -Milliseconds 400
-    $line = (nvidia-smi --query-gpu=clocks.sm,utilization.gpu --format=csv,noheader,nounits 2>$null)
-    if ($line -match '^\s*(\d+)\s*,\s*(\d+)') {
-        if ([int]$Matches[2] -ge $busyPct) { $samples.Add([int]$Matches[1]) }
+$sampler = Start-Job -ScriptBlock {
+    param($busyPct)
+    $out = @()
+    while ($true) {
+        $line = (nvidia-smi --query-gpu=clocks.sm,utilization.gpu --format=csv,noheader,nounits 2>$null)
+        if ($line -match '^\s*(\d+)\s*,\s*(\d+)') {
+            if ([int]$Matches[2] -ge $busyPct) { $out += [int]$Matches[1] }
+        }
+        Write-Output $out.Count  # keeps the job's output stream alive
+        Set-Content -Path "$env:TEMP\bmb_clock_samples.txt" -Value ($out -join ',')
+        Start-Sleep -Milliseconds 400
     }
+} -ArgumentList $busyPct
+
+try {
+    $exe = $Command[0]
+    $rest = if ($Command.Length -gt 1) { $Command[1..($Command.Length - 1)] } else { @() }
+    & $exe @rest
+    $rc = $LASTEXITCODE
+} finally {
+    Stop-Job $sampler -ErrorAction SilentlyContinue
+    Remove-Job $sampler -Force -ErrorAction SilentlyContinue
 }
-$proc.WaitForExit()
-$rc = $proc.ExitCode
+
+$raw = if (Test-Path "$env:TEMP\bmb_clock_samples.txt") { Get-Content "$env:TEMP\bmb_clock_samples.txt" } else { "" }
+$samples = @($raw -split ',' | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ })
 
 if ($samples.Count -eq 0) {
     Write-Host "[clock] no busy samples -- the command was too short to judge."
@@ -56,7 +74,7 @@ if ($samples.Count -eq 0) {
 
 $lo = ($samples | Measure-Object -Minimum).Minimum
 $hi = ($samples | Measure-Object -Maximum).Maximum
-$off = $samples | Where-Object { [Math]::Abs($_ - $target) -gt $target * $tol }
+$off = @($samples | Where-Object { [Math]::Abs($_ - $target) -gt $target * $tol })
 if ($off.Count -eq 0) {
     Write-Host ("[clock] {0}-{1} MHz across {2} busy samples, target {3} -- timings above are comparable." -f $lo, $hi, $samples.Count, $target)
 } else {
