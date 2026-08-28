@@ -923,8 +923,26 @@ __global__ void splitk_reduce_k(float *C, const float *partial, int N,
 // is 590 KB, the partials are free, and the grid is NINE blocks on a 36-SM
 // card. Same technique, opposite verdict, and the deciding quantity is the
 // ratio of K to M*N rather than anything about waves.
+// How many blocks it takes to fill the machine, derived rather than assumed.
+// This was `144 = 4 blocks/SM x 36 SMs` -- the 4070 again, the same stale
+// constant as the tile rule and in the same file. It lands on the largest
+// single line in the step profile: the weight-gradient matmuls are 26.2% of a
+// training step and the most under-filled shapes in the model.
+inline int fill_blocks() {
+    static int cached = 0;
+    if (cached) return cached;
+    int dev = 0, sms = 0;
+    if (cudaGetDevice(&dev) == cudaSuccess &&
+        cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, dev) ==
+            cudaSuccess && sms > 0)
+        cached = 4 * sms;
+    else
+        cached = 144;  // cannot tell; the value this was born with
+    return cached;
+}
+
 inline int splitk_for(int blocks, int K, int BK) {
-    constexpr int TARGET_BLOCKS = 144;  // 4 blocks/SM x 36 SMs
+    const int TARGET_BLOCKS = fill_blocks();
     if (blocks >= TARGET_BLOCKS) return 1;
     int s = TARGET_BLOCKS / blocks;
     const int max_by_k = K / (BK * 4);  // keep >=4 K-chunks per split

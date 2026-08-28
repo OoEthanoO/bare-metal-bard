@@ -772,6 +772,40 @@ the model: 7699–8284 GF/s for the `dW` shapes against 11292 for `mlp up` in th
 same transpose case. Roughly 30% of the largest cost in the step, sitting in
 `384×384×4096`-shaped work with tall K and a tiny output.
 
+#### Following that lead found the third stale 36-SM constant
+
+`splitk_for` decided how many pieces to cut K into against
+`TARGET_BLOCKS = 144`, commented `4 blocks/SM x 36 SMs`. The 4070 again, in the
+same file as the tile rule, and landing on the largest line in the profile. It
+is now derived from `cudaDevAttrMultiProcessorCount`, and the effect is exactly
+what the block arithmetic predicted *before* it was measured:
+
+| dW shape | blocks | splits | TF32 GF/s | |
+|---|---:|---|---:|---:|
+| attnproj `384×384×4096` | 18 | 8 → **10** | 7699 → **8990** | +16.8% |
+| qkv `1152×384×4096` | 54 | 2 → **3** | 8284 → **9386** | +13.3% |
+| fc `384×1536×4096` | 72 | 2 → 2 | 8527 → 8617 | +1.1% |
+| fcproj `1536×384×4096` | 72 | 2 → 2 | 8552 → 8623 | +0.8% |
+
+The two shapes whose split count changed gained 13–17%; the two whose count was
+already right gained nothing. That is the mechanism confirmed shape by shape.
+
+**End to end it is worth 1.3%, and I did not resolve it.** The two shapes that
+improved are only a third of dW's flops, so the arithmetic gives 10.36 → 9.85 ms
+of a 40.2 ms step — 0.51 ms. Three samples at a ~0.5% noise floor read
+40.2/40.4/40.4 against a 40.2 baseline, which genuinely cannot separate that
+from nothing, and no step-time win is claimed here. What justifies the change is
+that `4 × 36` is wrong on every GPU that is not a 4070 and wrong *silently* —
+there is no error, just quiet under-filling.
+
+It also re-points the target rather than clearing it. The two **big** dW shapes
+are 67% of dW's flops, their split count was already correct, and they sit at
+~8620 GF/s against `mlp up`'s 11292 in the same transpose case. That is where
+the rest of the largest line in the step lives, and it is not a split-K problem.
+
+*(Predicted dW total before the change, 10.36 ms, against the profiler's
+measured 10.649 — a cross-check that the new instrument is telling the truth.)*
+
 
 ### The tile rule was stale, and my explanation for it was wrong twice
 
