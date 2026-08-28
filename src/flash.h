@@ -59,6 +59,8 @@ bool flash_attention_forward_cfg(int cfg, float *out, float *lse,
 // ---- backward tuning harness ----
 int flash_num_bwd_configs();
 const char *flash_bwd_config_name(int cfg);
+// Per-config bars. Only dQ relaxes on a tensor-core config; dK and dV do not.
+void flash_bwd_config_tol(int cfg, double *dq, double *dk, double *dv);
 // Depends on the context length: the tile that wins at T=256 is not the tile
 // that wins at T=2048. See the table above the definition in flash.cu.
 int flash_default_bwd_config(int T);

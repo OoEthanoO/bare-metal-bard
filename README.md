@@ -1116,6 +1116,68 @@ The structural result is worth more than the 1.3%: the P round trip is now known
 to be removable, and the backward — where it costs two round trips instead of
 one, across 16.5% of a step rather than 3.6% — is the place that matters.
 
+#### dQ, where the same trick is worth five times more
+
+The backward is two kernels, and only one of them ports directly:
+
+    dQ kernel   dQ[i][j] += sum_c dS[i][c] K[c][j]     A operand M = query
+    dK/dV       dV[c][j] += sum_i  P[i][c] dO[i][j]    A operand M = key
+
+`S = Q@K^T` accumulates as `[query][key]`, so dQ's A operand is the
+accumulator's own orientation and `acc_to_a` applies unchanged. dK/dV wants the
+transpose. There is a way out for it too — have that kernel compute
+`S^T = K@Q^T`, so its accumulator starts as `[key][query]` — and it costs
+nothing, because the backward needs **no row reductions at all**: lse and D are
+already known, so P and dS are elementwise. That kernel is still fp32; this
+section is dQ.
+
+One thing had to change first, and it was the whole result. `launch_bwd` gave
+both kernels the same block size, and the mma dQ kernel wants exactly one
+16-row query tile per warp — 64 threads at `BR`=32, not 128. Tying them together
+kept the **fastest** kv tile from ever pairing with the tensor-core dQ, and it
+showed: the first mma-q configs *lost* to the best fp32 config outright.
+Decoupling the two block sizes is the difference between a 23% regression and a
+20% win.
+
+Fused backward, median of the sweep, `B·T` held constant:
+
+| ctx | best fp32 | **mma dQ** | | vs unfused |
+|----:|------:|------:|---:|---:|
+| 256 | 1.335 | **1.071** | −19.8% | 1.05x → **1.32x** |
+| 512 | 2.404 | **1.903** | −20.8% | 1.06x → **1.35x** |
+| 1024 | 4.410 | **3.516** | −20.3% | 1.11x → **1.40x** |
+| 2048 | 8.377 | **6.685** | −20.2% | 1.15x → **1.44x** |
+
+Flat ~20% at every context length, from replacing *half* the backward. It also
+collapses the context-dependent rule from the section above: that rule existed
+because the fp32 dQ kernel was expensive enough for the kv tile's shape to be
+worth trading against it, and making dQ 1.6x faster removed the trade. Under
+`--tf32` one config now wins everywhere.
+
+End to end, both arms with `--tf32` GEMMs, attention pinned each way:
+
+| ctx | fp32 attention | TF32 attention | |
+|----:|------:|------:|---:|
+| 256 | 46.3 ms | **44.1 ms** | −4.8% |
+| 1024 | 68.6 ms | **60.9 ms** | −11.2% |
+| 2048 | 97.7 ms | **82.7 ms** | −15.4% |
+
+The win grows with context because attention's share of the step does. The
+gradient check passes, and `dK`/`dV` come back **identical to the fp32 control**
+at every shape — 3.81e-07 and 1.68e-07 at ctx 33, unchanged — which confines the
+TF32 error to the tensor a tensor-core kernel actually computed. Only `dQ`'s bar
+is relaxed in the config table, for exactly that reason: a blanket tolerance
+would have hidden corruption in the other two.
+
+Fixing the harness was part of this. At ctx 1 the single query attends only to
+itself, so `dS = P*(dP - D)` is exactly zero and `dQ` and `dK` are exactly zero
+with it — and the backward check divided by that zero reference, printed `inf`,
+and failed **every** config including the fp32 ones, on a shape the kernels get
+exactly right. Where the reference is zero, the meaningful test is that the
+error is zero too.
+
+**Still to do: the dK/dV kernel** — the other half, by the `S^T` route above.
+
 
 ### The backward is only 1.19x, and here is why
 

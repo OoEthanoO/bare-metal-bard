@@ -309,9 +309,19 @@ int main(int argc, char **argv) {
 
         char ratio[16];
         snprintf(ratio, sizeof ratio, "%.2fx", bref_t.best_ms / t.best_ms);
-        const double rq = err[0] / ref[0], rk = err[1] / ref[1],
-                     rv = err[2] / ref[2];
-        const bool ok = rq < 1e-5 && rk < 1e-5 && rv < 1e-5;
+        // A zero reference is not a failure, it is a correct answer of zero.
+        // At T=1 the single query attends only to itself, so P is exactly 1 and
+        // dS = P*(dP - D) is exactly 0 -- which makes dQ and dK exactly 0 and
+        // ref[] zero with them. Dividing by that reported `inf` for EVERY
+        // config, fp32 ones included, and the whole row failed on a shape the
+        // kernels get exactly right. Where the reference is zero the meaningful
+        // test is that the error is zero too, in absolute terms.
+        auto relerr = [](double e, double r) { return r > 0.0 ? e / r : e; };
+        const double rq = relerr(err[0], ref[0]), rk = relerr(err[1], ref[1]),
+                     rv = relerr(err[2], ref[2]);
+        double tq, tk, tv;
+        flash_bwd_config_tol(cfg, &tq, &tk, &tv);
+        const bool ok = rq < tq && rk < tk && rv < tv;
         if (!ok) ++fails;
         printf("%-22s %9.3f %9.3f %10.1f %10s %10.2e %10.2e %10.2e %s\n",
                flash_bwd_config_name(cfg), t.best_ms, t.median_ms,
