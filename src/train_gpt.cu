@@ -32,6 +32,7 @@
 #include "gemm.h"
 #include "nn.h"
 #include "ddp.h"
+#include "flash.h"
 #include <chrono>
 #include <thread>
 
@@ -251,6 +252,7 @@ int main(int argc, char **argv) {
     float temperature = 0.8f;
     unsigned seed = 1337;
     bool use_flash = true;  // --unfused selects the three-kernel attention
+    int bwd_cfg = -1;       // --bwd-cfg pins a fused-backward tile; -1 = measured rule
     bool alloc_only = false;
     int nranks = 1;  // --gpus N: data-parallel replicas
     bool tf32 = false;  // --tf32: route the matmuls through the tensor cores
@@ -276,6 +278,8 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--gpus") && i + 1 < argc) nranks = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--tf32")) tf32 = true;
         else if (!strcmp(argv[i], "--unfused")) use_flash = false;
+        // Pin the fused-backward tile config, for A/B without a rebuild.
+        else if (!strcmp(argv[i], "--bwd-cfg") && i + 1 < argc) bwd_cfg = atoi(argv[++i]);
         else { fprintf(stderr, "unknown arg %s\n", argv[i]); return 1; }
     }
 
@@ -341,6 +345,11 @@ int main(int argc, char **argv) {
     printf("model     %d layers, %d heads, %d embd, ctx %d, %s attention\n",
            n_layer, n_head, n_embd, T, use_flash ? "fused" : "unfused");
     printf("matmul    %s\n", tf32 ? "TF32 tensor cores" : "fp32");
+    if (bwd_cfg >= 0) {
+        flash_set_bwd_config(bwd_cfg);
+        printf("bwd tile  config %d pinned (%s)\n", bwd_cfg,
+               flash_bwd_config_name(bwd_cfg));
+    }
     printf("params    %.2fM (%.1f MB; +%.1f MB grads, +%.1f MB adam state)\n",
            g.num_params / 1e6, param_mb, param_mb, 2 * param_mb);
     printf("memory    %.1f MB forward activations, %.1f MB backward scratch\n",
@@ -356,7 +365,7 @@ int main(int argc, char **argv) {
     if (alloc_only) return 0;
 
     float best_val = 1e30f;
-    int best_step = 0;
+    int best_step = -1;  // -1 until an evaluation actually produces one
     std::mt19937 rng(seed), sample_rng(seed + 1);
     std::vector<int> x((size_t)B * T), y((size_t)B * T);
 
@@ -527,8 +536,14 @@ int main(int argc, char **argv) {
                final_train, final_val, eval_batches);
     }
 
-    printf("best   val loss %.4f at step %d (checkpoint saved there)\n",
-           best_val, best_step);
+    // With --eval 0 no evaluation ever runs, so there is no best to report and
+    // no checkpoint was written. Printing the sentinel here claimed a best val
+    // loss of 1e30 "at step 0 (checkpoint saved there)", which is three false
+    // statements in one line -- and the run it appeared under was a benchmark,
+    // where evaluation is switched off precisely so it cannot cost time.
+    if (best_step >= 0)
+        printf("best   val loss %.4f at step %d (checkpoint saved there)\n",
+               best_val, best_step);
 
     // Generation is autoregressive -- one full forward per token -- so this is
     // not free, and at long context it dwarfs the training it is reporting on.

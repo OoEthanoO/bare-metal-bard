@@ -489,7 +489,8 @@ __global__ void flash_dsum_k(float *__restrict__ dsum,
 // dK and dV: one block owns BC keys and streams every query block that can see
 // them. Both accumulators live in registers for the whole kernel and are
 // written exactly once.
-template <int BR, int BC, int HS, int NT, int RT, int CT, int AT, int BT>
+template <int BR, int BC, int HS, int NT, int RT, int CT, int AT, int BT,
+          int KVC>
 __global__ __launch_bounds__(NT) void flash_bwd_kv_k(
     float *__restrict__ dqkv, const float *__restrict__ qkv,
     const float *__restrict__ dout, const float *__restrict__ lse,
@@ -498,6 +499,7 @@ __global__ __launch_bounds__(NT) void flash_bwd_kv_k(
     constexpr int RG = BR / RT, CG = BC / CT;
     constexpr int AG = BC / AT, BG = HS / BT;
     constexpr int V4 = HS / 4;
+    constexpr int KC4 = KVC / 4;  // float4s per key when staging one chunk
     constexpr int QW = BR + PAD;  // Qst/dOst row width (head-size major)
     constexpr int KW = BC + PAD;  // Kst/Vst row width (head-size major)
     constexpr int PW = BC + PAD;  // Pst/dSst row width (query major)
@@ -507,13 +509,15 @@ __global__ __launch_bounds__(NT) void flash_bwd_kv_k(
     static_assert(RT % 4 == 0, "vector loads");
     static_assert(AT % 4 == 0 && BT % 4 == 0, "vector loads");
     static_assert(NT % V4 == 0, "staging must tile evenly");
+    static_assert(KVC % 4 == 0 && HS % KVC == 0, "head chunk divides the head");
+    static_assert(NT % KC4 == 0, "chunk staging must tile evenly");
 
     extern __shared__ float smem[];
     float *Qst = smem;              // [HS][QW], carries the 1/sqrt(hs)
     float *dOst = Qst + HS * QW;    // [HS][QW]
-    float *Kst = dOst + HS * QW;    // [HS][KW]
-    float *Vst = Kst + HS * KW;     // [HS][KW]
-    float *Pst = Vst + HS * KW;     // [BR][PW]
+    float *Kst = dOst + HS * QW;    // [KVC][KW]
+    float *Vst = Kst + KVC * KW;    // [KVC][KW]
+    float *Pst = Vst + KVC * KW;    // [BR][PW]
     float *dSst = Pst + BR * PW;    // [BR][PW]
     float *lses = dSst + BR * PW;   // [BR]
     float *dss = lses + BR;         // [BR]
@@ -532,22 +536,30 @@ __global__ __launch_bounds__(NT) void flash_bwd_kv_k(
     const float *lserow = lse + (size_t)bh * T;
     const float *dsrow = dsum + (size_t)bh * T;
 
-    // K and V are fixed for this block: stage once, transposed.
-    {
-        const int i4 = (tid % V4) * 4;
-        for (int c = tid / V4; c < BC; c += NT / V4) {
+    // Stage head dimensions [hc, hc+KVC) of K and V for this block's BC keys,
+    // transposed. With KVC == HS this is the whole head and runs once; with
+    // KVC < HS it runs once per chunk per query block, which is the trade the
+    // config table measures.
+    auto stage_kv = [&](int hc) {
+        const int i4 = (tid % KC4) * 4;
+        for (int c = tid / KC4; c < BC; c += NT / KC4) {
             const int t = j0 + c;
             float4 k = make_float4(0.f, 0.f, 0.f, 0.f), v = k;
             if (t < T) {
-                k = CVEC4(base[(size_t)t * 3 * C + C + i4]);
-                v = CVEC4(base[(size_t)t * 3 * C + 2 * C + i4]);
+                k = CVEC4(base[(size_t)t * 3 * C + C + hc + i4]);
+                v = CVEC4(base[(size_t)t * 3 * C + 2 * C + hc + i4]);
             }
             Kst[(i4 + 0) * KW + c] = k.x; Kst[(i4 + 1) * KW + c] = k.y;
             Kst[(i4 + 2) * KW + c] = k.z; Kst[(i4 + 3) * KW + c] = k.w;
             Vst[(i4 + 0) * KW + c] = v.x; Vst[(i4 + 1) * KW + c] = v.y;
             Vst[(i4 + 2) * KW + c] = v.z; Vst[(i4 + 3) * KW + c] = v.w;
         }
-    }
+    };
+
+    // K and V are fixed for this block, so unchunked they are staged once and
+    // every query block reuses them. This is the path every pre-chunking config
+    // takes, and it is unchanged.
+    if constexpr (KVC == HS) stage_kv(0);
 
     float dK[AT][BT], dV[AT][BT];
 #pragma unroll
@@ -580,6 +592,9 @@ __global__ __launch_bounds__(NT) void flash_bwd_kv_k(
                 dss[r] = (t < T) ? dsrow[t] : 0.0f;
             }
         }
+        // Chunk 0 rides along with the Q/dO staging so it costs no extra
+        // barrier; only chunks 1.. need a pair of their own.
+        if constexpr (KVC < HS) stage_kv(0);
         __syncthreads();
 
         // S = Q K^T and dP = dO V^T share one loop: same shape, same tiles, and
@@ -590,22 +605,37 @@ __global__ __launch_bounds__(NT) void flash_bwd_kv_k(
 #pragma unroll
             for (int c = 0; c < CT; ++c) { s[r][c] = 0.0f; dp[r][c] = 0.0f; }
 
-        for (int i = 0; i < HS; ++i) {
-            float rq[RT], rk[CT], rdo[RT], rv[CT];
-#pragma unroll
-            for (int r = 0; r < RT; r += 4) {
-                VEC4(rq[r]) = CVEC4(Qst[i * QW + r0 + r]);
-                VEC4(rdo[r]) = CVEC4(dOst[i * QW + r0 + r]);
-            }
-            load_n<CT>(rk, &Kst[i * KW + c0]);
-            load_n<CT>(rv, &Vst[i * KW + c0]);
-#pragma unroll
-            for (int r = 0; r < RT; ++r)
-#pragma unroll
-                for (int c = 0; c < CT; ++c) {
-                    s[r][c] += rq[r] * rk[c];
-                    dp[r][c] += rdo[r] * rv[c];
+        for (int hc = 0; hc < HS; hc += KVC) {
+            if constexpr (KVC < HS) {
+                if (hc) {
+                    __syncthreads();  // every warp is done with the last chunk
+                    stage_kv(hc);
+                    __syncthreads();
                 }
+            }
+            // Deliberately NOT `#pragma unroll`. The pre-chunking loop over the
+            // whole head had no pragma, and adding one here changes the codegen
+            // of every unchunked config -- measured, config 0 lost 13.8% and
+            // config 7 gained 10% from that alone. The chunked path is supposed
+            // to be the only variable in this comparison.
+            for (int ii = 0; ii < KVC; ++ii) {
+                const int i = hc + ii;
+                float rq[RT], rk[CT], rdo[RT], rv[CT];
+#pragma unroll
+                for (int r = 0; r < RT; r += 4) {
+                    VEC4(rq[r]) = CVEC4(Qst[i * QW + r0 + r]);
+                    VEC4(rdo[r]) = CVEC4(dOst[i * QW + r0 + r]);
+                }
+                load_n<CT>(rk, &Kst[ii * KW + c0]);
+                load_n<CT>(rv, &Vst[ii * KW + c0]);
+#pragma unroll
+                for (int r = 0; r < RT; ++r)
+#pragma unroll
+                    for (int c = 0; c < CT; ++c) {
+                        s[r][c] += rq[r] * rk[c];
+                        dp[r][c] += rdo[r] * rv[c];
+                    }
+            }
         }
 
         // P from lse -- exact, and with no reduction. Masked entries become 0
@@ -850,18 +880,21 @@ __global__ __launch_bounds__(NT) void flash_bwd_q_k(
 constexpr size_t SMEM_CAP = 99 * 1024;  // Ada's opt-in maximum per block
 
 template <int BR, int BC, int HS, int NT, int RT, int CT, int AT, int BT,
-          int QAT, int QBT>
+          int QAT, int QBT, int KVC>
 bool launch_bwd(float *dqkv, float *dsum, const float *dout, const float *qkv,
                 const float *out, const float *lse, int B, int T, int NH,
                 float scale) {
     constexpr int PAD = 4, QW = BR + PAD, KW = BC + PAD, PW = BC + PAD;
+    // Only KVC head dimensions of K and V are resident at a time. That term is
+    // what a chunked config shrinks, and shrinking it is only worth anything
+    // because it is what decides how many blocks fit on an SM.
     constexpr size_t kv_smem =
-        (size_t)(2 * HS * QW + 2 * HS * KW + 2 * BR * PW + 2 * BR) * sizeof(float);
+        (size_t)(2 * HS * QW + 2 * KVC * KW + 2 * BR * PW + 2 * BR) * sizeof(float);
     constexpr size_t q_smem =
         (size_t)(2 * HS * QW + 2 * HS * KW + BC * QW + 2 * BR) * sizeof(float);
     if (kv_smem > SMEM_CAP || q_smem > SMEM_CAP) return false;
 
-    auto kv = flash_bwd_kv_k<BR, BC, HS, NT, RT, CT, AT, BT>;
+    auto kv = flash_bwd_kv_k<BR, BC, HS, NT, RT, CT, AT, BT, KVC>;
     auto qk = flash_bwd_q_k<BR, BC, HS, NT, RT, CT, QAT, QBT>;
     static bool configured = false;
     if (!configured) {
@@ -902,36 +935,69 @@ bool launch_bwd(float *dqkv, float *dsum, const float *dout, const float *qkv,
 // of what the same counter reading meant for kernel 7. A profile says which
 // resource is saturated. It does not say which change is affordable.
 //
-// (id, BR, BC, NT, RT, CT, kv: AT, BT, dQ: QAT, QBT, name)
+// -1 means "use the measured rule"; train_gpt --bwd-cfg N pins a config.
+static int g_bwd_override = -1;
+
+// CHUNKING THE HEAD DIMENSION, which is what the paragraph above says to do.
+//
+// The dK/dV kernel holds six shared arrays, and their sizes are
+//
+//     Q, dO   2 * HS * (BR+4)      K, V   2 * HS * (BC+4)
+//     P, dS   2 * BR * (BC+4)
+//
+// so the HS terms dominate and the K/V one is the larger of them whenever
+// BC > BR. K and V are also the only two operands the SECOND matmul never
+// touches -- it reads P, dS, Q and dO -- so they are the only two that can be
+// made non-resident without shrinking the accumulator tile. That asymmetry is
+// the whole opening: staging K and V one head-chunk at a time cuts the biggest
+// shared term by HS/KVC and leaves every register tile exactly as it was.
+//
+// What it costs is that K and V stop being staged once per block and start
+// being staged once per chunk per query block, plus two barriers per chunk.
+// Whether the extra blocks/SM outrun that is the measurement, not the theory.
+//
+// (id, BR, BC, NT, RT, CT, kv: AT, BT, dQ: QAT, QBT, KVC, name)
 #define BWD_CONFIGS(X)                                                         \
-    X(0, 64, 32, 128, 4, 4, 4, 4, 8, 4, "br64 bc32 t128 kv4x4 q8x4")           \
-    X(1, 64, 32, 128, 4, 4, 4, 4, 4, 8, "br64 bc32 t128 kv4x4 q4x8")           \
-    X(2, 32, 32, 64, 4, 4, 4, 8, 4, 8, "br32 bc32 t64  kv4x8 q4x8")            \
-    X(3, 32, 32, 64, 4, 4, 8, 4, 8, 4, "br32 bc32 t64  kv8x4 q8x4")            \
-    X(4, 32, 32, 64, 4, 4, 4, 4, 4, 4, "br32 bc32 t64  kv4x4 q4x4")            \
-    X(5, 32, 32, 128, 4, 2, 4, 4, 4, 4, "br32 bc32 t128 kv4x4 q4x4")           \
-    X(6, 32, 64, 128, 4, 4, 8, 4, 4, 4, "br32 bc64 t128 kv8x4 q4x4")           \
-    X(7, 64, 32, 64, 8, 4, 8, 4, 8, 8, "br64 bc32 t64  8x4 kv8x4 q8x8")
+    X(0, 64, 32, 128, 4, 4, 4, 4, 8, 4, 0, "br64 bc32 t128 kv4x4 q8x4")        \
+    X(1, 64, 32, 128, 4, 4, 4, 4, 4, 8, 0, "br64 bc32 t128 kv4x4 q4x8")        \
+    X(2, 32, 32, 64, 4, 4, 4, 8, 4, 8, 0, "br32 bc32 t64  kv4x8 q4x8")         \
+    X(3, 32, 32, 64, 4, 4, 8, 4, 8, 4, 0, "br32 bc32 t64  kv8x4 q8x4")         \
+    X(4, 32, 32, 64, 4, 4, 4, 4, 4, 4, 0, "br32 bc32 t64  kv4x4 q4x4")         \
+    X(5, 32, 32, 128, 4, 2, 4, 4, 4, 4, 0, "br32 bc32 t128 kv4x4 q4x4")        \
+    X(6, 32, 64, 128, 4, 4, 8, 4, 4, 4, 0, "br32 bc64 t128 kv8x4 q4x4")        \
+    X(7, 64, 32, 64, 8, 4, 8, 4, 8, 8, 0, "br64 bc32 t64  8x4 kv8x4 q8x8")     \
+    X(8, 32, 64, 128, 4, 4, 8, 4, 4, 4, 16, "br32 bc64 t128 kv8x4 q4x4 c16")   \
+    X(9, 32, 64, 128, 4, 4, 8, 4, 4, 4, 32, "br32 bc64 t128 kv8x4 q4x4 c32")   \
+    X(10, 32, 32, 128, 4, 2, 4, 4, 4, 4, 16, "br32 bc32 t128 kv4x4 q4x4 c16")  \
+    X(11, 32, 32, 128, 4, 2, 4, 4, 4, 4, 32, "br32 bc32 t128 kv4x4 q4x4 c32")  \
+    X(12, 32, 64, 128, 4, 4, 8, 4, 4, 4, 8, "br32 bc64 t128 kv8x4 q4x4 c8")
+
+// KVC == 0 in the table means "no chunking"; it becomes HS here so that the
+// unchunked configs keep taking the stage-once path bit for bit.
+template <int HS, int KVC>
+constexpr int kvc_of() { return KVC == 0 ? HS : KVC; }
 
 template <int BR, int BC, int HS, int NT, int RT, int CT, int AT, int BT,
-          int QAT, int QBT>
+          int QAT, int QBT, int KVC>
 constexpr bool bwd_cfg_ok() {
     return (BR / RT) * (BC / CT) == NT &&        // score tile
            (BC / AT) * (HS / BT) == NT &&        // dK/dV tile
            (BR / QAT) * (HS / QBT) == NT &&      // dQ tile
            NT % (HS / 4) == 0 && HS % BT == 0 && HS % QBT == 0 &&
            BC % AT == 0 && BR % QAT == 0 && AT % 4 == 0 && BT % 4 == 0 &&
-           QAT % 4 == 0 && QBT % 4 == 0;
+           QAT % 4 == 0 && QBT % 4 == 0 &&
+           KVC % 4 == 0 && HS % KVC == 0 && NT % (KVC / 4) == 0;
 }
 
 template <int BR, int BC, int HS, int NT, int RT, int CT, int AT, int BT,
-          int QAT, int QBT>
+          int QAT, int QBT, int KVC>
 struct BwdInst {
     static bool run(float *dqkv, float *dsum, const float *dout,
                     const float *qkv, const float *out, const float *lse, int B,
                     int T, int NH, float scale) {
-        if constexpr (bwd_cfg_ok<BR, BC, HS, NT, RT, CT, AT, BT, QAT, QBT>())
-            return launch_bwd<BR, BC, HS, NT, RT, CT, AT, BT, QAT, QBT>(
+        constexpr int C = kvc_of<HS, KVC>();
+        if constexpr (bwd_cfg_ok<BR, BC, HS, NT, RT, CT, AT, BT, QAT, QBT, C>())
+            return launch_bwd<BR, BC, HS, NT, RT, CT, AT, BT, QAT, QBT, C>(
                 dqkv, dsum, dout, qkv, out, lse, B, T, NH, scale);
         else
             return false;
@@ -943,9 +1009,9 @@ bool dispatch_bwd(int cfg, float *dqkv, float *dsum, const float *dout,
                   const float *qkv, const float *out, const float *lse, int B,
                   int T, int NH, float scale) {
     switch (cfg) {
-#define X(id, BR, BC, NT, RT, CT, AT, BT, QAT, QBT, name)                      \
+#define X(id, BR, BC, NT, RT, CT, AT, BT, QAT, QBT, KVC, name)                 \
     case id:                                                                   \
-        return BwdInst<BR, BC, HS, NT, RT, CT, AT, BT, QAT, QBT>::run(         \
+        return BwdInst<BR, BC, HS, NT, RT, CT, AT, BT, QAT, QBT, KVC>::run(    \
             dqkv, dsum, dout, qkv, out, lse, B, T, NH, scale);
         BWD_CONFIGS(X)
 #undef X
@@ -956,7 +1022,7 @@ bool dispatch_bwd(int cfg, float *dqkv, float *dsum, const float *dout,
 
 int flash_num_bwd_configs() {
     int n = 0;
-#define X(id, BR, BC, NT, RT, CT, AT, BT, QAT, QBT, name) ++n;
+#define X(id, BR, BC, NT, RT, CT, AT, BT, QAT, QBT, KVC, name) ++n;
     BWD_CONFIGS(X)
 #undef X
     return n;
@@ -964,7 +1030,7 @@ int flash_num_bwd_configs() {
 
 const char *flash_bwd_config_name(int cfg) {
     switch (cfg) {
-#define X(id, BR, BC, NT, RT, CT, AT, BT, QAT, QBT, name)                      \
+#define X(id, BR, BC, NT, RT, CT, AT, BT, QAT, QBT, KVC, name)                 \
     case id: return name;
         BWD_CONFIGS(X)
 #undef X
@@ -980,7 +1046,73 @@ const char *flash_bwd_config_name(int cfg) {
 // FMA. Fixing this properly means staging the head dimension in chunks so that
 // bigger register tiles and more blocks per SM stop competing for the same
 // shared memory -- the next thing to do here.
-int flash_default_bwd_config() { return 5; }
+// WHAT CHUNKING SETTLED, after one false start that was my own bug.
+//
+// THE FALSE START, recorded because it is the more useful half. The first sweep
+// said chunking was worth 8-10% at every context length. It is not. In
+// restructuring the score loop I had put a `#pragma unroll` on the inner loop
+// that the pre-chunking code did not have -- and it sits inside the KVC == HS
+// path too, so it re-tuned the codegen of every UNCHUNKED config, which is to
+// say the entire control group. Config 0 lost 13.8% to that pragma alone,
+// config 7 gained 10%, and config 6 -- the one the argument rests on -- lost 8%.
+// Chunking was being credited with damage the comparison had done to itself.
+// A change that restructures a loop is not a controlled experiment until the
+// control has been checked byte for byte.
+//
+// THE REAL NUMBERS. Median of three sweeps, spread under 1% on every cell,
+// B*T held constant, fused backward, ms:
+//
+//   ctx   cfg5 bc32   cfg6 bc64   cfg8 +c16   cfg12 +c8   cfg10 bc32+c16
+//   256      1.337      1.447       1.412       1.396         1.331
+//   512      2.405      2.467       2.449       2.411         2.435
+//   1024     4.535      4.472       4.475       4.424         4.619
+//   2048     8.755      8.402       8.471       8.369         8.955
+//
+// Chunking is worth 0.4-3.5%, not 8-10%, and KVC=8 beats KVC=16 nearly
+// everywhere -- so the chunk size picked first was wrong as well. The wide tile
+// does win at long context, but mostly on its own: config 6 unchunked already
+// beats config 5 by 1.4% at ctx 1024 and 4.0% at 2048, and chunking adds about
+// another 1% on top of that.
+//
+// WHAT SURVIVES IS THE NEGATIVE HALF. `ncu` medians
+// (bench/logs/flash_bwd_chunk_ncu.csv):
+//
+//   cfg  tile        KVC  blocks/SM  L1/TEX    SM    Occ   MIO   ms(256)
+//    5   br32 bc32    --      2        78.9  34.3   16.3  0.79    1.337
+//   10   br32 bc32    16      3        82.2  36.9   23.9  2.45    1.331
+//    6   br32 bc64    --      1        63.8  26.0    8.3  0.25    1.447
+//    8   br32 bc64    16      2        71.1  29.9   15.9  0.83    1.412
+//   12   br32 bc64     8      2        74.0  30.6   15.9  1.15    1.396
+//
+// Config 10 is the one case where the resource was FREED rather than traded:
+// the default's own tile, three resident blocks against two, nothing given up.
+// Every counter says it should be faster -- highest occupancy, highest L1/TEX,
+// highest SM throughput in the table -- and it ties at ctx 256 and loses
+// everywhere above. Fifty percent more resident warps, for free, for nothing.
+// One counter says where they went: MIO throttle 0.79 -> 2.45, a tripling, with
+// the barrier stall up 0.24 -> 0.39. They arrive and they queue.
+//
+// The wide-tile family says the converse. Config 6 has the least saturated
+// datapath of the five and the lowest throughput, because at 8% occupancy there
+// are not enough warps to feed the FMA pipes however little each asks for.
+// Efficiency per warp is not throughput; neither is occupancy. Both ends of
+// that trade are visible in the one table.
+//
+// So the default is a rule rather than a constant -- the same shape as the
+// GEMM's two tiles. End to end, --bwd-cfg pinning each way, three interleaved
+// runs, bracketed by a ctx-256 reference that read 46.8 ms before and 46.2
+// after: ctx 1024 goes 69.1 -> 68.1 ms (1.4%), ctx 2048 goes 99.4 -> 97.2
+// (2.2%). The model trains at ctx 256, where the narrow tile wins and nothing
+// changes.
+int flash_default_bwd_config(int T) {
+    if (g_bwd_override >= 0) return g_bwd_override;
+    return T > 512 ? 12 : 5;
+}
+
+// A/B-ing a tile choice used to mean editing the line above and rebuilding,
+// which is two builds per comparison and puts the two numbers in different
+// binaries. The override makes it one binary and one run each way.
+void flash_set_bwd_config(int cfg) { g_bwd_override = cfg; }
 
 bool flash_attention_backward_cfg(int cfg, float *dqkv, float *dsum,
                                   const float *dout, const float *qkv,
@@ -1003,9 +1135,17 @@ bool flash_attention_backward_cfg(int cfg, float *dqkv, float *dsum,
 void flash_attention_backward(float *dqkv, float *dsum, const float *dout,
                               const float *qkv, const float *out,
                               const float *lse, int B, int T, int C, int NH) {
-    if (flash_attention_backward_cfg(flash_default_bwd_config(), dqkv, dsum,
-                                     dout, qkv, out, lse, B, T, C, NH))
-        return;
+    // Preferred first, then the short-context default, then anything that runs.
+    // Config 12's dK/dV tile does not divide a 32-wide head, so at T > 512 with
+    // hs=32 the preferred config declines -- and without config 5 named
+    // explicitly here the scan below would fall to whatever happens to sit
+    // earliest in the table, which is not the same as falling back to the tile
+    // that was measured to be second best.
+    const int preferred[] = {flash_default_bwd_config(T), 5};
+    for (int cfg : preferred)
+        if (flash_attention_backward_cfg(cfg, dqkv, dsum, dout, qkv, out, lse, B,
+                                         T, C, NH))
+            return;
     for (int cfg = 0; cfg < flash_num_bwd_configs(); ++cfg)
         if (flash_attention_backward_cfg(cfg, dqkv, dsum, dout, qkv, out, lse, B,
                                          T, C, NH))

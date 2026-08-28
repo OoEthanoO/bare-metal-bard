@@ -1063,6 +1063,139 @@ next thing to do here.
 Reproduce the table with `scripts\profile_flash.bat` (needs elevation — reading
 GPU performance counters is admin-only on Windows).
 
+### Chunking the head dimension, and the bug that made it look four times better
+
+*Measured on the 5070 Ti, sm_120, clock pinned to 1200 MHz.*
+
+Re-profiling the step on this card first, to check the target is still worth
+hitting ([`step_ncu_tf32_sm120.csv`](bench/logs/step_ncu_tf32_sm120.csv)): the
+GEMMs are 66.8% and the fused backward is **17.1%** across its three kernels —
+the largest single thing left once the matmuls are excluded, and close enough to
+the 4070's 15.9% that the ranking did not move with the hardware.
+
+The paragraph above is a prescription, so it is worth carrying out. K and V are
+the only two operands the second matmul never touches — it reads P, dS, Q and dO
+— so they are the only two that can be made non-resident **without shrinking the
+accumulator tile**, which is the whole point. Staging them one head-chunk at a
+time (`KVC` in the config table) cuts the largest shared term by `HS/KVC` and
+leaves every register tile exactly as it was. What it costs is that K and V stop
+being staged once per block and start being staged once per chunk per query
+block, plus two barriers per chunk.
+
+Structurally it does exactly what it was designed to do. `ncu` on the dK/dV
+kernel ([`flash_bwd_chunk_ncu.csv`](bench/logs/flash_bwd_chunk_ncu.csv)),
+medians over the sweep:
+
+| cfg | tile | `KVC` | shared | blocks/SM | L1/TEX | SM | Occupancy | MIO stall |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| 5 | br32 bc32 | — | 45.3 KB | 2 | 78.9% | 34.3% | 16.3% | 0.79 |
+| 10 | br32 bc32 | 16 | 31.8 KB | **3** | **82.2%** | **36.9%** | **23.9%** | **2.45** |
+| 6 | br32 bc64 | — | 69.3 KB | 1 | 63.8% | 26.0% | 8.3% | 0.25 |
+| 8 | br32 bc64 | 16 | 43.8 KB | **2** | 71.1% | 29.9% | 15.9% | 0.83 |
+| 12 | br32 bc64 | 8 | 39.5 KB | **2** | 74.0% | 30.6% | 15.9% | 1.15 |
+
+Occupancy doubles where it was supposed to double — config 6 from one resident
+block per SM to two, config 5 from two to three — at tiles that did not change
+by one register. And the wide tile really does do less shared work per FMA:
+config 6 reads L1/TEX at 64% where config 5 reads 79%, which is the
+0.50-against-0.75 loads-per-FMA ratio showing up in a counter rather than on
+paper.
+
+#### The first answer was wrong, and it was my bug
+
+The first sweep said chunking was worth **8–10% at every context length**. It is
+not. Restructuring the score loop for chunking, I had put a `#pragma unroll` on
+the inner loop that the original did not have — and that pragma is inside the
+`KVC == HS` path too, so it re-tuned the codegen of *every unchunked config*,
+which is to say the entire control group. Measured, config 0 lost 13.8% and
+config 7 gained 10% from the pragma alone; config 6, the one the whole argument
+rests on, lost 8%.
+
+So chunking was being credited with damage the comparison itself had done.
+Removing the pragma restores config 6 to 1.447 ms, within 1.5% of where the
+pre-chunking build had it, and the real numbers are much smaller. Median of
+three sweeps, spread under 1% on every cell, `B·T` held constant:
+
+| ctx | cfg 5 `bc32` | cfg 6 `bc64` | cfg 8 `+c16` | cfg 12 `+c8` | cfg 10 `bc32+c16` |
+|----:|------:|------:|------:|------:|------:|
+| 256 | **1.337** | 1.447 | 1.412 | 1.396 | 1.331 |
+| 512 | **2.405** | 2.467 | 2.449 | 2.411 | 2.435 |
+| 1024 | 4.535 | 4.472 | 4.475 | **4.424** | 4.619 |
+| 2048 | 8.755 | 8.402 | 8.471 | **8.369** | 8.955 |
+
+Chunking is worth **0.4% to 3.5%**, not 8–10%, and `KVC`=8 beats `KVC`=16
+almost everywhere — so the chunk size I picked first was wrong too. The wide
+tile does win at long context, but it wins mostly *on its own*: config 6
+unchunked already beats config 5 by 1.4% at ctx 1024 and 4.0% at ctx 2048.
+Chunking adds about another 1% on top.
+
+The lesson is not subtle and it is not about attention. **A change that
+restructures a loop is not a controlled experiment until the control has been
+checked byte for byte.** I would have published a four-times-overstated result,
+with a plausible mechanism attached to it, and the mechanism would have been
+real — the occupancy really does double — just nowhere near large enough to
+explain the number I was quoting.
+
+#### What survives, and it is the negative half
+
+Config 10 is the result worth keeping, because it is the one case where the
+resource was **freed rather than traded**: same tile as the default, three
+resident blocks against two, nothing given up to get them. Every counter you
+would check says it should be faster — highest occupancy in the table, highest
+L1/TEX, highest SM throughput. It is 1.331 ms against config 5's 1.337 at ctx
+256, a tie, and clearly *worse* everywhere above: 4.619 against 4.535 at ctx
+1024, 8.955 against 8.755 at 2048.
+
+Fifty percent more resident warps, for free, for nothing. One counter does say
+where they went: MIO throttle goes 0.79 → **2.45**, a tripling, while the
+barrier stall also rises 0.24 → 0.39. The warps arrive and queue. Which is the
+same sentence this page already wrote once about the 64→128 thread change —
+*more warps issuing against an already-saturated datapath is not a fix, it is
+more queueing* — and this witness is cleaner, because the earlier one had bought
+its occupancy by loading more per FMA and could be waved away as a wash. This
+one paid nothing and still got nothing.
+
+The wide-tile family says the converse, and it is the same point from the other
+side. Config 6 has the *least* saturated datapath of the five (L1/TEX 64%) and
+the *lowest* throughput (SM 26%), because at 8% occupancy there are not enough
+warps to keep the FMA pipes fed however little each one asks for. Efficiency per
+warp is not throughput; neither is occupancy. They trade, and both ends of the
+trade are visible in this one table.
+
+So the profiler's prescription was affordable after all, and buying it does not
+help. The counter named a real inefficiency; removing it did not make the kernel
+faster. That is worth more than the 1% it also produced.
+
+#### The default is now a rule
+
+The crossover sits between ctx 512 and 1024, so `flash_default_bwd_config` takes
+`T` rather than being a constant — the same shape of rule as the GEMM's two
+tiles. End to end, `--bwd-cfg` pinning each way, three interleaved runs each:
+
+| ctx | cfg 5 | cfg 8 | cfg 12 | best |
+|----:|------:|------:|------:|---|
+| 1024 | 69.1 ms | 68.7 ms | **68.1 ms** | 1.4% |
+| 2048 | 99.4 ms | 98.1 ms | **97.2 ms** | **2.2%** |
+
+The model trains at ctx 256, where the narrow tile wins and nothing changes. The
+fused kernel exists so that long context is affordable at all, and that is
+exactly where the wide chunked tile takes over.
+
+#### Two ways the machine lied, both caught by the same habit
+
+Half these numbers were first taken while the laptop sat idle with its screen
+off, and Windows had cut the GPU's power ceiling from 100 W to 33 W — the same
+workload measured 136 ms where it had measured 46.8. Nothing in `nvidia-smi`'s
+clock column showed it; that field reports 0 MHz, 3180 MHz and once 21292 MHz on
+this card. The tell was `power.draw/power.limit`. Separately, an `ncu` run left
+pending on a UAC prompt started late and competed for the GPU through a whole
+measurement pass.
+
+A pinned SM clock is not a pinned machine. Both were caught the same way, and it
+is the cheapest discipline in this repo: **every batch of numbers is bracketed
+by a known reference point** — ctx 256 at 46.8 ms — run immediately before and
+after. The final sweeps read 46.6 before and 46.2 after.
+
 ### What the memory actually buys: twice the context
 
 The forward speedup is nice. The memory is the part that changes what the card
@@ -1206,6 +1339,15 @@ Generate text from a saved checkpoint:
 ./bench/train_gpt --load bench/gpt.bin --len 1000 --temp 0.8
 ```
 
+A/B a fused-backward tile config end to end without rebuilding. `--bwd-cfg`
+pins one of the configs `test_flash` sweeps, overriding the context-dependent
+rule, so both halves of a comparison come out of the same binary and can be
+interleaved against a drifting machine:
+
+```bash
+./bench/train_gpt -n 12 -b 2 -t 2048 --tf32 --eval 0 --len 0 --bwd-cfg 8
+```
+
 Regenerate the charts:
 
 ```bash
@@ -1333,10 +1475,25 @@ four scalar stores.
    thing to try here is **the warp tile, not the staging** — and this is the
    third time the `N=384`-shaped part of the model has eaten a GEMM gain that
    was real at square sizes.
-3. **The attention backward**, now the largest thing left after the matmuls —
-   the largest single thing left after the matmuls. The cure and the one
-   unmeasured piece of it are in item 4 below; the profile has just promoted it
-   from "nice to have" to the next thing to do.
+3. ~~**The attention backward**~~ — [measured](#chunking-the-head-dimension-and-the-bug-that-made-it-look-four-times-better),
+   and the prescribed cure works without paying off. Chunking the head dimension
+   frees the shared memory the bigger register tile needed and doubles blocks/SM
+   exactly as intended, and it is worth **0.4–3.5%** — not the 8–10% the first
+   sweep said, which was a `#pragma unroll` I had added to the control group.
+   The sharpest datum is the config where occupancy went 2 → 3 blocks with
+   nothing traded away: highest occupancy, highest L1/TEX, highest SM throughput
+   in the table, and not one percent faster — MIO throttle triples instead. The
+   default is now context-dependent (`flash_default_bwd_config`), worth 2.2% of
+   a step at ctx 2048.
+
+   What is left here is not a tile parameter. The fused backward runs at 2.2
+   TFLOP/s against 14.1 fp32 peak, and its matmuls are 4×2 and 4×4 register
+   tiles where the model's GEMM runs 8×8 on tensor cores — which is most of why
+   it only beats the unfused path by 1.06x. **Attention is the last consumer in
+   this repo still on fp32 FMAs.** The machinery to fix that already exists in
+   `lane_major.cuh`; what it needs is the `mma` fragment layout carried through
+   the P/dS round-trip, which is exactly the thing WMMA could not express and
+   kernel 10 already had to solve once.
 4. **The N=384 tail.** Every shape in the model where `mma.sync` gained nothing
    is a shape whose grid is 1.33 waves. Neither a narrower tile (measured,
    worse everywhere) nor a better inner loop can fix a grid that leaves two
@@ -1360,9 +1517,10 @@ four scalar stores.
    block count is worth more — the opposite of what the identical counter
    reading meant for kernel 7. A profile says which resource is saturated, not
    which change is affordable. Getting both would need the head dimension
-   chunked so the tile and the block count stop competing, and the re-staging
-   that costs (K and V restaged once per query block) is the part that has not
-   been measured.
+   chunked so the tile and the block count stop competing — [now
+   measured](#chunking-the-head-dimension-and-the-bug-that-made-it-look-four-times-better):
+   the chunking works and the block comes back, and it buys 0.4–3.5% rather than
+   the 8–10% the first, miscontrolled sweep claimed. See item 3.
 4. **Multi-GPU** — started, and the first measurements are in
    [`bench/logs/multigpu_a40.txt`](bench/logs/multigpu_a40.txt). A ring
    all-reduce written from scratch (no NCCL), data-parallel training behind

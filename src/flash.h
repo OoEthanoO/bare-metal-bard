@@ -55,7 +55,11 @@ bool flash_attention_forward_cfg(int cfg, float *out, float *lse,
 // ---- backward tuning harness ----
 int flash_num_bwd_configs();
 const char *flash_bwd_config_name(int cfg);
-int flash_default_bwd_config();
+// Depends on the context length: the tile that wins at T=256 is not the tile
+// that wins at T=2048. See the table above the definition in flash.cu.
+int flash_default_bwd_config(int T);
+// Pin a backward config, overriding the rule above. -1 restores the rule.
+void flash_set_bwd_config(int cfg);
 bool flash_attention_backward_cfg(int cfg, float *dqkv, float *dsum,
                                   const float *dout, const float *qkv,
                                   const float *out, const float *lse, int B,
