@@ -1415,6 +1415,8 @@ tools/
   device_query.cu   roofline numbers for this GPU
   merge_runs.py     median several sweeps, flag cells that disagree
   smem_banks.py     proves kernel 10's shared layout, no GPU needed
+  probe_mma_acc.cu  measures the mma accumulator layout, and whether it can
+                    be shuffled into an A operand without shared memory
   step_profile.py   aggregate an ncu dump into where a step spends its time
   flash_memory.py   context-length memory sweep, fused vs unfused
   plot_results.py   CSV -> SVG charts
@@ -1494,6 +1496,26 @@ four scalar stores.
    `lane_major.cuh`; what it needs is the `mma` fragment layout carried through
    the P/dS round-trip, which is exactly the thing WMMA could not express and
    kernel 10 already had to solve once.
+
+   **The layout question is now answered**, by `tools/probe_mma_acc.cu` rather
+   than by recall. The `m16n8k8` TF32 accumulator comes back as
+
+       reg i of lane L  =  (row = L/4 + 8*(i/2),  col = 2*(L%4) + i%2)
+
+   verified against all 128 entries. It does **not** match the A-operand
+   mapping, which wants columns `{t, t+4}` where the accumulator holds
+   `{2t, 2t+1}` -- so unlike the f16 shapes, a TF32 accumulator cannot be fed
+   straight back in. But the two differ only *within* the four lanes that share
+   a row group, so **eight `__shfl_sync`es convert one to the other exactly,
+   with no shared memory at all.** The P/dS round-trip does not have to survive
+   the port: on the tensor-core path it can be deleted, and that round-trip is
+   the structural reason the fused backward is only 1.06x today.
+
+   One trap found on the way, worth stating because it is silent: shuffling the
+   *already-selected* register, `__shfl_sync(mask, par ? d[1] : d[0], src)`,
+   reads whichever register the SOURCE lane's own `par` chose. Both have to be
+   shuffled and the selection applied after. The wrong version lands on the
+   neighbouring column and stays entirely plausible.
 4. **The N=384 tail.** Every shape in the model where `mma.sync` gained nothing
    is a shape whose grid is 1.33 waves. Neither a narrower tile (measured,
    worse everywhere) nor a better inner loop can fix a grid that leaves two
