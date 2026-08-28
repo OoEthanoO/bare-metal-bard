@@ -795,7 +795,82 @@ constexpr int SWM = 32, SWN = 64, STHREADS = 128, SMINB = 4;
 // Switch below this many 128x128 blocks. 72 is two blocks per SM across 36
 // SMs -- one full wave -- so the rule reads: if the default tile cannot fill
 // the machine once, prefer the tile that makes more blocks.
-constexpr int TILE_SWITCH_BLOCKS = 72;
+// WHICH OF THE TWO TILES, AND WHY THE OLD RULE WAS WRONG TWICE OVER.
+//
+// This used to be `TILE_SWITCH_BLOCKS = 72` -- two blocks per SM across the 36
+// SMs of the 4070 this was written on -- reading "if the wide tile cannot fill
+// the machine once, prefer the tile that makes more blocks". Re-measuring it on
+// a 46-SM card was worth 7.3% of a training step. The constant was stale, but
+// the rule behind it was also wrong, and the second part took a control to see.
+//
+// Forcing the NARROW tile on every shape, this card, TF32 GFLOP/s:
+//
+//   shape                       N     wide    narrow
+//   attn proj    4096x384x384    384   7172    8556   +19%
+//   qkv proj    4096x1152x384   1152   9732   11100   +14%
+//   mlp up      4096x1536x384   1536  10467   11584   +11%
+//   mlp down    4096x384x1536    384   7868    9613   +22%
+//
+// The narrow tile wins at 384 blocks (mlp up, four full waves) as decisively as
+// at 96 (attn proj, one). So it is NOT wave quantisation -- which was the first
+// explanation, and does not survive the arithmetic either: 96 blocks into 92
+// slots and 192 into 184 are the same 52% efficiency.
+//
+// THE ROOFLINE IS THE MOTIVATION AND NOT A PROOF, which is worth stating
+// because the tempting version of this comment is wrong. A BM x BN tile reads
+// (BM+BN)*BK*4 bytes per 2*BM*BN*BK flops, so its intensity is
+// BM*BN/(2*(BM+BN)): 32.0 FLOP/byte wide, 21.3 narrow. The ridge point of the
+// 4070 is far above both and this card's is much lower, which is a real and
+// robust difference between the two machines and plausibly why they prefer
+// different tiles.
+//
+// It does NOT survive as a threshold test, and pretending otherwise was a
+// mistake caught only by building it. "Narrow clears the ridge" is true at
+// 21.3 against 21.0 -- a 1.4% margin, and only at the PINNED 1.2 GHz clock.
+// At this card's base clock the ridge is 25.4 and at boost 54.1, so the same
+// card answers the same question three different ways depending on which clock
+// you evaluate at. A rule that flips on 1.4% is numerology, not physics; and
+// the intensity model ignores L2 reuse, which at these shapes is large.
+//
+// So what is here is an EMPIRICAL rule with the roofline as its motivation:
+// take the narrow tile unless this machine's ridge point (at base clock, which
+// is a fixed device property rather than whatever the card is clocked at right
+// now) sits above the WIDE tile's intensity, i.e. unless the machine is
+// bandwidth-starved enough that arithmetic intensity is what limits it.
+//
+//   4070      ~11.3 TFLOP/s / 256 GB/s = 44.3  >  32.0  ->  wide    (measured)
+//   5070 Ti    17.1 TFLOP/s / 672 GB/s = 25.4  <  32.0  ->  narrow  (measured)
+//
+// Both sides clear by ~20-40%, which is the margin the knife-edge version
+// lacked. It is calibrated on two cards and should be re-measured on a third
+// rather than trusted; `--bench` in tools/test_gemm.cu is what does that.
+constexpr double NARROW_TILE_AI = (double)SBM * SBN / (2.0 * (SBM + SBN));
+constexpr double WIDE_TILE_AI = (double)TBM * TBN / (2.0 * (TBM + TBN));
+
+static bool prefer_narrow_tile() {
+    static int cached = -1;
+    if (cached >= 0) return cached != 0;
+    int dev = 0, clock_khz = 0, mem_khz = 0;
+    cudaDeviceProp p{};
+    if (cudaGetDevice(&dev) != cudaSuccess ||
+        cudaGetDeviceProperties(&p, dev) != cudaSuccess) {
+        cached = 0;  // cannot tell -- keep the tile the 4070 was tuned on
+        return false;
+    }
+    // CUDA 13 removed cudaDeviceProp::clockRate and ::memoryClockRate; the
+    // attribute API works on both, which device_query.cu already relies on.
+    cudaDeviceGetAttribute(&clock_khz, cudaDevAttrClockRate, dev);
+    cudaDeviceGetAttribute(&mem_khz, cudaDevAttrMemoryClockRate, dev);
+    if (clock_khz <= 0 || mem_khz <= 0 || p.memoryBusWidth <= 0) {
+        cached = 0;
+        return false;
+    }
+    const double peak = 2.0 * 128 * p.multiProcessorCount * clock_khz * 1e3;
+    const double bw = 2.0 * (p.memoryBusWidth / 8.0) * mem_khz * 1e3;
+    cached = (peak / bw < WIDE_TILE_AI) ? 1 : 0;
+    return cached != 0;
+}
+
 // Narrowing BN to 64 was tried, to cut the wave quantisation at N=384 where a
 // 128-wide tile leaves only three block columns and the second wave runs a
 // third full. It is worse everywhere -- 6144 -> 5644 GF/s at 4096x384x384 --
@@ -880,7 +955,7 @@ void dispatch_epi(int M, int N, int K, float alpha, const float *A,
         }
 #else
         const bool narrow =
-            (M / TBM) * (N / TBN) < TILE_SWITCH_BLOCKS && M % SBM == 0;
+            prefer_narrow_tile() && M % SBM == 0;
         const int bm = narrow ? SBM : TBM, bn = narrow ? SBN : TBN;
         const int bk = narrow ? SBK : TBK;
         const int blocks = (M / bm) * (N / bn);

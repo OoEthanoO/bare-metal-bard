@@ -716,6 +716,77 @@ It stays opt-in here (`--tf32`) rather than becoming the default, because it
 changes what the model computes and one 5000-step run on 1 MB of Shakespeare is
 not enough evidence to make that choice silently for someone else.
 
+### The tile rule was stale, and my explanation for it was wrong twice
+
+*Measured on the 5070 Ti, sm_120, clock pinned to 1200 MHz.*
+
+With attention ported, the GEMMs are back to ~72% of a step, so the next thing
+is the two-tile dispatch above. Its rule was `TILE_SWITCH_BLOCKS = 72` — two
+blocks per SM across the **36** SMs of the 4070 it was written on. This card has
+46. Re-measuring is worth **7.6% of a training step**, 43.6 → 40.2 ms.
+
+Every model shape improves, TF32 GFLOP/s:
+
+| shape | N | wide 128×128 | narrow 64×128 | |
+|---|---:|---:|---:|---:|
+| attn proj `4096×384×384` | 384 | 7172 | **8766** | +22% |
+| qkv proj `4096×1152×384` | 1152 | 9732 | **11100** | +14% |
+| mlp up `4096×1536×384` | 1536 | 10467 | **11618** | +11% |
+| mlp down `4096×384×1536` | 384 | 7868 | **9613** | +22% |
+
+`mlp up` is now at **96.5% of the ladder's own square-N peak** (12001 GF/s),
+which is about as close as a rectangular shape gets.
+
+**The first explanation was wave quantisation** — 96 blocks against 46 SMs × 2 =
+92 slots is one full wave plus four stragglers. It is wrong, and the control
+that killed it was forcing the narrow tile on *every* shape: it wins at 384
+blocks (`mlp up`, four full waves) as decisively as at 96. The arithmetic agrees
+that it was never the story — 96 blocks into 92 slots and 192 into 184 are the
+same 52% efficiency.
+
+**The second explanation was the roofline, and it was wrong in a more
+interesting way.** A `BM×BN` tile reads `(BM+BN)·BK·4` bytes per `2·BM·BN·BK`
+flops, so its arithmetic intensity is `BM·BN / 2(BM+BN)`: **32.0** FLOP/byte
+wide, **21.3** narrow. This card's ridge point is 21.0, so the narrow tile
+clears it and the wide one does not — a tidy story that explains the measurement
+*and* the 4070's opposite result.
+
+It only holds at the pinned 1.2 GHz clock, by 1.4%:
+
+| clock | peak fp32 | ridge point | narrow (21.3) clears? |
+|---|---:|---:|---|
+| pinned 1.20 GHz | 14.1 TFLOP/s | 21.0 | yes, by 1.4% |
+| base 1.45 GHz | 17.1 TFLOP/s | 25.4 | **no** |
+| boost 3.09 GHz | 36.4 TFLOP/s | 54.1 | **no** |
+
+I had picked the one clock that made the story work. Building it as a threshold
+is what exposed that — the rule promptly selected the *wrong* tile, because at
+the device's base clock 21.3 does not clear 25.4. A rule that flips on a 1.4%
+margin is numerology, and the intensity model ignores L2 reuse, which at these
+shapes is large.
+
+What survives is the ratio between *machines*, which is robust where the
+knife-edge was not: the 4070's ridge is ~44 at base clock against this card's
+25.4. So the rule here is empirical with the roofline as motivation — take the
+narrow tile unless the machine's ridge point sits above the **wide** tile's
+intensity, i.e. unless it is bandwidth-starved enough that intensity is what
+limits it:
+
+    4070      ~11.3 TFLOP/s / 256 GB/s = 44.3  >  32.0  ->  wide     (measured)
+    5070 Ti    17.1 TFLOP/s / 672 GB/s = 25.4  <  32.0  ->  narrow   (measured)
+
+Both clear by 20–40%, which is the margin the knife-edge version lacked. It is
+calibrated on two cards, evaluated at base clock so it is deterministic rather
+than depending on how the card happens to be clocked, and it should be
+re-measured on a third rather than trusted — `./bench/test_gemm --bench` is what
+does that.
+
+**And the 64×64 warp tile lost again.** The next-steps list said to try it in the
+model GEMM; it measured 44.8 ms against a bracketed 43.1/43.6 baseline, ~3%
+slower, which is the same verdict the 4070 gave. Two cards, same answer, so that
+one is settled.
+
+
 ### How much is still on the table
 
 Against cuBLAS's own TF32 path at the same shapes:
@@ -1620,6 +1691,18 @@ prints the spread; anything over 3% is flagged as not-a-result-yet. Current
 worst spread across the whole table is **1.0%**. The rule this encodes: a number
 measured once is a hypothesis.
 
+**A reference bracket only guards what it does not contain.** Every batch of
+numbers here is bracketed by the ctx-256 training step, run before and after, on
+the rule that if both ends read 46.8 ms the measurements between them are
+comparable. That caught two bad sessions. It also stopped working the moment I
+changed a GEMM, and quietly: the bracket is `--fwd-cfg 1 --bwd-cfg 5`, fp32
+attention with TF32 matmuls, so a *matmul* speedup moves the anchor itself. It
+read 44.1 instead of 46.8, and that was the change working rather than the
+machine drifting. The bracket was sound for every attention change because those
+leave the GEMMs untouched; it cannot guard a GEMM change, because nothing in
+this model avoids a matmul. There the guard is an interleaved A/B — both arms
+minutes apart in one machine state — plus the power and clock check.
+
 **cuBLAS is re-timed immediately after each kernel** in the same process, so
 both see comparable thermal state and the ratio cancels what drift remains.
 
@@ -1760,7 +1843,15 @@ four scalar stores.
    reads whichever register the SOURCE lane's own `par` chose. Both have to be
    shuffled and the selection applied after. The wrong version lands on the
    neighbouring column and stays entirely plausible.
-4. **The N=384 tail.** Every shape in the model where `mma.sync` gained nothing
+4. ~~**The N=384 tail.**~~ — [largely answered](#the-tile-rule-was-stale-and-my-explanation-for-it-was-wrong-twice),
+   and not by anything specific to N=384: the two-tile rule was calibrated on a
+   36-SM card and re-measuring it is worth **7.6% of a step**, lifting every
+   model shape 11–22% and `mlp up` to 96.5% of the ladder's square-N peak. The
+   original diagnosis below is kept because it was wrong in an instructive way —
+   the narrow tile wins at four full waves as decisively as at one, so wave
+   quantisation was never the mechanism.
+
+   Superseded reasoning: Every shape in the model where `mma.sync` gained nothing
    is a shape whose grid is 1.33 waves. Neither a narrower tile (measured,
    worse everywhere) nor a better inner loop can fix a grid that leaves two
    thirds of the second wave empty; what can is **splitting K** so the same
