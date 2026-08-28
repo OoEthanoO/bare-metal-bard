@@ -1176,7 +1176,60 @@ and failed **every** config including the fp32 ones, on a shape the kernels get
 exactly right. Where the reference is zero, the meaningful test is that the
 error is zero too.
 
-**Still to do: the dK/dV kernel** — the other half, by the `S^T` route above.
+#### dK/dV, the half that needed the transpose, and did not get one
+
+This is the kernel the forward's trick does *not* fit. Its second matmul
+reduces over queries —
+
+    dV[c][j] += sum_i P[i][c] dO[i][j]
+
+— so the A operand is P **transposed**, M = key, while `S = Q@K^T` accumulates
+as `[query][key]`. Transposing an accumulator is exactly the shared-memory round
+trip the whole port exists to delete.
+
+So this kernel does not compute S. **It computes `S^T = K@Q^T` directly**, key as
+M and query as N, and its accumulator is `[key][query]` from the start — the
+orientation the second matmul wants. `acc_to_a` then applies unchanged.
+
+That reorientation is free, and the reason is the part worth keeping: **the
+backward needs no row reductions at all.** The forward has to reduce along a
+query's keys for the running max and sum, which in this orientation would have
+been a stride-4 reduction across eight lanes. Here lse and D are already known,
+so `P = exp(S - lse[q])` and `dS = P*(dP - D[q])` are elementwise — a per-query
+scalar, which in the transposed layout means indexing by *column* instead of
+row. Both are staged into shared once per query block, so it costs one LDS.
+
+Fused backward, both kernels on tensor cores, median of the sweep:
+
+| ctx | best fp32 | **both mma** | | vs unfused |
+|----:|------:|------:|---:|---:|
+| 256 | 1.335 | **0.881** | −34.0% | 1.06x → **1.59x** |
+| 512 | 2.416 | **1.515** | −37.3% | 1.06x → **1.70x** |
+| 1024 | 4.411 | **2.779** | −37.0% | 1.11x → **1.77x** |
+| 2048 | 8.407 | **5.206** | −38.1% | 1.15x → **1.84x** |
+
+The fused backward was **1.06x** the unfused path when this section began. It is
+now **1.59x to 1.84x**, and the whole gap was fp32 FMAs where the model's own
+GEMM had been running tensor cores for months.
+
+End to end, both arms with `--tf32` GEMMs, attention pinned each way:
+
+| ctx | fp32 attention | TF32 attention | |
+|----:|------:|------:|---:|
+| 256 | 46.7 ms | **43.5 ms** | −6.9% |
+| 1024 | 69.0 ms | **56.3 ms** | −18.5% |
+| 2048 | 97.2 ms | **73.6 ms** | −24.3% |
+
+**A quarter of a training step at ctx 2048**, and the gradient check passes with
+both kernels on tensor cores. Errors stay in a 1.8e-04 to 9.6e-04 band across
+ctx 1, 33, 63, 100, 256, 512, 777, 1024 and both head sizes — the ragged shapes
+being where an indexing or masking mistake in a transposed kernel would show
+first, and it is a *transposed* kernel, so that check was the one that mattered.
+
+Config 19 exists to keep the two halves separable: it ports dK/dV and leaves dQ
+in fp32, and its error signature is `dq 3.00e-07, dk 6.01e-04, dv 3.54e-04` —
+fp32 where the fp32 kernel still runs, TF32 where the new one does. That is how
+you tell a port from a corruption.
 
 
 ### The backward is only 1.19x, and here is why

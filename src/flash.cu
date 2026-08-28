@@ -1188,6 +1188,227 @@ __global__ __launch_bounds__(NT) void flash_bwd_q_k(
 
 
 #if BMB_TF32
+// ------------------------------------ dK and dV on the tensor cores
+//
+// This is the kernel the forward's trick does NOT fit, and the way around it is
+// the interesting part. Its second matmul reduces over queries:
+//
+//     dV[c][j] += sum_i P[i][c] dO[i][j]
+//
+// so the A operand is P TRANSPOSED -- M = key -- while S = Q@K^T accumulates as
+// [query][key]. Transposing an accumulator is exactly the shared-memory round
+// trip the port is trying to delete.
+//
+// So this kernel does not compute S. It computes S^T = K@Q^T directly, with
+// key as M and query as N, and its accumulator is [key][query] to begin with:
+// the orientation the second matmul wants. acc_to_a then applies unchanged.
+//
+// That costs nothing, and the reason is worth stating: the BACKWARD NEEDS NO
+// ROW REDUCTIONS. The forward has to reduce along a query's keys to get the
+// running max and sum, which would have been a stride-4 reduction across eight
+// lanes in this orientation. Here lse and D are already known, so
+//
+//     P = exp(S - lse[query])        dS = P * (dP - D[query])
+//
+// are elementwise, and a per-query scalar is all that is needed -- which in the
+// transposed layout means indexing by COLUMN rather than row. Both scalars are
+// staged into shared once per query block, so the indexing costs one LDS.
+//
+// The operands, all through kernels/lane_major.cuh:
+//
+//     K, V    A operand   a_off<BC>(m = key,      k = head dim)
+//     Q, dO   B operand   b_off<BR>(k = head dim, n = query)   |  S^T, dP^T
+//     Q, dO   B operand   b_off<HS>(k = query,    n = head dim)|  dK, dV
+//
+// Q and dO appear in two B layouts each, which is four staging passes off two
+// global reads. That is the whole reason this kernel wants BR = BC = 32: at 48
+// KB it keeps two blocks per SM, and at BR = 64 it would be 80 KB and one.
+template <int BR, int BC, int HS, int NT>
+__global__ __launch_bounds__(NT) void flash_bwd_kv_mma_k(
+    float *__restrict__ dqkv, const float *__restrict__ qkv,
+    const float *__restrict__ dout, const float *__restrict__ lse,
+    const float *__restrict__ dsum, int T, int NH, float scale) {
+    constexpr int NW = NT / WARPSIZE;
+    constexpr int NR = BR / MMA_N;   // n-tiles of S^T, then k-chunks of P^T
+    constexpr int NO = HS / MMA_N;   // n-tiles of dK and dV
+    constexpr int NK = HS / MMA_K;   // k-chunks of S^T
+    constexpr int V4 = HS / 4;
+
+    static_assert(BC == MMA_M * NW, "one 16-key tile per warp");
+    static_assert(BR % 16 == 0 && HS % 16 == 0, "B operands pack 16 wide");
+    static_assert(BR % MMA_K == 0, "P^T's k chunks divide the query tile");
+    static_assert(NT % V4 == 0, "staging tiles evenly");
+
+    extern __shared__ float smem[];
+    float *Ks = smem;                  // a_off<BC>(key, head dim)
+    float *Vs = Ks + BC * HS;          // a_off<BC>(key, head dim)
+    float *Qb = Vs + BC * HS;          // b_off<BR>(head dim, query), scaled
+    float *dOb = Qb + HS * BR;         // b_off<BR>(head dim, query)
+    float *Qv = dOb + HS * BR;         // b_off<HS>(query, head dim), scaled
+    float *dOv = Qv + BR * HS;         // b_off<HS>(query, head dim)
+    float *lses = dOv + BR * HS;       // [BR]
+    float *dss = lses + BR;            // [BR]
+
+    const int tid = threadIdx.x;
+    const int lane = tid % WARPSIZE, warp = tid / WARPSIZE;
+    const int g = lane >> 2, tq = lane & 3;
+
+    const int bh = blockIdx.y, b = bh / NH, h = bh % NH;
+    const int C = NH * HS;
+    const int j0 = blockIdx.x * BC;
+
+    const float *base = qkv + (size_t)b * T * 3 * C + h * HS;
+    const float *dob = dout + (size_t)b * T * C + h * HS;
+    const float *lserow = lse + (size_t)bh * T;
+    const float *dsrow = dsum + (size_t)bh * T;
+
+    // K and V are fixed for this block: stage once, in the A layout.
+    for (int lin = tid; lin < BC * V4; lin += NT) {
+        const int c = lin / V4, i4 = (lin % V4) * 4;
+        const int t = j0 + c;
+        float4 k = make_float4(0.f, 0.f, 0.f, 0.f), v = k;
+        if (t < T) {
+            k = CVEC4(base[(size_t)t * 3 * C + C + i4]);
+            v = CVEC4(base[(size_t)t * 3 * C + 2 * C + i4]);
+        }
+        Ks[a_off<BC>(c, i4 + 0)] = k.x;
+        Ks[a_off<BC>(c, i4 + 1)] = k.y;
+        Ks[a_off<BC>(c, i4 + 2)] = k.z;
+        Ks[a_off<BC>(c, i4 + 3)] = k.w;
+        Vs[a_off<BC>(c, i4 + 0)] = v.x;
+        Vs[a_off<BC>(c, i4 + 1)] = v.y;
+        Vs[a_off<BC>(c, i4 + 2)] = v.z;
+        Vs[a_off<BC>(c, i4 + 3)] = v.w;
+    }
+
+    float acc_dk[NO][4] = {}, acc_dv[NO][4] = {};
+
+    // Only queries at or after this key block can attend it.
+    for (int i0 = (j0 / BR) * BR; i0 < T; i0 += BR) {
+        __syncthreads();
+        for (int lin = tid; lin < BR * V4; lin += NT) {
+            const int r = lin / V4, i4 = (lin % V4) * 4;
+            const int t = i0 + r;
+            float4 q = make_float4(0.f, 0.f, 0.f, 0.f), o = q;
+            if (t < T) {
+                q = CVEC4(base[(size_t)t * 3 * C + i4]);
+                o = CVEC4(dob[(size_t)t * C + i4]);
+            }
+            // The 1/sqrt(hs) rides on Q in BOTH layouts, so S^T is scaled and
+            // dK comes out scaled with it -- no epilogue multiply, same as the
+            // fp32 kernel.
+            Qb[b_off<BR>(i4 + 0, r)] = q.x * scale;
+            Qb[b_off<BR>(i4 + 1, r)] = q.y * scale;
+            Qb[b_off<BR>(i4 + 2, r)] = q.z * scale;
+            Qb[b_off<BR>(i4 + 3, r)] = q.w * scale;
+            dOb[b_off<BR>(i4 + 0, r)] = o.x;
+            dOb[b_off<BR>(i4 + 1, r)] = o.y;
+            dOb[b_off<BR>(i4 + 2, r)] = o.z;
+            dOb[b_off<BR>(i4 + 3, r)] = o.w;
+            Qv[b_off<HS>(r, i4 + 0)] = q.x * scale;
+            Qv[b_off<HS>(r, i4 + 1)] = q.y * scale;
+            Qv[b_off<HS>(r, i4 + 2)] = q.z * scale;
+            Qv[b_off<HS>(r, i4 + 3)] = q.w * scale;
+            dOv[b_off<HS>(r, i4 + 0)] = o.x;
+            dOv[b_off<HS>(r, i4 + 1)] = o.y;
+            dOv[b_off<HS>(r, i4 + 2)] = o.z;
+            dOv[b_off<HS>(r, i4 + 3)] = o.w;
+        }
+        for (int r = tid; r < BR; r += NT) {
+            const int t = i0 + r;
+            lses[r] = (t < T) ? lserow[t] : 0.0f;
+            dss[r] = (t < T) ? dsrow[t] : 0.0f;
+        }
+        __syncthreads();
+
+        // S^T = K @ (Q/sqrt(hs))^T and dP^T = V @ dO^T.
+        float acc_s[NR][4] = {}, acc_p[NR][4] = {};
+#pragma unroll
+        for (int kk = 0; kk < NK; ++kk) {
+            const int au = kk * (BC / MMA_M) + warp;
+            const float4 kv4 = CVEC4(Ks[au * UNIT + (lane ^ a_swz<BC>(au)) * 4]);
+            const float4 vv4 = CVEC4(Vs[au * UNIT + (lane ^ a_swz<BC>(au)) * 4]);
+            const unsigned ak[4] = {to_tf32(kv4.x), to_tf32(kv4.y),
+                                    to_tf32(kv4.z), to_tf32(kv4.w)};
+            const unsigned av[4] = {to_tf32(vv4.x), to_tf32(vv4.y),
+                                    to_tf32(vv4.z), to_tf32(vv4.w)};
+#pragma unroll
+            for (int jj = 0; jj < NR; jj += 2) {
+                const int bu = kk * (BR / 16) + jj / 2;
+                const float4 qv4 = CVEC4(Qb[bu * UNIT + (lane ^ b_swz<BR>(bu)) * 4]);
+                const float4 ov4 = CVEC4(dOb[bu * UNIT + (lane ^ b_swz<BR>(bu)) * 4]);
+                const unsigned bq[4] = {to_tf32(qv4.x), to_tf32(qv4.y),
+                                        to_tf32(qv4.z), to_tf32(qv4.w)};
+                const unsigned bo[4] = {to_tf32(ov4.x), to_tf32(ov4.y),
+                                        to_tf32(ov4.z), to_tf32(ov4.w)};
+                mma_m16n8k8(acc_s[jj + 0], ak, &bq[0]);
+                mma_m16n8k8(acc_s[jj + 1], ak, &bq[2]);
+                mma_m16n8k8(acc_p[jj + 0], av, &bo[0]);
+                mma_m16n8k8(acc_p[jj + 1], av, &bo[2]);
+            }
+        }
+
+        // P^T and dS^T, elementwise. The per-query scalars are indexed by the
+        // accumulator's COLUMN here, which is what the transposed orientation
+        // buys and costs: one LDS each instead of a register already in hand.
+        // acc_s becomes P^T, acc_p becomes dS^T.
+#pragma unroll
+        for (int jj = 0; jj < NR; ++jj)
+#pragma unroll
+            for (int i = 0; i < 4; ++i) {
+                const int rq = jj * MMA_N + 2 * tq + (i & 1);  // query in tile
+                const int kg = j0 + warp * MMA_M + g + 8 * (i >> 1);
+                const int qg = i0 + rq;
+                const bool live = (qg < T) && (kg < T) && (kg <= qg);
+                const float p = live ? __expf(acc_s[jj][i] - lses[rq]) : 0.0f;
+                acc_s[jj][i] = p;
+                acc_p[jj][i] = p * (acc_p[jj][i] - dss[rq]);
+            }
+
+        // dV += P^T @ dO and dK += dS^T @ Q, both with the A operand handed
+        // over in registers.
+#pragma unroll
+        for (int jj = 0; jj < NR; ++jj) {
+            unsigned ap[4], ad[4];
+            acc_to_a(acc_s[jj], ap, lane);
+            acc_to_a(acc_p[jj], ad, lane);
+#pragma unroll
+            for (int nn = 0; nn < NO; nn += 2) {
+                const int bu = jj * (HS / 16) + nn / 2;
+                const float4 ov4 = CVEC4(dOv[bu * UNIT + (lane ^ b_swz<HS>(bu)) * 4]);
+                const float4 qv4 = CVEC4(Qv[bu * UNIT + (lane ^ b_swz<HS>(bu)) * 4]);
+                const unsigned bo[4] = {to_tf32(ov4.x), to_tf32(ov4.y),
+                                        to_tf32(ov4.z), to_tf32(ov4.w)};
+                const unsigned bq[4] = {to_tf32(qv4.x), to_tf32(qv4.y),
+                                        to_tf32(qv4.z), to_tf32(qv4.w)};
+                mma_m16n8k8(acc_dv[nn + 0], ap, &bo[0]);
+                mma_m16n8k8(acc_dv[nn + 1], ap, &bo[2]);
+                mma_m16n8k8(acc_dk[nn + 0], ad, &bq[0]);
+                mma_m16n8k8(acc_dk[nn + 1], ad, &bq[2]);
+            }
+        }
+    }
+
+    // Q carried the scale, so dK needs no further multiply.
+#pragma unroll
+    for (int u = 0; u < 2; ++u) {
+        const int kg = j0 + warp * MMA_M + g + 8 * u;
+        if (kg >= T) continue;
+        float *dk = dqkv + ((size_t)b * T + kg) * 3 * C + C + h * HS;
+        float *dv = dk + C;
+#pragma unroll
+        for (int nn = 0; nn < NO; ++nn) {
+            float2 a, c;
+            a.x = acc_dk[nn][2 * u + 0]; a.y = acc_dk[nn][2 * u + 1];
+            c.x = acc_dv[nn][2 * u + 0]; c.y = acc_dv[nn][2 * u + 1];
+            reinterpret_cast<float2 *>(&dk[nn * MMA_N + 2 * tq])[0] = a;
+            reinterpret_cast<float2 *>(&dv[nn * MMA_N + 2 * tq])[0] = c;
+        }
+    }
+}
+#endif  // BMB_TF32
+
+#if BMB_TF32
 // ------------------------------------ dQ on the tensor cores
 //
 // The forward's trick carries over unchanged here, because the orientations
@@ -1372,7 +1593,7 @@ __global__ __launch_bounds__(NT) void flash_bwd_q_mma_k(
 #endif  // BMB_TF32
 
 template <int BR, int BC, int HS, int NT, int RT, int CT, int AT, int BT,
-          int QAT, int QBT, int KVC, int MMAQ>
+          int QAT, int QBT, int KVC, int MMAQ, int MMAKV>
 bool launch_bwd(float *dqkv, float *dsum, const float *dout, const float *qkv,
                 const float *out, const float *lse, int B, int T, int NH,
                 float scale) {
@@ -1389,19 +1610,43 @@ bool launch_bwd(float *dqkv, float *dsum, const float *dout, const float *qkv,
              : (size_t)(2 * HS * QW + 2 * HS * KW + BC * QW + 2 * BR) * sizeof(float);
     if (kv_smem > SMEM_CAP || q_smem > SMEM_CAP) return false;
 
-    auto kv = flash_bwd_kv_k<BR, BC, HS, NT, RT, CT, AT, BT, KVC>;
-    static bool configured = false;
-    if (!configured) {
-        if (cudaFuncSetAttribute(kv, cudaFuncAttributeMaxDynamicSharedMemorySize,
-                                 (int)kv_smem) != cudaSuccess) return false;
-        configured = true;
-    }
+    // The tensor-core dK/dV kernel holds K and V in the A layout and Q and dO
+    // in TWO B layouts each, and keeps no score tile at all.
+    constexpr size_t kvm_smem =
+        (size_t)(2 * BC * HS + 4 * BR * HS + 2 * BR) * sizeof(float);
+    if (MMAKV && kvm_smem > SMEM_CAP) return false;
 
     const int rows = B * NH * T;
     flash_dsum_k<<<ceil_div(rows * 32, 128), 128>>>(dsum, dout, out, T, NH, HS,
                                                     rows);
-    kv<<<dim3(ceil_div(T, BC), B * NH), NT, kv_smem>>>(dqkv, qkv, dout, lse,
-                                                       dsum, T, NH, scale);
+    if constexpr (MMAKV) {
+#if BMB_TF32
+        // One 16-key tile per warp, so this kernel sets its own block size for
+        // the same reason the dQ one does.
+        constexpr int NTKV = BC * 2;
+        auto kv = flash_bwd_kv_mma_k<BR, BC, HS, NTKV>;
+        static bool kv_conf = false;
+        if (!kv_conf) {
+            if (cudaFuncSetAttribute(kv, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                     (int)kvm_smem) != cudaSuccess) return false;
+            kv_conf = true;
+        }
+        kv<<<dim3(ceil_div(T, BC), B * NH), NTKV, kvm_smem>>>(
+            dqkv, qkv, dout, lse, dsum, T, NH, scale);
+#else
+        return false;
+#endif
+    } else {
+        auto kv = flash_bwd_kv_k<BR, BC, HS, NT, RT, CT, AT, BT, KVC>;
+        static bool kv_conf = false;
+        if (!kv_conf) {
+            if (cudaFuncSetAttribute(kv, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                     (int)kv_smem) != cudaSuccess) return false;
+            kv_conf = true;
+        }
+        kv<<<dim3(ceil_div(T, BC), B * NH), NT, kv_smem>>>(dqkv, qkv, dout, lse,
+                                                           dsum, T, NH, scale);
+    }
     if constexpr (MMAQ) {
 #if BMB_TF32
         // The two kernels no longer have to share a block size. The mma dQ
@@ -1477,26 +1722,28 @@ static int g_bwd_override = -1;
 // being staged once per chunk per query block, plus two barriers per chunk.
 // Whether the extra blocks/SM outrun that is the measurement, not the theory.
 //
-// (id, BR, BC, NT, RT, CT, kv: AT, BT, dQ: QAT, QBT, KVC, MMAQ, name)
+// (id, BR, BC, NT, RT, CT, kv: AT, BT, dQ: QAT, QBT, KVC, MMAQ, MMAKV, name)
 #define BWD_CONFIGS(X)                                                         \
-    X(0, 64, 32, 128, 4, 4, 4, 4, 8, 4, 0, 0, "br64 bc32 t128 kv4x4 q8x4")        \
-    X(1, 64, 32, 128, 4, 4, 4, 4, 4, 8, 0, 0, "br64 bc32 t128 kv4x4 q4x8")        \
-    X(2, 32, 32, 64, 4, 4, 4, 8, 4, 8, 0, 0, "br32 bc32 t64  kv4x8 q4x8")         \
-    X(3, 32, 32, 64, 4, 4, 8, 4, 8, 4, 0, 0, "br32 bc32 t64  kv8x4 q8x4")         \
-    X(4, 32, 32, 64, 4, 4, 4, 4, 4, 4, 0, 0, "br32 bc32 t64  kv4x4 q4x4")         \
-    X(5, 32, 32, 128, 4, 2, 4, 4, 4, 4, 0, 0, "br32 bc32 t128 kv4x4 q4x4")        \
-    X(6, 32, 64, 128, 4, 4, 8, 4, 4, 4, 0, 0, "br32 bc64 t128 kv8x4 q4x4")        \
-    X(7, 64, 32, 64, 8, 4, 8, 4, 8, 8, 0, 0, "br64 bc32 t64  8x4 kv8x4 q8x8")     \
-    X(8, 32, 64, 128, 4, 4, 8, 4, 4, 4, 16, 0, "br32 bc64 t128 kv8x4 q4x4 c16")   \
-    X(9, 32, 64, 128, 4, 4, 8, 4, 4, 4, 32, 0, "br32 bc64 t128 kv8x4 q4x4 c32")   \
-    X(10, 32, 32, 128, 4, 2, 4, 4, 4, 4, 16, 0, "br32 bc32 t128 kv4x4 q4x4 c16")  \
-    X(11, 32, 32, 128, 4, 2, 4, 4, 4, 4, 32, 0, "br32 bc32 t128 kv4x4 q4x4 c32")  \
-    X(12, 32, 64, 128, 4, 4, 8, 4, 4, 4, 8, 0, "br32 bc64 t128 kv8x4 q4x4 c8")                    \
-    X(13, 64, 32, 128, 4, 4, 4, 4, 4, 8, 0, 1, "br64 bc32 t128 mma-q")         \
-    X(14, 32, 32, 64, 4, 4, 4, 8, 4, 8, 0, 1, "br32 bc32 t64  mma-q")          \
-    X(15, 32, 64, 128, 4, 4, 8, 4, 4, 4, 8, 1, "br32 bc64 t128 c8 mma-q")       \
-    X(16, 32, 32, 128, 4, 2, 4, 4, 4, 4, 0, 1, "br32 bc32 t128 mma-q")         \
-    X(17, 32, 32, 128, 4, 2, 4, 4, 4, 4, 16, 1, "br32 bc32 t128 c16 mma-q")
+    X(0, 64, 32, 128, 4, 4, 4, 4, 8, 4, 0, 0, 0, "br64 bc32 t128 kv4x4 q8x4")        \
+    X(1, 64, 32, 128, 4, 4, 4, 4, 4, 8, 0, 0, 0, "br64 bc32 t128 kv4x4 q4x8")        \
+    X(2, 32, 32, 64, 4, 4, 4, 8, 4, 8, 0, 0, 0, "br32 bc32 t64  kv4x8 q4x8")         \
+    X(3, 32, 32, 64, 4, 4, 8, 4, 8, 4, 0, 0, 0, "br32 bc32 t64  kv8x4 q8x4")         \
+    X(4, 32, 32, 64, 4, 4, 4, 4, 4, 4, 0, 0, 0, "br32 bc32 t64  kv4x4 q4x4")         \
+    X(5, 32, 32, 128, 4, 2, 4, 4, 4, 4, 0, 0, 0, "br32 bc32 t128 kv4x4 q4x4")        \
+    X(6, 32, 64, 128, 4, 4, 8, 4, 4, 4, 0, 0, 0, "br32 bc64 t128 kv8x4 q4x4")        \
+    X(7, 64, 32, 64, 8, 4, 8, 4, 8, 8, 0, 0, 0, "br64 bc32 t64  8x4 kv8x4 q8x8")     \
+    X(8, 32, 64, 128, 4, 4, 8, 4, 4, 4, 16, 0, 0, "br32 bc64 t128 kv8x4 q4x4 c16")   \
+    X(9, 32, 64, 128, 4, 4, 8, 4, 4, 4, 32, 0, 0, "br32 bc64 t128 kv8x4 q4x4 c32")   \
+    X(10, 32, 32, 128, 4, 2, 4, 4, 4, 4, 16, 0, 0, "br32 bc32 t128 kv4x4 q4x4 c16")  \
+    X(11, 32, 32, 128, 4, 2, 4, 4, 4, 4, 32, 0, 0, "br32 bc32 t128 kv4x4 q4x4 c32")  \
+    X(12, 32, 64, 128, 4, 4, 8, 4, 4, 4, 8, 0, 0, "br32 bc64 t128 kv8x4 q4x4 c8")                    \
+    X(13, 64, 32, 128, 4, 4, 4, 4, 4, 8, 0, 1, 0, "br64 bc32 t128 mma-q")         \
+    X(14, 32, 32, 64, 4, 4, 4, 8, 4, 8, 0, 1, 0, "br32 bc32 t64  mma-q")          \
+    X(15, 32, 64, 128, 4, 4, 8, 4, 4, 4, 8, 1, 0, "br32 bc64 t128 c8 mma-q")       \
+    X(16, 32, 32, 128, 4, 2, 4, 4, 4, 4, 0, 1, 0, "br32 bc32 t128 mma-q")         \
+    X(17, 32, 32, 128, 4, 2, 4, 4, 4, 4, 16, 1, 0, "br32 bc32 t128 c16 mma-q")    \
+    X(18, 32, 32, 128, 4, 2, 4, 4, 4, 4, 0, 1, 1, "br32 bc32 mma-q mma-kv")     \
+    X(19, 32, 32, 128, 4, 2, 4, 4, 4, 4, 0, 0, 1, "br32 bc32 mma-kv only")
 
 // KVC == 0 in the table means "no chunking"; it becomes HS here so that the
 // unchunked configs keep taking the stage-once path bit for bit.
@@ -1518,7 +1765,7 @@ constexpr bool bwd_kv_ok() {
 }
 
 template <int BR, int BC, int HS, int NT, int RT, int CT, int AT, int BT,
-          int QAT, int QBT, int KVC, int MMAQ>
+          int QAT, int QBT, int KVC, int MMAQ, int MMAKV>
 struct BwdInst {
     static bool run(float *dqkv, float *dsum, const float *dout,
                     const float *qkv, const float *out, const float *lse, int B,
@@ -1531,8 +1778,15 @@ struct BwdInst {
             MMAQ ? (BC % 16 == 0 && HS % 16 == 0 && (BR * 2) % (HS / 4) == 0)
                  : ((BR / QAT) * (HS / QBT) == NT && BR % QAT == 0 &&
                     HS % QBT == 0 && QAT % 4 == 0 && QBT % 4 == 0);
-        if constexpr (bwd_kv_ok<BR, BC, HS, NT, RT, CT, AT, BT, C>() && q_ok)
-            return launch_bwd<BR, BC, HS, NT, RT, CT, AT, BT, QAT, QBT, C, MMAQ>(
+        // The tensor-core dK/dV kernel replaces the AT/BT tile with the mma
+        // fragment layout, so like the dQ one it has its own shape rule.
+        constexpr bool kv_ok =
+            MMAKV ? (BR % 16 == 0 && HS % 16 == 0 && (BC * 2) % (HS / 4) == 0 &&
+                     BR % 8 == 0)
+                  : bwd_kv_ok<BR, BC, HS, NT, RT, CT, AT, BT, C>();
+        if constexpr (kv_ok && q_ok)
+            return launch_bwd<BR, BC, HS, NT, RT, CT, AT, BT, QAT, QBT, C, MMAQ,
+                              MMAKV>(
                 dqkv, dsum, dout, qkv, out, lse, B, T, NH, scale);
         else
             return false;
@@ -1544,9 +1798,9 @@ bool dispatch_bwd(int cfg, float *dqkv, float *dsum, const float *dout,
                   const float *qkv, const float *out, const float *lse, int B,
                   int T, int NH, float scale) {
     switch (cfg) {
-#define X(id, BR, BC, NT, RT, CT, AT, BT, QAT, QBT, KVC, MMAQ, name)                 \
+#define X(id, BR, BC, NT, RT, CT, AT, BT, QAT, QBT, KVC, MMAQ, MMAKV, name)                 \
     case id:                                                                   \
-        return BwdInst<BR, BC, HS, NT, RT, CT, AT, BT, QAT, QBT, KVC, MMAQ>::run(    \
+        return BwdInst<BR, BC, HS, NT, RT, CT, AT, BT, QAT, QBT, KVC, MMAQ, MMAKV>::run(    \
             dqkv, dsum, dout, qkv, out, lse, B, T, NH, scale);
         BWD_CONFIGS(X)
 #undef X
@@ -1557,7 +1811,7 @@ bool dispatch_bwd(int cfg, float *dqkv, float *dsum, const float *dout,
 
 int flash_num_bwd_configs() {
     int n = 0;
-#define X(id, BR, BC, NT, RT, CT, AT, BT, QAT, QBT, KVC, MMAQ, name) ++n;
+#define X(id, BR, BC, NT, RT, CT, AT, BT, QAT, QBT, KVC, MMAQ, MMAKV, name) ++n;
     BWD_CONFIGS(X)
 #undef X
     return n;
@@ -1569,19 +1823,19 @@ int flash_num_bwd_configs() {
 // blanket tolerance would hide it, and the split is what makes the measured
 // 5.5e-04 / 4.2e-07 / 3.3e-07 signature readable at a glance.
 void flash_bwd_config_tol(int cfg, double *dq, double *dk, double *dv) {
-    int mmaq = 0;
-#define X(id, BR, BC, NT, RT, CT, AT, BT, QAT, QBT, KVC, MMAQ, name)           \
-    if (cfg == id) mmaq = MMAQ;
+    int mmaq = 0, mmakv = 0;
+#define X(id, BR, BC, NT, RT, CT, AT, BT, QAT, QBT, KVC, MMAQ, MMAKV, name)           \
+    if (cfg == id) { mmaq = MMAQ; mmakv = MMAKV; }
     BWD_CONFIGS(X)
 #undef X
     *dq = mmaq ? 2e-3 : 1e-5;
-    *dk = 1e-5;
-    *dv = 1e-5;
+    *dk = mmakv ? 2e-3 : 1e-5;
+    *dv = mmakv ? 2e-3 : 1e-5;
 }
 
 const char *flash_bwd_config_name(int cfg) {
     switch (cfg) {
-#define X(id, BR, BC, NT, RT, CT, AT, BT, QAT, QBT, KVC, MMAQ, name)                 \
+#define X(id, BR, BC, NT, RT, CT, AT, BT, QAT, QBT, KVC, MMAQ, MMAKV, name)                 \
     case id: return name;
         BWD_CONFIGS(X)
 #undef X
@@ -1657,14 +1911,13 @@ const char *flash_bwd_config_name(int cfg) {
 // changes.
 int flash_default_bwd_config(int T) {
     if (g_bwd_override >= 0) return g_bwd_override;
-    // Under --tf32 the tensor-core dQ config wins at every context length
-    // measured, by a flat ~20%, so the context-dependent rule below simply
-    // does not apply to it. That rule existed because the fp32 dQ kernel was
-    // expensive enough for the kv tile's shape to be worth trading against it;
-    // making dQ 1.6x faster removed the trade. Config 16 keeps BC=32, which is
-    // what holds the mma dQ kernel to 40 KB and two blocks per SM -- config 15
-    // is the same idea at BC=64, costs 64 KB, drops to one block, and loses.
-    if (gemm_tf32()) return 16;
+    // Under --tf32 both backward kernels are tensor-core, and config 18 wins at
+    // every context length measured -- 34% at ctx 256 rising to 38% at 2048 --
+    // so the context-dependent rule below simply does not apply to it. That
+    // rule existed because the fp32 dQ kernel was expensive enough for the kv
+    // tile's shape to be worth trading against it, and the port removed the
+    // trade. BR = BC = 32 is what keeps both kernels at two blocks per SM.
+    if (gemm_tf32()) return 18;
     return T > 512 ? 12 : 5;
 }
 
@@ -1700,7 +1953,7 @@ void flash_attention_backward(float *dqkv, float *dsum, const float *dout,
     // explicitly here the scan below would fall to whatever happens to sit
     // earliest in the table, which is not the same as falling back to the tile
     // that was measured to be second best.
-    const int preferred[] = {flash_default_bwd_config(T), 12, 5};
+    const int preferred[] = {flash_default_bwd_config(T), 16, 12, 5};
     for (int cfg : preferred)
         if (flash_attention_backward_cfg(cfg, dqkv, dsum, dout, qkv, out, lse, B,
                                          T, C, NH))
