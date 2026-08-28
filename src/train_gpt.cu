@@ -345,10 +345,14 @@ int main(int argc, char **argv) {
     printf("model     %d layers, %d heads, %d embd, ctx %d, %s attention\n",
            n_layer, n_head, n_embd, T, use_flash ? "fused" : "unfused");
     printf("matmul    %s\n", tf32 ? "TF32 tensor cores" : "fp32");
-    if (bwd_cfg >= 0) {
-        flash_set_bwd_config(bwd_cfg);
-        printf("bwd tile  config %d pinned (%s)\n", bwd_cfg,
-               flash_bwd_config_name(bwd_cfg));
+    // Which backward tile a run used is part of what the run measured, so it
+    // is printed rather than inferred -- the context-dependent rule means two
+    // runs of the same binary can take different tiles.
+    if (bwd_cfg >= 0) flash_set_bwd_config(bwd_cfg);
+    if (use_flash) {
+        const int cfg = flash_default_bwd_config(T);
+        printf("bwd tile  config %d (%s)%s\n", cfg, flash_bwd_config_name(cfg),
+               bwd_cfg >= 0 ? "  [pinned]" : "");
     }
     printf("params    %.2fM (%.1f MB; +%.1f MB grads, +%.1f MB adam state)\n",
            g.num_params / 1e6, param_mb, param_mb, 2 * param_mb);
