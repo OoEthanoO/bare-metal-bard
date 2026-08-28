@@ -1737,9 +1737,10 @@ four scalar stores.
    the P/dS round-trip, which is exactly the thing WMMA could not express and
    kernel 10 already had to solve once.
 
-   ~~**The layout question**~~ — [answered](#attention-on-the-tensor-cores-and-the-round-trip-that-vanishes),
-   and the **forward is ported and 1.81x**. What remains is the backward, which
-   is where 16.5% of the step is and where the round trip is paid twice.
+   ~~**Attention is the last consumer on fp32 FMAs**~~ — [done](#attention-on-the-tensor-cores-and-the-round-trip-that-vanishes).
+   Forward 1.81x, backward 1.06x → **1.84x** the unfused path, and **24.3% off a
+   training step at ctx 2048**. Nothing in the repo computes a matmul on fp32
+   FMAs any more when `--tf32` is on.
 
    By `tools/probe_mma_acc.cu` rather than by recall. The `m16n8k8` TF32 accumulator comes back as
 
