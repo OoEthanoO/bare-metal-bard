@@ -14,6 +14,7 @@
 #include "gemm.h"
 #include "nn.h"
 #include "attention.h"
+#include "prof.cuh"
 #include "flash.h"
 
 #define CUDA_CHECK(x)                                                          \
@@ -234,7 +235,9 @@ float gpt_forward(GPT &g, const int *tokens, const int *targets) {
     memcpy(g.h_tokens, tokens, (size_t)N * sizeof(int));
     CUDA_CHECK(cudaMemcpyAsync(g.d_tokens, g.h_tokens, (size_t)N * sizeof(int),
                                cudaMemcpyHostToDevice));
+    PROF_BEGIN("embeddings");
     encoder_forward(a.encoded, g.d_tokens, p.wte, p.wpe, B, T, C);
+    PROF_END();
 
     float *residual = a.encoded;  // the running residual stream
     for (int l = 0; l < L; ++l) {
@@ -255,45 +258,65 @@ float gpt_forward(GPT &g, const int *tokens, const int *targets) {
         const float *fcw = p.fcw + (size_t)l * 4 * C * C, *fcb = p.fcb + l * 4 * C;
         const float *fpw = p.fcprojw + (size_t)l * C * 4 * C, *fpb = p.fcprojb + l * C;
 
+        PROF_BEGIN("layernorm");
         layernorm_forward(ln1, ln1_mean, ln1_rstd, residual, ln1w, ln1b, N, C);
+        PROF_END();
         // Weights are (out, in), so every forward matmul is the transB case.
         // Everything that can ride in the GEMM epilogue does. As separate
         // kernels the bias, the residual add and GELU each read and write a
         // whole activation tensor to do one operation per element, and the
         // step profile had them at 8.2%, 1.3% and 4.8%.
+        PROF_BEGIN("GEMM qkv proj");
         gemm(false, true, N, 3 * C, C, 1.0f, ln1, qkvw, 0.0f, qkv, 0, {qkvb});
+        PROF_END();
+        PROF_BEGIN("attention fwd");
         if (g.use_flash)
             flash_attention_forward(atty, a.lse + l * s.lse, qkv, B, T, C, NH);
         else
             attention_forward(atty, qkvr, att, qkv, B, T, C, NH);
+        PROF_END();
         // residual2 = attn_proj(atty) + bias + residual, in one pass. The
         // `attproj` tensor it used to land in is never read again -- not even
         // by the backward, which needs only d(residual2) -- so it is gone.
+        PROF_BEGIN("GEMM attn proj");
         gemm(false, true, N, C, C, 1.0f, atty, apw, 0.0f, residual2, 0,
              {apb, residual});
+        PROF_END();
 
+        PROF_BEGIN("layernorm");
         layernorm_forward(ln2, ln2_mean, ln2_rstd, residual2, ln2w, ln2b, N, C);
+        PROF_END();
         // Both fch and fch_gelu are written from the epilogue: the backward
         // needs the pre-activation to differentiate GELU, so this saves the
         // READ of fch rather than the write -- 25 MB per layer at this size.
+        PROF_BEGIN("GEMM mlp up");
         gemm(false, true, N, 4 * C, C, 1.0f, ln2, fcw, 0.0f, fch, 0,
              {fcb, nullptr, fch_gelu});
+        PROF_END();
+        PROF_BEGIN("GEMM mlp down");
         gemm(false, true, N, C, 4 * C, 1.0f, fch_gelu, fpw, 0.0f, residual3, 0,
              {fpb, residual2});
+        PROF_END();
 
         residual = residual3;
     }
 
+    PROF_BEGIN("layernorm");
     layernorm_forward(a.lnf, a.lnf_mean, a.lnf_rstd, residual, p.lnfw, p.lnfb, N, C);
+    PROF_END();
     // Tied head: logits = lnf @ wte^T.
+    PROF_BEGIN("GEMM logits");
     gemm(false, true, N, Vp, C, 1.0f, a.lnf, p.wte, 0.0f, a.logits);
+    PROF_END();
 
     if (!targets) return 0.0f;
 
     memcpy(g.h_targets, targets, (size_t)N * sizeof(int));
     CUDA_CHECK(cudaMemcpyAsync(g.d_targets, g.h_targets, (size_t)N * sizeof(int),
                                cudaMemcpyHostToDevice));
+    PROF_BEGIN("cross-entropy");
     softmax_crossentropy_forward(a.probs, a.losses, a.logits, g.d_targets, N, V, Vp);
+    PROF_END();
     return reduce_mean(a.losses, N);
 }
 
@@ -315,13 +338,19 @@ void gpt_backward(GPT &g) {
                                   1.0f / N);
 
     // Tied head: logits = lnf @ wte^T.
+    PROF_BEGIN("GEMM logits bwd");
     gemm(false, false, N, C, Vp, 1.0f, gr.dlogits, p.wte, 0.0f, gr.dlnf);
+    PROF_END();
+    PROF_BEGIN("GEMM logits bwd");
     gemm(true, false, Vp, C, N, 1.0f, gr.dlogits, a.lnf, 1.0f, d.wte);
+    PROF_END();
 
     float *last_residual = a.residual3 + (size_t)(L - 1) * s.BTC;
     CUDA_CHECK(cudaMemset(gr.dres, 0, s.BTC * sizeof(float)));
+    PROF_BEGIN("layernorm bwd");
     layernorm_backward(gr.dres, d.lnfw, d.lnfb, gr.dlnf, last_residual, p.lnfw,
                        a.lnf_mean, a.lnf_rstd, N, C);
+    PROF_END();
 
     for (int l = L - 1; l >= 0; --l) {
         // The input to layer l is layer l-1's output, or the embedding.
@@ -353,45 +382,79 @@ void gpt_backward(GPT &g) {
 
         // gr.dres currently holds d(residual3). Since residual3 =
         // residual2 + fcproj, that is also d(fcproj) exactly.
+        PROF_BEGIN("GEMM bwd dX");
         gemm(false, false, N, 4 * C, C, 1.0f, gr.dres, fpw, 0.0f, gr.dfch_gelu);
+        PROF_END();
+        PROF_BEGIN("GEMM bwd dW");
         gemm(true, false, C, 4 * C, N, 1.0f, gr.dres, fch_gelu, 1.0f, dfpw);
+        PROF_END();
+        PROF_BEGIN("bias backward");
         bias_backward(dfpb, gr.dres, N, C);
+        PROF_END();
 
+        PROF_BEGIN("GELU backward");
         gelu_backward(gr.dfch, fch, gr.dfch_gelu, N * 4 * C);
+        PROF_END();
 
+        PROF_BEGIN("GEMM bwd dX");
         gemm(false, false, N, C, 4 * C, 1.0f, gr.dfch, fcw, 0.0f, gr.dln2);
+        PROF_END();
+        PROF_BEGIN("GEMM bwd dW");
         gemm(true, false, 4 * C, C, N, 1.0f, gr.dfch, ln2, 1.0f, dfcw);
+        PROF_END();
+        PROF_BEGIN("bias backward");
         bias_backward(dfcb, gr.dfch, N, 4 * C);
+        PROF_END();
 
         // Accumulates into gr.dres, turning d(residual3) into d(residual2).
+        PROF_BEGIN("layernorm bwd");
         layernorm_backward(gr.dres, dln2w, dln2b, gr.dln2, residual2, ln2w,
                            ln2_mean, ln2_rstd, N, C);
+        PROF_END();
 
         // Now gr.dres holds d(residual2) = d(attproj).
+        PROF_BEGIN("GEMM bwd dX");
         gemm(false, false, N, C, C, 1.0f, gr.dres, apw, 0.0f, gr.datty);
+        PROF_END();
+        PROF_BEGIN("GEMM bwd dW");
         gemm(true, false, C, C, N, 1.0f, gr.dres, atty, 1.0f, dapw);
+        PROF_END();
+        PROF_BEGIN("bias backward");
         bias_backward(dapb, gr.dres, N, C);
+        PROF_END();
 
         // The fused backward reads the raw qkv and the attention output, both
         // already saved, and rebuilds the probabilities from lse. That is why
         // it needs no score matrix: nothing here was thrown away that cannot
         // be recomputed in registers.
+        PROF_BEGIN("attention bwd");
         if (g.use_flash)
             flash_attention_backward(gr.dqkv, gr.dsum, gr.datty, qkv, atty,
                                      a.lse + l * s.lse, B, T, C, NH);
         else
             attention_backward(gr.dqkv, gr.dqkvr, gr.datt, gr.datt, gr.datty,
                                qkvr, att, B, T, C, NH);
+        PROF_END();
 
+        PROF_BEGIN("GEMM bwd dX");
         gemm(false, false, N, C, 3 * C, 1.0f, gr.dqkv, qkvw, 0.0f, gr.dln1);
+        PROF_END();
+        PROF_BEGIN("GEMM bwd dW");
         gemm(true, false, 3 * C, C, N, 1.0f, gr.dqkv, ln1, 1.0f, dqkvw);
+        PROF_END();
+        PROF_BEGIN("bias backward");
         bias_backward(dqkvb, gr.dqkv, N, 3 * C);
+        PROF_END();
 
         // Accumulates again, turning d(residual2) into d(layer input).
+        PROF_BEGIN("layernorm bwd");
         layernorm_backward(gr.dres, dln1w, dln1b, gr.dln1, residual, ln1w,
                            ln1_mean, ln1_rstd, N, C);
+        PROF_END();
     }
 
+    PROF_BEGIN("embeddings bwd");
     encoder_backward(d.wte, d.wpe, gr.dres, g.d_tokens, B, T, C);
+    PROF_END();
 }
 

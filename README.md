@@ -716,6 +716,63 @@ It stays opt-in here (`--tf32`) rather than becoming the default, because it
 changes what the model computes and one 5000-step run on 1 MB of Shakespeare is
 not enough evidence to make that choice silently for someone else.
 
+### Profiling without a profiler, and where the step goes now
+
+*Measured on the 5070 Ti, sm_120, clock pinned to 1200 MHz.*
+
+Two ports and a tile fix later, the step has gone 46.8 → 40.2 ms and both of the
+largest costs moved a long way, so the old ranking cannot be trusted. This
+project is four-for-four on my intuitions losing to measurement, so: measure.
+
+Except `ncu` needs elevated GPU performance-counter access, which on WSL means a
+registry change and a reboot — and on the free Colab or Kaggle T4 this project
+is supposed to be reproducible on, it is not available at all. A measurement you
+cannot take on the target hardware is not much of a measurement.
+
+So `--profile` puts one `cudaEvent` pair around each region, records them all on
+the same stream during the step, and does **one** synchronize at the end to read
+them back. An event record is a marker rather than a barrier, so the step being
+measured is still the step that would have run — which is the whole difference
+between this and wrapping every kernel in a sync. It costs nothing when off and
+needs no permissions.
+
+| region | ms/step | share |
+|---|---:|---:|
+| GEMM bwd dW | 10.649 | **26.2%** |
+| GEMM bwd dX | 8.899 | 21.9% |
+| attention bwd | 5.294 | 13.0% |
+| GEMM mlp down | 3.194 | 7.9% |
+| GEMM mlp up | 2.765 | 6.8% |
+| GEMM qkv proj | 2.037 | 5.0% |
+| layernorm bwd | 1.627 | 4.0% |
+| bias backward | 1.207 | 3.0% |
+| GELU backward | 1.193 | 2.9% |
+| optimizer | 0.997 | 2.5% |
+| GEMM attn proj | 0.943 | 2.3% |
+| attention fwd | 0.936 | 2.3% |
+| layernorm | 0.561 | 1.4% |
+| *(the remaining five)* | 0.372 | 0.9% |
+| **measured total** | **40.677** | |
+
+The total lands on the 40.2–40.4 ms the step timer reports, so the
+instrumentation is accounting for essentially all of it rather than a
+convenient subset. **Matmuls are 70.6%**, attention is down to **15.3%** from
+the 17.1% it was before the port — despite the step itself shrinking 14% — and
+everything else is 14.2%.
+
+One check worth doing on a new instrument: the same profile taken at an
+*unpinned* clock (the lock had lapsed, and a 21.6 ms step is what gave it away)
+returns shares within one point of these — 25.3% against 26.2% for the largest.
+Shares are clock-invariant and absolute times are not, which is exactly what a
+correct tool should show.
+
+**The next target is now named rather than guessed.** The weight-gradient
+matmuls are the single largest line at 26.2%, and they are the slowest GEMMs in
+the model: 7699–8284 GF/s for the `dW` shapes against 11292 for `mlp up` in the
+same transpose case. Roughly 30% of the largest cost in the step, sitting in
+`384×384×4096`-shaped work with tall K and a tiny output.
+
+
 ### The tile rule was stale, and my explanation for it was wrong twice
 
 *Measured on the 5070 Ti, sm_120, clock pinned to 1200 MHz.*
@@ -1740,6 +1797,8 @@ tools/
   probe_mma_acc.cu  measures the mma accumulator layout, and whether it can
                     be shuffled into an A operand without shared memory
   step_profile.py   aggregate an ncu dump into where a step spends its time
+                    (see also `train_gpt --profile`, which needs no ncu and no
+                    elevated counters, and works on a Colab T4)
   flash_memory.py   context-length memory sweep, fused vs unfused
   plot_results.py   CSV -> SVG charts
 scripts/

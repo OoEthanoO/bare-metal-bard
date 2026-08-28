@@ -33,6 +33,7 @@
 #include "nn.h"
 #include "ddp.h"
 #include "flash.h"
+#include "prof.cuh"
 #include <chrono>
 #include <thread>
 
@@ -254,6 +255,7 @@ int main(int argc, char **argv) {
     bool use_flash = true;  // --unfused selects the three-kernel attention
     int bwd_cfg = -1;       // --bwd-cfg pins a fused-backward tile; -1 = measured rule
     int fwd_cfg = -1;       // --fwd-cfg pins a fused-forward tile
+    bool do_profile = false;  // --profile: per-region cudaEvent timing
     bool alloc_only = false;
     int nranks = 1;  // --gpus N: data-parallel replicas
     bool tf32 = false;  // --tf32: route the matmuls through the tensor cores
@@ -282,6 +284,7 @@ int main(int argc, char **argv) {
         // Pin the fused-backward tile config, for A/B without a rebuild.
         else if (!strcmp(argv[i], "--bwd-cfg") && i + 1 < argc) bwd_cfg = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--fwd-cfg") && i + 1 < argc) fwd_cfg = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--profile")) do_profile = true;
         else { fprintf(stderr, "unknown arg %s\n", argv[i]); return 1; }
     }
 
@@ -352,6 +355,7 @@ int main(int argc, char **argv) {
     // runs of the same binary can take different tiles.
     if (bwd_cfg >= 0) flash_set_bwd_config(bwd_cfg);
     if (fwd_cfg >= 0) flash_set_fwd_config(fwd_cfg);
+    prof::set_enabled(do_profile);
     if (use_flash) {
         const int fc = flash_default_config();
         printf("fwd tile  config %d (%s)%s\n", fc, flash_config_name(fc),
@@ -465,6 +469,7 @@ int main(int argc, char **argv) {
         float gnorm = 0.0f;
         auto opt_step = [&](int r) {
             cudaSetDevice(devs[r]);
+            PROF_BEGIN("optimizer");
             const float gn =
                 grad_global_norm(reps[r].grads_mem, (int)reps[r].num_params) /
                 nranks;
@@ -473,6 +478,7 @@ int main(int argc, char **argv) {
             adamw_update(reps[r].params_mem, reps[r].grads_mem, reps[r].m_mem,
                          reps[r].v_mem, (int)reps[r].num_params, lr_now, 0.9f,
                          0.999f, 1e-8f, weight_decay, step, gs);
+            PROF_END();
             cudaDeviceSynchronize();
         };
         if (nranks == 1) {
@@ -487,6 +493,12 @@ int main(int argc, char **argv) {
             CUDA_CHECK(cudaDeviceSynchronize());
         }
         CUDA_CHECK(cudaSetDevice(devs[0]));
+        // One synchronize per step reads back every region's events. The first
+        // few steps are discarded: the allocator, the caches and the lazily
+        // configured kernels make them unrepresentative, and the step timer
+        // above already shows how much (180 ms against 40).
+        prof::flush();
+        if (step == 3) prof::reset();
         const auto t_end = std::chrono::steady_clock::now();
 
         auto msec = [](auto a, auto b) {
@@ -545,6 +557,8 @@ int main(int argc, char **argv) {
         printf("\nfinal  train loss %.4f   val loss %.4f   (%d batches each)\n",
                final_train, final_val, eval_batches);
     }
+
+    prof::report();
 
     // With --eval 0 no evaluation ever runs, so there is no best to report and
     // no checkpoint was written. Printing the sentinel here claimed a best val
