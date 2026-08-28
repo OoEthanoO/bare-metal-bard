@@ -34,7 +34,7 @@ $(BIN): $(SRC) src/kernels.h src/kernels/lane_major.cuh | bench
 
 tools: $(TOOLS)
 bench/device_query: tools/device_query.cu | bench
-	$(NVCC) -ccbin $(CCBIN) -arch=$(ARCH) -O2 $< -o $@
+	$(NVCC) $(CCBIN_FLAG) -arch=$(ARCH) -O2 -std=c++17 $< -o $@
 
 bench/test_gemm: tools/test_gemm.cu src/gemm.cu src/bgemm.cu src/gemm.h | bench
 	$(NVCC) $(NVCCFLAGS) tools/test_gemm.cu src/gemm.cu src/bgemm.cu -o $@ $(LDFLAGS)

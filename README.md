@@ -1251,12 +1251,37 @@ project has **Root Directory = `site`**. Everything else is default.
 
 ## Build and run
 
-Requires CUDA 12.x. On Ubuntu 26.04 the toolkit needs gcc ≤ 13 as host compiler
-(the default is 15); the Makefile sets `-ccbin g++-13`.
+Requires a CUDA toolkit and a host compiler. On a distro that packages them:
 
 ```bash
 sudo apt install nvidia-cuda-toolkit gcc-13 g++-13
 ```
+
+The Makefile passes `-ccbin g++-13` **only if that compiler exists**, because
+CUDA 12.x rejects gcc ≥ 14 while 13.x is happy with gcc 15 — on a box with a
+usable default compiler, demanding g++-13 would just fail.
+
+**Without root, or on a WSL image with no toolkit at all**, conda-forge packages
+the whole thing into `$HOME` and needs no `sudo`. That is how this project is
+built now; `scripts/env.sh` carries the one-time setup and is sourced before
+`make`:
+
+```bash
+source scripts/env.sh && make -j4
+```
+
+It pins **CUDA 13.3**, matching the Windows toolkit this repo used before the
+move, because nvcc's version decides the generated SASS and the cuBLAS beside it
+is the denominator of every "% of cuBLAS" number here. The CUDA *driver* is not
+part of that env — WSL exposes it at `/usr/lib/wsl/lib` and registers it with
+`ldconfig`, so `libcuda` resolves on its own.
+
+*Is WSL slower?* Measured, not assumed: **no**, not for this workload. The same
+training step, Windows-native binary against WSL-native binary, interleaved on
+one machine state, agreed to within 0.6% (119.0/119.3, 136.2/137.0, 136.5/136.4
+ms). The per-launch overhead GPU-PV is supposed to add does not show up even in
+a step that fires hundreds of small kernels. What *does* show up is the power
+cap — see *Methodology*.
 
 On Windows the Makefile does not apply (no `make`, and nvcc drives MSVC rather
 than gcc). `scripts\build.bat` is the equivalent, and builds the same targets:
@@ -1421,6 +1446,7 @@ tools/
   flash_memory.py   context-length memory sweep, fused vs unfused
   plot_results.py   CSV -> SVG charts
 scripts/
+  env.sh            the Linux/WSL toolchain: conda-forge CUDA in $HOME, no root
   gpu_clocks.sh     lock/unlock SM clock for reproducible benchmarks
   gpu_clocks.bat    the same on Windows; self-elevates for the UAC prompt
   profile_step.bat  per-kernel profile of a training step; re-pins the clock
