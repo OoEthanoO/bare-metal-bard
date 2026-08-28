@@ -1622,8 +1622,11 @@ four scalar stores.
    the P/dS round-trip, which is exactly the thing WMMA could not express and
    kernel 10 already had to solve once.
 
-   **The layout question is now answered**, by `tools/probe_mma_acc.cu` rather
-   than by recall. The `m16n8k8` TF32 accumulator comes back as
+   ~~**The layout question**~~ — [answered](#attention-on-the-tensor-cores-and-the-round-trip-that-vanishes),
+   and the **forward is ported and 1.81x**. What remains is the backward, which
+   is where 16.5% of the step is and where the round trip is paid twice.
+
+   By `tools/probe_mma_acc.cu` rather than by recall. The `m16n8k8` TF32 accumulator comes back as
 
        reg i of lane L  =  (row = L/4 + 8*(i/2),  col = 2*(L%4) + i%2)
 
