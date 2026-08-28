@@ -1276,12 +1276,15 @@ is the denominator of every "% of cuBLAS" number here. The CUDA *driver* is not
 part of that env — WSL exposes it at `/usr/lib/wsl/lib` and registers it with
 `ldconfig`, so `libcuda` resolves on its own.
 
-*Is WSL slower?* Measured, not assumed: **no**, not for this workload. The same
-training step, Windows-native binary against WSL-native binary, interleaved on
-one machine state, agreed to within 0.6% (119.0/119.3, 136.2/137.0, 136.5/136.4
-ms). The per-launch overhead GPU-PV is supposed to add does not show up even in
-a step that fires hundreds of small kernels. What *does* show up is the power
-cap — see *Methodology*.
+*Is WSL slower?* Measured, not assumed: **no**, not for this workload, twice
+over. Interleaved against the Windows-native binary on one machine state, the
+two agreed to within 0.6% (119.0/119.3, 136.2/137.0, 136.5/136.4 ms). And the
+WSL build then reproduced the **absolute** ctx-256 reference this repo has used
+since the move — 46.2-47.1 ms against a historical 46.8 — so it is not merely
+that the two agree with each other, it is that the toolchain change is invisible
+in the number every other measurement here is anchored to. The per-launch
+overhead GPU-PV is supposed to add does not show up even in a step that fires
+hundreds of small kernels.
 
 On Windows the Makefile does not apply (no `make`, and nvcc drives MSVC rather
 than gcc). `scripts\build.bat` is the equivalent, and builds the same targets:
