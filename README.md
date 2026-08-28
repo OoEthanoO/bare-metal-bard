@@ -87,6 +87,40 @@ Reproduce the TF32 column with:
 
 ![scaling](docs/sgemm_scaling.svg)
 
+### The same ladder on the 5070 Ti
+
+The table above is the 4070, which is where the ladder was built. For
+completeness, all eleven on the card the project now runs on — N=4096, fp32
+cuBLAS as the denominator, SM clock pinned to 1200 MHz, bracketed by the
+ctx-256 reference (46.7 before, 46.4 after) so the whole sweep is known to sit
+in one machine state:
+
+| # | kernel | GFLOP/s | % of cuBLAS |
+|---|--------|--------:|------------:|
+| 1 | naive | 106.0 | 1.1% |
+| 2 | coalesced | 702.6 | 7.4% |
+| 3 | smem | 1063.7 | 11.2% |
+| 4 | tile1d | 3282.1 | 34.6% |
+| 5 | tile2d | 6545.1 | 69.1% |
+| 6 | vectorized | 7882.8 | 83.3% |
+| 7 | warptile | 7244.5 | 76.9% |
+| 8 | dbuffer | **8288.2** | **88.7%** |
+| 9 | tensorcore | 6173.8 | 65.2% |
+| 10 | mma | 11085.4 | 116.9% |
+| 11 | cpasync | **12000.8** | **126.7%** |
+
+**113× from first to last**, and the shape of the curve is the 4070's shape —
+the same three jumps in the same three places. What moved is the fp32 ceiling:
+`dbuffer` reaches 88.7% of cuBLAS here against 95.0% there, because this card's
+cuBLAS fp32 is relatively stronger, not because the kernel got worse.
+
+These were taken with the WSL toolchain, and kernels 10 and 11 reproduce the
+numbers previously recorded on this card with the Windows one to **0.13% and
+0.05%** (11085 vs 11100, 12001 vs 11994) — which is the tightest evidence in
+this repo that the toolchain move changed nothing.
+
+
+
 ### Kernel 10: the hypothesis was wrong and the kernel got faster anyway
 
 Kernel 9 stopped 21% short of cuBLAS's own TF32 path, and five attempts to
