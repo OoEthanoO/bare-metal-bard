@@ -1358,50 +1358,204 @@ O' = O * exp(m - m') + exp(S_j - m') @ V_j`}</code>
         </p>
       </div>
 
+      <h2>Attention on the tensor cores, and a round trip that vanishes</h2>
+      <p>
+        Every matmul in the project ran on tensor cores under <code>--tf32</code> except the ones
+        inside attention, which stayed on fp32 FMAs with 4×2 and 4×4 register tiles while the
+        model&rsquo;s own GEMM ran 8×8. That gap was most of why the fused backward beat the
+        unfused path by only 1.06×. Attention was the last consumer in the repo computing a matmul
+        the slow way.
+      </p>
+      <p>
+        Porting it turns on one fact. <code>S = Q@Kᵀ</code> comes out of an{' '}
+        <code>mma</code> as an <em>accumulator</em>, and <code>P = softmax(S)</code> then has to go
+        back in as the <em>A operand</em> of <code>P@V</code>. If those layouts agree the fragment
+        is reused in place; if they do not, P goes through shared memory — and that round trip is
+        the structural reason the backward was slow.
+      </p>
+      <div className="note">
+        <p style={{ margin: 0 }}>
+          They do not agree, and I measured rather than recalled — a fragment layout guessed wrong
+          is silent, which kernel 10 had already learned once about the <code>a1</code>/
+          <code>a2</code> order. The m16n8k8 TF32 accumulator holds{' '}
+          <code>reg i of lane L = (row = L/4 + 8·(i/2), col = 2·(L%4) + i%2)</code>, verified
+          against all 128 entries of a matrix built so each decodes by inspection. The A operand
+          wants columns <code>&#123;t, t+4&#125;</code> where the accumulator holds{' '}
+          <code>&#123;2t, 2t+1&#125;</code>. The f16 shapes happen to agree, which is why
+          FlashAttention-2 gets the fused form for free and TF32 does not.
+        </p>
+      </div>
+      <p>
+        But the disagreement is confined to the four lanes that share a row group, so{' '}
+        <strong>eight <code>__shfl_sync</code>es convert one to the other exactly</strong>, and P
+        never reaches shared memory at all. One trap on the way, worth stating because it is
+        silent: shuffling the already-selected register —{' '}
+        <code>__shfl_sync(m, par ? d[1] : d[0], src)</code> — reads whichever register the{' '}
+        <em>source</em> lane&rsquo;s own <code>par</code> chose. It lands on the neighbouring
+        column and stays entirely plausible. Both registers have to be shuffled and the selection
+        applied afterwards.
+      </p>
+      <h3>The backward needed a transpose, and did not get one</h3>
+      <p>
+        The forward ports directly and is 1.81× the best fp32 tile. The backward is two kernels and
+        only one of them is that easy: <code>dQ</code>&rsquo;s second matmul reduces over keys, so
+        its A operand is <code>dS</code> in the accumulator&rsquo;s own orientation. But{' '}
+        <code>dK/dV</code> reduces over <em>queries</em> — <code>dV[c][j] += Σ P[i][c] dO[i][j]</code>{' '}
+        — so its A operand is P <em>transposed</em>, and transposing an accumulator is exactly the
+        round trip being deleted.
+      </p>
+      <p>
+        So that kernel does not compute S. It computes <code>Sᵀ = K@Qᵀ</code>{' '}
+        directly, key as M, and its accumulator is <code>[key][query]</code> from the start — the
+        orientation the second matmul wants. The reorientation is free, and the reason is the part
+        worth keeping: <strong>the backward needs no row reductions at all</strong>. The forward
+        must reduce along a query&rsquo;s keys for the running max and sum; here lse and D are
+        already known, so P and dS are elementwise with a per-query scalar.
+      </p>
+      <div className="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>fused backward</th>
+              <th className="n">best fp32</th>
+              <th className="n">both mma</th>
+              <th className="n"></th>
+              <th className="n">vs unfused</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>ctx 256</td><td className="n">1.335 ms</td><td className="n">0.881 ms</td><td className="n">−34.0%</td><td className="n">1.06× → 1.59×</td></tr>
+            <tr><td>ctx 512</td><td className="n">2.416 ms</td><td className="n">1.515 ms</td><td className="n">−37.3%</td><td className="n">1.06× → 1.70×</td></tr>
+            <tr><td>ctx 1024</td><td className="n">4.411 ms</td><td className="n">2.779 ms</td><td className="n">−37.0%</td><td className="n">1.11× → 1.77×</td></tr>
+            <tr className="hi"><td>ctx 2048</td><td className="n">8.407 ms</td><td className="n">5.206 ms</td><td className="n">−38.1%</td><td className="n">1.15× → 1.84×</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        End to end, both arms with <code>--tf32</code> matmuls and attention pinned each way:{' '}
+        <strong>−6.9%</strong> of a training step at ctx 256, <strong>−18.5%</strong> at 1024,{' '}
+        <strong>−24.3%</strong> at 2048. The win grows with context because attention&rsquo;s share
+        of the step does.
+      </p>
+      <div className="note">
+        <p style={{ margin: 0 }}>
+          How you tell a port from a corruption: one config ports <code>dK/dV</code> and leaves{' '}
+          <code>dQ</code> in fp32, and its error signature is{' '}
+          <code>dq 3.00e-07, dk 6.01e-04, dv 3.54e-04</code> — fp32 precision exactly where the
+          fp32 kernel still runs, TF32 where the new one does. Only <code>dQ</code>&rsquo;s
+          tolerance is relaxed, per config. A blanket tolerance would have hidden corruption in the
+          other two. Errors stay in a 1.8e-04 to 9.6e-04 band across ctx 1, 33, 63, 100, 256, 512,
+          777 and 1024 — ragged shapes being where a transposed kernel&rsquo;s indexing breaks
+          first.
+        </p>
+      </div>
+
+      <h2>A stale constant, and two wrong explanations for it</h2>
+      <p>
+        With attention ported the matmuls are back to roughly 72% of a step, so the next thing is
+        the tensor-core dispatch&rsquo;s choice between a 128×128 tile and a 64×128 one. Its rule
+        was <code>TILE_SWITCH_BLOCKS = 72</code> — two blocks per SM across the <strong>36</strong>{' '}
+        SMs of the 4070 it was written on. The card it now runs on has 46. Re-measuring is worth{' '}
+        <strong>7.6% of a training step</strong>, 43.6 → 40.2 ms, and lifts{' '}
+        <code>mlp up</code> to 96.5% of the ladder&rsquo;s own square-N peak.
+      </p>
+      <p>
+        The interesting part is that I explained it wrong twice, and both times building the
+        explanation is what exposed it.
+      </p>
+      <p>
+        <strong>Wave quantisation</strong> was the first: 96 blocks against 46 SMs × 2 = 92 slots is
+        one full wave plus four stragglers. The control that killed it was forcing the narrow tile
+        on <em>every</em> shape — it wins at 384 blocks as decisively as at 96 — and the arithmetic
+        agrees it was never the story, since 96-into-92 and 192-into-184 are the same 52%
+        efficiency.
+      </p>
+      <p>
+        <strong>The roofline</strong> was the second, and wrong more interestingly. A{' '}
+        <code>BM×BN</code> tile reads <code>(BM+BN)·BK·4</code> bytes per <code>2·BM·BN·BK</code>{' '}
+        flops, so its arithmetic intensity is <code>BM·BN / 2(BM+BN)</code>: 32.0 FLOP/byte wide,
+        21.3 narrow. This card&rsquo;s ridge point is 21.0 — so the narrow tile clears it and the
+        wide one does not, which explains the measurement <em>and</em> the 4070&rsquo;s opposite
+        result. A tidy story.
+      </p>
+      <div className="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>evaluated at</th>
+              <th className="n">peak fp32</th>
+              <th className="n">ridge point</th>
+              <th>narrow (21.3) clears?</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="hi"><td>pinned 1.20 GHz</td><td className="n">14.1 TFLOP/s</td><td className="n">21.0</td><td>yes — by 1.4%</td></tr>
+            <tr><td>base 1.45 GHz</td><td className="n">17.1 TFLOP/s</td><td className="n">25.4</td><td>no</td></tr>
+            <tr><td>boost 3.09 GHz</td><td className="n">36.4 TFLOP/s</td><td className="n">54.1</td><td>no</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div className="note">
+        <p style={{ margin: 0 }}>
+          I had picked the one clock that made the story work. Writing it as a threshold is what
+          caught it — the rule promptly selected the <em>wrong</em> tile, because at the
+          device&rsquo;s base clock 21.3 does not clear 25.4.{' '}
+          <strong>A rule that flips on a 1.4% margin is numerology, not physics</strong>, and the
+          intensity model ignores L2 reuse, which at these shapes is large.
+        </p>
+      </div>
+      <p>
+        What survives is the ratio between <em>machines</em>, robust where the knife-edge was not:
+        the 4070&rsquo;s ridge is ~44 at base clock against this card&rsquo;s 25.4. So the rule
+        shipped is empirical with the roofline as motivation — take the narrow tile unless the
+        machine&rsquo;s ridge sits above the <em>wide</em> tile&rsquo;s intensity, i.e. unless it
+        is bandwidth-starved enough that intensity is the limit. Both cards clear by 20–40%, it is
+        evaluated at base clock so it is deterministic, and it is calibrated on two data points and
+        labelled as such rather than dressed up as a law.
+      </p>
+
       <h2>What I&rsquo;d do next</h2>
       <ol>
         <li>
-          <strong>
-            <s>Raw <code>mma.sync</code></s>
-          </strong>{' '}
-          — done, above. 8318 → 9210 GF/s on the ladder, and 67.7 → 65.2 ms on the training
-          step once it was made transpose-aware. The hypothesis behind it was wrong, which is the
-          part worth keeping.
+          <strong><s>Raw <code>mma.sync</code></s></strong> — done, above. 8318 → 9210 GF/s on the
+          ladder. The hypothesis behind it was wrong, which is the part worth keeping.
         </li>
         <li>
-          <strong>
-            <code>cp.async</code>
-          </strong>{' '}
-          for the staging copies. Kernel 10 stages through registers into a scattered shared layout,
-          four 32-bit stores per <code>float4</code>; <code>cp.async</code> would write
-          global→shared directly and free the 32 registers staging pins. Kernel 10 is now register-
-          bound at 255, and registers are what caps the warp tile — which is the thing that turned
-          out to matter. This has gone from a tidy-up to the main event.
+          <strong><s><code>cp.async</code></s></strong> — done. Worth 8.1% on the ladder, and the
+          reasoning that promoted it to &ldquo;the main event&rdquo; accounted for only 2.1 of
+          those 8.1 points; the asynchrony it treated as a bonus was the rest. Wiring it into the
+          model&rsquo;s GEMM was tried and <em>lost</em> at every shape, and the suspected cause —
+          shared footprint costing a resident block — is not the reason either. It is{' '}
+          <code>BK</code>: reuse per barrier.
         </li>
         <li>
-          <strong>
-            <s>Fuse attention</s>
-          </strong>{' '}
-          — done, above. What is left is the backward: it is bound on shared-memory→register
-          traffic, so <strong>chunk the head dimension</strong> the way a GEMM chunks K, and stop
-          bigger register tiles competing with more blocks per SM for the same shared memory. DRAM
-          sits at ~21%, so there is bandwidth to pay for the re-staging.
+          <strong><s>Fuse attention</s></strong> — done, and then ported to tensor cores, above.
+          The prescription this list used to carry — chunk the head dimension so bigger register
+          tiles stop competing with more blocks per SM — <em>was</em> carried out, and it works
+          structurally while buying only 0.4–3.5%. The sharpest datum from it is the config that
+          frees a third resident block with nothing traded away and is not one percent faster.
+          Attention is no longer computing anything on fp32 FMAs.
         </li>
         <li>
-          <strong>
-            <s>Multi-GPU</s>
-          </strong>{' '}
-          — started, above. The collective is correct and cheap; the data-parallel driver is not
-          yet good enough to profit from it. Two ranks need to genuinely overlap, which means one
-          process per GPU or a step with no blocking calls left in it. The blocking host transfers
-          are gone already — that fix is committed and unmeasured, because it needs a second GPU
-          and the pod is terminated.
+          <strong>Re-profile before choosing the next thing.</strong> The step has gone 46.8 → 40.2
+          ms, and the two largest costs both moved a lot, so the old ranking cannot be trusted.
+          This project is three-for-three on my intuitions losing to the profiler, and the honest
+          move is to measure the new distribution rather than guess which of layernorm, the bias
+          reductions or the remaining GEMM headroom is now on top.
+        </li>
+        <li>
+          <strong><s>Multi-GPU</s></strong> — started, above. The collective is correct and cheap;
+          the data-parallel driver is not yet good enough to profit from it. Two ranks need to
+          genuinely overlap, which means one process per GPU or a step with no blocking calls left
+          in it.
         </li>
       </ol>
 
       <footer>
         <p>
-          Built on an RTX 4070 Laptop, CUDA 13.3, driver 610.88, SM clock pinned to 1200 MHz. Every
+          Built on an RTX 4070 Laptop and continued on an RTX 5070 Ti Laptop (sm_120), CUDA 13.3,
+          SM clock pinned to 1200 MHz. The two cards are not comparable and no table here mixes
+          them. Every
           benchmark cell is the median of three independent sweeps, because pinning the clock fixes
           variance <em>within</em> a run and does nothing about a bad run — which cost me a
           published paragraph explaining a slowdown that three later sweeps showed did not exist.
