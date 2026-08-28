@@ -36,6 +36,8 @@
 //     (B, T, 3C) projection: one block owns one head, so the head offset is a
 //     constant added to the row pointer.
 #include "flash.h"
+#include "gemm.h"  // gemm_tf32(): attention follows the matmuls' opt-in
+#include "kernels/lane_major.cuh"  // mma layout, shared with kernels 10 and 11
 #include <cstdio>
 #include <cstdlib>
 #include <cfloat>
@@ -335,12 +337,266 @@ bool launch_fwd(float *out, float *lse, const float *qkv, int B, int T, int NH,
 }
 
 // (id, BR, BC, NT, RT, CT, name)
+// The opt-in maximum dynamic shared memory per block: 99 KiB on Ada, and the
+// same on the Blackwell laptop part this now runs on. Used by both the fused
+// forward and the fused backward, so it lives above the first of them.
+constexpr size_t SMEM_CAP = 99 * 1024;
+
+#if BMB_TF32
+// ------------------------------------------- forward on the tensor cores
+//
+// The same algorithm as flash_fwd_k above, with both matmuls issued as
+// mma.sync TF32 -- and, more interestingly, with P never reaching shared
+// memory at all.
+//
+// The three operands, all laid out by kernels/lane_major.cuh, the same file
+// kernels 10 and 11 use:
+//
+//     Q   A operand   a_off<BR>(m = query,     k = head dim)  |  S = Q @ K^T
+//     K   B operand   b_off<BC>(k = head dim,  n = key)       |
+//     V   B operand   b_off<HS>(k = key,       n = head dim)  |  O = P @ V
+//
+// Both B operands fall out of the natural layouts: `.row.col` wants its B
+// operand as N x K, and K is stored (key, head dim) while V is stored
+// (key, head dim) -- which is N x K for the first and K x N for the second,
+// exactly as needed.
+//
+// THE PART THAT IS NOT FREE. P is the accumulator of the first mma and the A
+// operand of the second, and for TF32 those two layouts DISAGREE: the
+// accumulator holds columns {2t, 2t+1} of a row group where the A operand wants
+// {t, t+4}. The f16 shapes happen to agree, which is why FlashAttention-2 gets
+// this for nothing and this does not. tools/probe_mma_acc.cu measured both
+// layouts rather than trusting either, and found the disagreement is confined
+// to the four lanes that share a row group -- so eight shuffles convert one to
+// the other exactly, and the shared-memory round trip that the fp32 kernel
+// needs for P disappears.
+
+// Accumulator tile (16 x 8) -> A fragment of the same 16 x 8 matrix.
+//
+// The selection MUST happen after the shuffle. Writing the obvious
+// `__shfl_sync(M, par ? d[1] : d[0], src)` reads whichever register the SOURCE
+// lane's own `par` chose, which silently lands on the neighbouring column.
+__device__ __forceinline__ void acc_to_a(const float (&d)[4], unsigned (&a)[4],
+                                         int lane) {
+    constexpr unsigned M = 0xffffffffu;
+    const int g = lane >> 2, t = lane & 3;
+    const int sA = (g << 2) | (t >> 1);        // holds column t
+    const int sB = (g << 2) | ((t + 4) >> 1);  // holds column t+4
+    const int par = t & 1;
+    const float a0 = __shfl_sync(M, d[0], sA), a1 = __shfl_sync(M, d[1], sA);
+    const float a2 = __shfl_sync(M, d[2], sA), a3 = __shfl_sync(M, d[3], sA);
+    const float b0 = __shfl_sync(M, d[0], sB), b1 = __shfl_sync(M, d[1], sB);
+    const float b2 = __shfl_sync(M, d[2], sB), b3 = __shfl_sync(M, d[3], sB);
+    a[0] = to_tf32(par ? a1 : a0);  // (g,   t)
+    a[1] = to_tf32(par ? a3 : a2);  // (g+8, t)
+    a[2] = to_tf32(par ? b1 : b0);  // (g,   t+4)
+    a[3] = to_tf32(par ? b3 : b2);  // (g+8, t+4)
+}
+
+template <int BR, int BC, int HS, int NT>
+__global__ __launch_bounds__(NT) void flash_fwd_mma_k(
+    float *__restrict__ out, float *__restrict__ lse,
+    const float *__restrict__ qkv, int T, int NH, float scale) {
+    constexpr int NW = NT / WARPSIZE;  // warps, one 16-row query tile each
+    constexpr int NC = BC / MMA_N;     // n-tiles of S, and k-chunks of P
+    constexpr int NO = HS / MMA_N;     // n-tiles of O
+    constexpr int NK = HS / MMA_K;     // k-chunks of S
+    constexpr int V4 = HS / 4;
+
+    static_assert(BR == MMA_M * NW, "one 16-row tile per warp, no remainder");
+    static_assert(BC % 16 == 0 && HS % 16 == 0, "B operands pack 16 wide");
+    static_assert(BC % MMA_K == 0, "P's k chunks divide the key tile");
+    static_assert(NT % V4 == 0, "staging tiles evenly");
+
+    extern __shared__ float smem[];
+    float *Qs = smem;             // a_off<BR>(query, head dim)
+    float *Ks = Qs + BR * HS;     // b_off<BC>(head dim, key)
+    float *Vs = Ks + HS * BC;     // b_off<HS>(key, head dim)
+
+    const int tid = threadIdx.x;
+    const int lane = tid % WARPSIZE, warp = tid / WARPSIZE;
+    // Every accumulator this warp holds puts rows g and g+8 in this lane, and
+    // columns 2*tq and 2*tq+1 -- measured in tools/probe_mma_acc.cu.
+    const int g = lane >> 2, tq = lane & 3;
+
+    const int bh = blockIdx.y, b = bh / NH, h = bh % NH;
+    const int C = NH * HS;
+    const int i0 = blockIdx.x * BR;
+    const float *base = qkv + (size_t)b * T * 3 * C + h * HS;
+
+    // --- stage Q once; every key block reuses it ---
+    for (int lin = tid; lin < BR * V4; lin += NT) {
+        const int r = lin / V4, i4 = (lin % V4) * 4;
+        const int t = i0 + r;
+        float4 q = make_float4(0.f, 0.f, 0.f, 0.f);
+        if (t < T) q = CVEC4(base[(size_t)t * 3 * C + i4]);
+        // 1/sqrt(hs) folds in here: BR*HS multiplies once, not BR*T per block.
+        Qs[a_off<BR>(r, i4 + 0)] = q.x * scale;
+        Qs[a_off<BR>(r, i4 + 1)] = q.y * scale;
+        Qs[a_off<BR>(r, i4 + 2)] = q.z * scale;
+        Qs[a_off<BR>(r, i4 + 3)] = q.w * scale;
+    }
+
+    float acc_o[NO][4] = {};
+    float m_[2], l_[2];
+#pragma unroll
+    for (int u = 0; u < 2; ++u) { m_[u] = -INFINITY; l_[u] = 0.0f; }
+
+    const int jmax = min(T, i0 + BR);  // causality as a loop bound
+    for (int j0 = 0; j0 < jmax; j0 += BC) {
+        __syncthreads();
+        for (int lin = tid; lin < BC * V4; lin += NT) {
+            const int c = lin / V4, i4 = (lin % V4) * 4;
+            const int t = j0 + c;
+            float4 k = make_float4(0.f, 0.f, 0.f, 0.f), v = k;
+            if (t < T) {
+                k = CVEC4(base[(size_t)t * 3 * C + C + i4]);
+                v = CVEC4(base[(size_t)t * 3 * C + 2 * C + i4]);
+            }
+            Ks[b_off<BC>(i4 + 0, c)] = k.x;
+            Ks[b_off<BC>(i4 + 1, c)] = k.y;
+            Ks[b_off<BC>(i4 + 2, c)] = k.z;
+            Ks[b_off<BC>(i4 + 3, c)] = k.w;
+            Vs[b_off<HS>(c, i4 + 0)] = v.x;
+            Vs[b_off<HS>(c, i4 + 1)] = v.y;
+            Vs[b_off<HS>(c, i4 + 2)] = v.z;
+            Vs[b_off<HS>(c, i4 + 3)] = v.w;
+        }
+        __syncthreads();
+
+        // --- S = (Q/sqrt(hs)) @ K^T, straight into accumulators ---
+        float acc_s[NC][4] = {};
+#pragma unroll
+        for (int kk = 0; kk < NK; ++kk) {
+            const int au = kk * (BR / MMA_M) + warp;
+            const float4 av = CVEC4(Qs[au * UNIT + (lane ^ a_swz<BR>(au)) * 4]);
+            const unsigned a[4] = {to_tf32(av.x), to_tf32(av.y), to_tf32(av.z),
+                                   to_tf32(av.w)};
+#pragma unroll
+            for (int jj = 0; jj < NC; jj += 2) {
+                const int bu = kk * (BC / 16) + jj / 2;
+                const float4 bv = CVEC4(Ks[bu * UNIT + (lane ^ b_swz<BC>(bu)) * 4]);
+                const unsigned bb[4] = {to_tf32(bv.x), to_tf32(bv.y),
+                                        to_tf32(bv.z), to_tf32(bv.w)};
+                mma_m16n8k8(acc_s[jj + 0], a, &bb[0]);
+                mma_m16n8k8(acc_s[jj + 1], a, &bb[2]);
+            }
+        }
+
+        // --- mask, then one step of the online softmax, per row half ---
+        //
+        // A row lives in the four lanes sharing g, so the row reductions are a
+        // width-4 butterfly -- narrower than the fp32 kernel's, because the
+        // accumulator layout already put the row's columns close together.
+#pragma unroll
+        for (int u = 0; u < 2; ++u) {
+            const int qg = i0 + warp * MMA_M + g + 8 * u;
+            float rmax = -INFINITY;
+#pragma unroll
+            for (int jj = 0; jj < NC; ++jj)
+#pragma unroll
+                for (int e = 0; e < 2; ++e) {
+                    const int kg = j0 + jj * MMA_N + 2 * tq + e;
+                    float &v = acc_s[jj][2 * u + e];
+                    if (kg > qg || kg >= T || qg >= T) v = -INFINITY;
+                    rmax = fmaxf(rmax, v);
+                }
+            rmax = row_reduce<4, true>(rmax);
+
+            const float mnew = fmaxf(m_[u], rmax);
+            const bool live = (mnew > -INFINITY);
+            const float resc = live ? __expf(m_[u] - mnew) : 1.0f;
+
+            float rsum = 0.0f;
+#pragma unroll
+            for (int jj = 0; jj < NC; ++jj)
+#pragma unroll
+                for (int e = 0; e < 2; ++e) {
+                    float &v = acc_s[jj][2 * u + e];
+                    const float p = live ? __expf(v - mnew) : 0.0f;
+                    v = p;
+                    rsum += p;
+                }
+            rsum = row_reduce<4, false>(rsum);
+
+            m_[u] = mnew;
+            l_[u] = l_[u] * resc + rsum;
+#pragma unroll
+            for (int nn = 0; nn < NO; ++nn) {
+                acc_o[nn][2 * u + 0] *= resc;
+                acc_o[nn][2 * u + 1] *= resc;
+            }
+        }
+
+        // --- O += P @ V, with P handed over in registers ---
+#pragma unroll
+        for (int jj = 0; jj < NC; ++jj) {
+            unsigned a[4];
+            acc_to_a(acc_s[jj], a, lane);
+#pragma unroll
+            for (int nn = 0; nn < NO; nn += 2) {
+                const int bu = jj * (HS / 16) + nn / 2;
+                const float4 bv = CVEC4(Vs[bu * UNIT + (lane ^ b_swz<HS>(bu)) * 4]);
+                const unsigned bb[4] = {to_tf32(bv.x), to_tf32(bv.y),
+                                        to_tf32(bv.z), to_tf32(bv.w)};
+                mma_m16n8k8(acc_o[nn + 0], a, &bb[0]);
+                mma_m16n8k8(acc_o[nn + 1], a, &bb[2]);
+            }
+        }
+    }
+
+    // --- normalize and write out ---
+#pragma unroll
+    for (int u = 0; u < 2; ++u) {
+        const int qg = i0 + warp * MMA_M + g + 8 * u;
+        if (qg >= T) continue;
+        const float inv = (l_[u] > 0.0f) ? 1.0f / l_[u] : 0.0f;
+        float *dst = out + ((size_t)b * T + qg) * C + h * HS;
+#pragma unroll
+        for (int nn = 0; nn < NO; ++nn) {
+            float2 o;
+            o.x = acc_o[nn][2 * u + 0] * inv;
+            o.y = acc_o[nn][2 * u + 1] * inv;
+            reinterpret_cast<float2 *>(&dst[nn * MMA_N + 2 * tq])[0] = o;
+        }
+        if (tq == 0) lse[(size_t)bh * T + qg] = m_[u] + __logf(l_[u]);
+    }
+}
+
+template <int BR, int BC, int HS, int NT>
+bool launch_fwd_mma(float *out, float *lse, const float *qkv, int B, int T,
+                    int NH, float scale) {
+    constexpr size_t smem = (size_t)(BR * HS + HS * BC + BC * HS) * sizeof(float);
+    if (smem > SMEM_CAP) return false;
+    auto kern = flash_fwd_mma_k<BR, BC, HS, NT>;
+    static bool configured = false;
+    if (!configured) {
+        if (cudaFuncSetAttribute(kern, cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                 (int)smem) != cudaSuccess)
+            return false;
+        configured = true;
+    }
+    dim3 grid(ceil_div(T, BR), B * NH);
+    kern<<<grid, NT, smem>>>(out, lse, qkv, T, NH, scale);
+    return true;
+}
+#endif  // BMB_TF32
+
+// MMA=1 selects the tensor-core kernel, for which RT and CT are meaningless
+// (its thread tile is the mma fragment layout, not a choice) and are passed as
+// zero. Everything else is the fp32 kernel, unchanged.
+//
+// (id, BR, BC, NT, RT, CT, MMA, name)
 #define FWD_CONFIGS(X)                                                         \
-    X(0, 64, 64, 128, 4, 8, "br64 bc64 t128 4x8")                              \
-    X(1, 64, 32, 128, 4, 4, "br64 bc32 t128 4x4")                              \
-    X(2, 64, 64, 256, 4, 4, "br64 bc64 t256 4x4")                              \
-    X(3, 128, 32, 256, 4, 4, "br128 bc32 t256 4x4")                            \
-    X(4, 32, 32, 64, 4, 4, "br32 bc32 t64 4x4")
+    X(0, 64, 64, 128, 4, 8, 0, "br64 bc64 t128 4x8")                           \
+    X(1, 64, 32, 128, 4, 4, 0, "br64 bc32 t128 4x4")                           \
+    X(2, 64, 64, 256, 4, 4, 0, "br64 bc64 t256 4x4")                           \
+    X(3, 128, 32, 256, 4, 4, 0, "br128 bc32 t256 4x4")                         \
+    X(4, 32, 32, 64, 4, 4, 0, "br32 bc32 t64 4x4")                             \
+    X(5, 64, 32, 128, 0, 0, 1, "mma br64 bc32 t128")                           \
+    X(6, 64, 64, 128, 0, 0, 1, "mma br64 bc64 t128")                           \
+    X(7, 128, 32, 256, 0, 0, 1, "mma br128 bc32 t256")                         \
+    X(8, 32, 32, 64, 0, 0, 1, "mma br32 bc32 t64")
 
 // OT = HS/(BC/CT) must be a positive multiple of 4, which rules some configs
 // out for small head sizes. Checked here so an unusable pair fails cleanly at
@@ -351,12 +607,29 @@ constexpr bool cfg_ok() {
            NT % (HS / 4) == 0 && (BR / RT) * (BC / CT) == NT;
 }
 
+// The tensor-core kernel's own shape constraints: one 16-row query tile per
+// warp, and B operands that pack 16 wide.
+template <int BR, int BC, int HS, int NT>
+constexpr bool mma_cfg_ok() {
+    return BR == 16 * (NT / 32) && BC % 16 == 0 && HS % 16 == 0 &&
+           BC % 8 == 0 && HS % 8 == 0 && NT % (HS / 4) == 0;
+}
+
 // Instantiate one config for one head size, or refuse it.
-template <int BR, int BC, int HS, int NT, int RT, int CT>
+template <int BR, int BC, int HS, int NT, int RT, int CT, int MMA>
 struct FwdInst {
     static bool run(float *out, float *lse, const float *qkv, int B, int T,
                     int NH, float scale) {
-        if constexpr (cfg_ok<BR, BC, HS, NT, RT, CT>())
+        if constexpr (MMA) {
+#if BMB_TF32
+            if constexpr (mma_cfg_ok<BR, BC, HS, NT>())
+                return launch_fwd_mma<BR, BC, HS, NT>(out, lse, qkv, B, T, NH, scale);
+            else
+                return false;
+#else
+            return false;  // no tensor cores below sm_80
+#endif
+        } else if constexpr (cfg_ok<BR, BC, HS, NT, RT, CT>())
             return launch_fwd<BR, BC, HS, NT, RT, CT>(out, lse, qkv, B, T, NH, scale);
         else
             return false;
@@ -367,9 +640,10 @@ template <int HS>
 bool dispatch_cfg(int cfg, float *out, float *lse, const float *qkv, int B,
                   int T, int NH, float scale) {
     switch (cfg) {
-#define X(id, BR, BC, NT, RT, CT, name)                                        \
+#define X(id, BR, BC, NT, RT, CT, MMA, name)                                   \
     case id:                                                                   \
-        return FwdInst<BR, BC, HS, NT, RT, CT>::run(out, lse, qkv, B, T, NH, scale);
+        return FwdInst<BR, BC, HS, NT, RT, CT, MMA>::run(out, lse, qkv, B, T,   \
+                                                         NH, scale);
         FWD_CONFIGS(X)
 #undef X
     default: return false;
@@ -379,15 +653,34 @@ bool dispatch_cfg(int cfg, float *out, float *lse, const float *qkv, int B,
 
 int flash_num_configs() {
     int n = 0;
-#define X(id, BR, BC, NT, RT, CT, name) ++n;
+#define X(id, BR, BC, NT, RT, CT, MMA, name) ++n;
     FWD_CONFIGS(X)
 #undef X
     return n;
 }
 
+// -1 means "use the rule"; train_gpt --fwd-cfg N pins a config.
+static int g_fwd_override = -1;
+
+// TF32 keeps 10 mantissa bits against fp32's 23, so the tensor-core configs are
+// computing a deliberately lower-precision answer rather than computing the
+// same answer badly. They get their own tolerance, per the rule the SGEMM
+// ladder already follows -- the alternative is loosening the bar for the fp32
+// kernels, which have no excuse. Measured error is 3.8e-04; a real indexing or
+// masking bug in this kernel lands at 1e-1 or worse, so the gap is wide.
+double flash_config_tol(int cfg) {
+    switch (cfg) {
+#define X(id, BR, BC, NT, RT, CT, MMA, name)                                   \
+    case id: return MMA ? 1e-3 : 1e-5;
+        FWD_CONFIGS(X)
+#undef X
+    default: return 1e-5;
+    }
+}
+
 const char *flash_config_name(int cfg) {
     switch (cfg) {
-#define X(id, BR, BC, NT, RT, CT, name)                                        \
+#define X(id, BR, BC, NT, RT, CT, MMA, name)                                   \
     case id: return name;
         FWD_CONFIGS(X)
 #undef X
@@ -398,7 +691,20 @@ const char *flash_config_name(int cfg) {
 // Measured, not reasoned: br64/bc32 wins at hs=64 despite br64/bc64 having the
 // better arithmetic intensity on paper, because the smaller key tile fits two
 // blocks per SM instead of one.
-int flash_default_config() { return 1; }
+//
+// The tensor-core config wins by a lot more than that -- 0.157 ms against
+// 0.284 at ctx 256, 1.81x -- but it computes in TF32, so it is gated on the
+// same opt-in the matmuls use rather than silently changing what the model
+// computes. `--tf32` already routes every GEMM through the tensor cores; this
+// makes attention follow, which it previously did not, and which is why
+// attention was the last consumer in the repo still on fp32 FMAs.
+int flash_default_config() {
+    if (g_fwd_override >= 0) return g_fwd_override;
+    return gemm_tf32() ? 5 : 1;
+}
+
+// Same escape hatch as the backward's: one binary, both arms, interleavable.
+void flash_set_fwd_config(int cfg) { g_fwd_override = cfg; }
 
 bool flash_attention_forward_cfg(int cfg, float *out, float *lse,
                                  const float *qkv, int B, int T, int C, int NH) {
@@ -418,9 +724,12 @@ bool flash_attention_forward_cfg(int cfg, float *out, float *lse,
 // the rest of the table until one fits.
 void flash_attention_forward(float *out, float *lse, const float *qkv, int B,
                              int T, int C, int NH) {
-    if (flash_attention_forward_cfg(flash_default_config(), out, lse, qkv, B, T,
-                                    C, NH))
-        return;
+    // Preferred first, then the best fp32 config, then anything that runs. The
+    // scan below starts at config 0, which is not the fp32 tile the sweep
+    // picked -- so config 1 is named explicitly rather than being fallen into.
+    const int preferred[] = {flash_default_config(), 1};
+    for (int c : preferred)
+        if (flash_attention_forward_cfg(c, out, lse, qkv, B, T, C, NH)) return;
     for (int cfg = 0; cfg < flash_num_configs(); ++cfg)
         if (flash_attention_forward_cfg(cfg, out, lse, qkv, B, T, C, NH)) return;
     {
@@ -877,7 +1186,6 @@ __global__ __launch_bounds__(NT) void flash_bwd_q_k(
     }
 }
 
-constexpr size_t SMEM_CAP = 99 * 1024;  // Ada's opt-in maximum per block
 
 template <int BR, int BC, int HS, int NT, int RT, int CT, int AT, int BT,
           int QAT, int QBT, int KVC>

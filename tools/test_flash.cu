@@ -223,7 +223,7 @@ int main(int argc, char **argv) {
         snprintf(ratio, sizeof ratio, "%.2fx", ref_t.best_ms / t.best_ms);
         printf("%-22s %9.3f %9.3f %10.1f %10s %12.2e %s\n",
                flash_config_name(cfg), t.best_ms, t.median_ms, gf(t.best_ms),
-               ratio, rel, rel < 1e-5 ? "ok" : "FAIL");
+               ratio, rel, rel < flash_config_tol(cfg) ? "ok" : "FAIL");
     }
 
     // ---- backward ----

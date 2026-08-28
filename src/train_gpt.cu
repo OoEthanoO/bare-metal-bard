@@ -253,6 +253,7 @@ int main(int argc, char **argv) {
     unsigned seed = 1337;
     bool use_flash = true;  // --unfused selects the three-kernel attention
     int bwd_cfg = -1;       // --bwd-cfg pins a fused-backward tile; -1 = measured rule
+    int fwd_cfg = -1;       // --fwd-cfg pins a fused-forward tile
     bool alloc_only = false;
     int nranks = 1;  // --gpus N: data-parallel replicas
     bool tf32 = false;  // --tf32: route the matmuls through the tensor cores
@@ -280,6 +281,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--unfused")) use_flash = false;
         // Pin the fused-backward tile config, for A/B without a rebuild.
         else if (!strcmp(argv[i], "--bwd-cfg") && i + 1 < argc) bwd_cfg = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--fwd-cfg") && i + 1 < argc) fwd_cfg = atoi(argv[++i]);
         else { fprintf(stderr, "unknown arg %s\n", argv[i]); return 1; }
     }
 
@@ -349,7 +351,11 @@ int main(int argc, char **argv) {
     // is printed rather than inferred -- the context-dependent rule means two
     // runs of the same binary can take different tiles.
     if (bwd_cfg >= 0) flash_set_bwd_config(bwd_cfg);
+    if (fwd_cfg >= 0) flash_set_fwd_config(fwd_cfg);
     if (use_flash) {
+        const int fc = flash_default_config();
+        printf("fwd tile  config %d (%s)%s\n", fc, flash_config_name(fc),
+               fwd_cfg >= 0 ? "  [pinned]" : "");
         const int cfg = flash_default_bwd_config(T);
         printf("bwd tile  config %d (%s)%s\n", cfg, flash_bwd_config_name(cfg),
                bwd_cfg >= 0 ? "  [pinned]" : "");

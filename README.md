@@ -1055,6 +1055,68 @@ compute the same thing.
 ./bench/train_gpt --unfused   # the three-kernel path, for comparison
 ```
 
+### Attention on the tensor cores, and the round trip that vanishes
+
+*Measured on the 5070 Ti, sm_120, clock pinned to 1200 MHz.*
+
+Every matmul in this repo runs on tensor cores under `--tf32` except the ones
+inside attention, which stayed on fp32 FMAs with 4x2 and 4x4 register tiles
+while the model's GEMM ran 8x8. That is most of why the fused backward beats the
+unfused path by only 1.06x. So: port it.
+
+The operands map straight onto `lane_major.cuh`, the layout kernels 10 and 11
+already share — `.row.col` wants its B operand as N x K, and K is stored
+(key, head dim) while V is stored (key, head dim), which is exactly N x K for
+`S = Q@K^T` and K x N for `O = P@V`.
+
+**The part that is not free is P.** It is the accumulator of the first mma and
+the A operand of the second, and for TF32 those layouts disagree: the
+accumulator holds columns `{2t, 2t+1}` of a row group where the A operand wants
+`{t, t+4}`. The f16 shapes happen to agree, which is why FlashAttention-2 gets
+this for nothing and this does not.
+
+Rather than guess, [`tools/probe_mma_acc.cu`](tools/probe_mma_acc.cu) measures
+both layouts against a matrix whose every entry decodes by inspection:
+
+    reg i of lane L  =  (row = L/4 + 8*(i/2),  col = 2*(L%4) + i%2)
+
+verified across all 128 entries. And the disagreement turns out to be confined
+to the four lanes that share a row group — so **eight `__shfl_sync`es convert
+one to the other exactly, and P never reaches shared memory at all.** The fp32
+kernel writes P out and reads it back; this one hands it over in registers.
+
+Forward, ctx 256, against the fp32 configs it replaces:
+
+| config | ms | GFLOP/s | vs unfused | err |
+|---|---:|---:|---:|---:|
+| unfused (3 kernels) | 0.876 | 946 | 1.00x | — |
+| `br64 bc32 t128 4x4` (fp32 best) | 0.284 | 3035 | 3.21x | 2.1e-07 |
+| **`mma br64 bc32 t128`** | **0.157** | **5320** | **5.63x** | 3.8e-04 |
+
+**1.81x over the best fp32 tile**, and 5.6x over the unfused path. The error is
+TF32's, not a bug's: it sits in a 2.4-3.8e-04 band across ctx 33, 100, 129, 200,
+256, 512, 777, 1024 and both head sizes — ragged shapes are where an indexing or
+masking mistake shows, and a real one lands at 1e-1. The tensor-core configs
+carry their own tolerance in the config table rather than loosening the bar for
+the fp32 kernels, which is the same rule the SGEMM ladder follows.
+
+End to end it is worth less, because the forward was only 3.6% of a step.
+Interleaved, both arms with `--tf32` GEMMs, attention pinned each way:
+
+| attention | step | 30-step loss |
+|---|---:|---:|
+| fp32 (`--fwd-cfg 1`) | 46.5 ms | 2.6080 |
+| **TF32 mma (`--fwd-cfg 5`)** | **45.9 ms** | 2.6080 |
+
+**1.3% of a training step, and the loss is the same to four decimals.** It is
+gated on `--tf32` like every other tensor-core path, so nothing changes what the
+model computes unless asked.
+
+The structural result is worth more than the 1.3%: the P round trip is now known
+to be removable, and the backward — where it costs two round trips instead of
+one, across 16.5% of a step rather than 3.6% — is the place that matters.
+
+
 ### The backward is only 1.19x, and here is why
 
 The forward result is most of the story; the backward is nearly a wash, and it

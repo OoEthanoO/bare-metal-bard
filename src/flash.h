@@ -47,7 +47,11 @@ void flash_attention_backward(float *dqkv, float *dsum, const float *dout,
 // whichever config flash_default_config() names.
 int flash_num_configs();
 const char *flash_config_name(int cfg);
+// Per-config accuracy bar: the tensor-core configs compute in TF32.
+double flash_config_tol(int cfg);
 int flash_default_config();
+// Pin a forward config, overriding the rule. -1 restores it.
+void flash_set_fwd_config(int cfg);
 // Returns false if the config cannot run for this head size.
 bool flash_attention_forward_cfg(int cfg, float *out, float *lse,
                                  const float *qkv, int B, int T, int C, int NH);
