@@ -792,6 +792,50 @@ constexpr int SWM = 32, SWN = 64, STHREADS = 128, SMINB = 4;
 // costs 128 threads instead of 256 and would have to be measured against the
 // epilogue and split-K paths that the current shape was picked for.
 
+// AND THE OTHER WAY TO HIDE THE GLOBAL READ IS BLOCKED TOO -- BY REGISTERS.
+//
+// This kernel reads global straight into shared, waits on a barrier, and only
+// then multiplies: nothing is in flight across the arithmetic. The fp32 kernel
+// has not done that since kernel 8, which prefetches the next k-chunk into
+// registers while the current one is being multiplied. Porting that here needs
+// no extra shared memory at all, so it looked like the way past the footprint
+// wall that cp.async hit above. It is not.
+//
+// aIters + bIters is 12 float4 on the narrow tile -- 48 registers -- and the
+// kernel does not have them. `-Xptxas -v` says so before any timing does:
+//
+//   narrow tile (24576 B smem)      registers   spill stores
+//   staged straight to shared             125              0
+//   prefetched into registers             128            176-284
+//
+// __launch_bounds__(NUM_THREADS, MINB) caps the narrow tile at 128 registers a
+// thread so four blocks fit an SM, and the kernel was already sitting at 125
+// with nothing spilled. It is not near its budget, it is AT it. Asking for 48
+// more buys a 96-240 byte stack frame per thread, and local-memory traffic in
+// the inner loop costs far more than the latency it was hiding: TF32 GF/s falls
+// 5-22% at every model shape, worst in the NN cases (mlp up 11544 -> 9260) and
+// mildest in the transposed ones (dW fc TN 7994 -> 7502). The fp32 column is
+// untouched in both builds, which is what makes the machine, not the change,
+// the thing that stayed still.
+//
+// So the two ways to overlap the global read are blocked by two DIFFERENT
+// resources: shared memory has no room for a second stage without costing the
+// resident block, and the register file has no room for a prefetch without
+// spilling. That is a genuine wall rather than a missing optimization, and it
+// says the next gain here has to come from needing less staging -- a wider warp
+// tile, which moves fewer bytes per mma -- rather than from hiding more of it.
+//
+// One thing measured on the way, worth stating because it is a trap for the
+// next attempt: merely SPLITTING the staging into a global-read half and a
+// shared-write half, with the prefetch compiled out and the two halves called
+// back to back, is not free. It reads the same in the NN and NT cases (within
+// 2%) and costs the TRANSPOSED-A cases 3-7% -- 8552 -> 7943 GF/s at dW fc TN,
+// which is exactly the case every weight gradient runs. The scatter of one
+// float4 across four shared rows is apparently something ptxas schedules better
+// when it can see the load that produced it. So a control that reuses the split
+// plumbing is not a control for the original kernel, and the numbers above are
+// prefetch-on against prefetch-off with the SAME plumbing on both sides.
+
 // Switch below this many 128x128 blocks. 72 is two blocks per SM across 36
 // SMs -- one full wave -- so the rule reads: if the default tile cannot fill
 // the machine once, prefer the tile that makes more blocks.

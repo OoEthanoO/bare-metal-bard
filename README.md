@@ -807,6 +807,68 @@ the rest of the largest line in the step lives, and it is not a split-K problem.
 measured 10.649 — a cross-check that the new instrument is telling the truth.)*
 
 
+### Both ways to hide the global read are blocked, and by different resources
+
+*Measured on the 5070 Ti, sm_120, clock pinned to 1200 MHz, CUDA 13.3.*
+
+The weight-gradient matmuls are the largest line in the step, and the two big
+`dW` shapes are the part of that line split-K did not explain. So: why are they
+slower than the forward GEMMs at the same flops?
+
+One answer was sitting in plain sight. The tensor-core kernel reads global
+straight into shared, waits on a barrier, and only then multiplies — **nothing
+is in flight across the arithmetic**. Every k-chunk pays a full global round
+trip with nothing to cover it, and a `dW` shape has K=4096, which is 128 chunks
+against `mlp up`'s 12. The fp32 kernel has prefetched the next chunk into
+registers since kernel 8. The tensor-core kernel never did.
+
+Porting that across needs no extra shared memory, so it looked like the way past
+the exact wall `cp.async` hit (above: a second stage costs the second resident
+block). **It loses, and `-Xptxas -v` says why before any timing does:**
+
+| narrow tile (24 KB smem) | registers | spill stores |
+|---|---:|---:|
+| staged straight to shared | 125 | **0** |
+| prefetched into registers | 128 | **176–284 B** |
+
+`__launch_bounds__` caps this tile at 128 registers a thread so four blocks fit
+an SM, and the kernel was already at 125 with nothing spilled. It is not near
+its budget, it is *at* it. The prefetch wants 12 more `float4` — 48 registers —
+and buys a 96–240 byte stack frame per thread instead. TF32 GFLOP/s, same
+source, same toolkit, the `#if` the only difference:
+
+| shape | op | prefetch off | prefetch on | |
+|---|---|---:|---:|---:|
+| mlp up `4096×1536×384` | NN | 11544 | 9260 | −19.8% |
+| mlp down `4096×384×1536` | NN | 9708 | 7559 | −22.1% |
+| dW fc `384×1536×4096` | NN | 8862 | 7477 | −15.6% |
+| dW fc `384×1536×4096` | TN | 7994 | 7502 | −6.2% |
+| dW fcproj `1536×384×4096` | TN | 8026 | 7510 | −6.4% |
+
+The fp32 column of the same table is unchanged in both builds to within 1% —
+`gemm_fast` is not touched by the switch, so it is a control that rides along in
+every run and says the machine held still while the kernel changed.
+
+**So the two ways to overlap the global read are blocked by two different
+resources.** Shared memory has no room for a second stage without costing the
+resident block; the register file has no room for a prefetch without spilling.
+That is a wall rather than a missing optimization, and it re-points the next
+attempt: the gain has to come from *needing less staging* — a wider warp tile
+moves 128 bytes of shared traffic per `mma` instead of 192 — rather than from
+hiding more of it.
+
+**And the control had a trap in it.** Merely splitting the staging into a
+global-read half and a shared-write half, with the prefetch compiled out and the
+halves called back to back, is *not* free: NN and NT read the same within 2%,
+and the transposed-A cases lose 3–7% — 8552 → 7943 GF/s at `dW fc` TN, which is
+exactly the case every weight gradient runs. Scattering one `float4` across four
+shared rows is something `ptxas` schedules better when it can still see the load
+that produced it. Which means a control built on the split plumbing is not a
+control for the shipping kernel, and the table above is prefetch-on against
+prefetch-off with the *same* plumbing on both sides. The shipping kernel is
+unchanged; what is committed here is the measurement.
+
+
 ### The tile rule was stale, and my explanation for it was wrong twice
 
 *Measured on the 5070 Ti, sm_120, clock pinned to 1200 MHz.*
@@ -1660,7 +1722,20 @@ overhead GPU-PV is supposed to add does not show up even in a step that fires
 hundreds of small kernels.
 
 On Windows the Makefile does not apply (no `make`, and nvcc drives MSVC rather
-than gcc). `scripts\build.bat` is the equivalent, and builds the same targets:
+than gcc). From nothing, the two prerequisites `scripts\env.bat` looks for are
+one `winget` command each -- note that the C++ workload is not part of a default
+Build Tools install and has to be asked for by name:
+
+```bash
+winget install --id Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait --add Microsoft.VisualStudio.Workload.VCTools"
+```
+
+```bash
+winget install --id Nvidia.CUDA --version 13.3
+```
+
+`scripts\build.bat` is the equivalent of the Makefile, and builds the same
+targets:
 
 ```
 scripts\build.bat            REM all targets
@@ -1893,6 +1968,17 @@ four scalar stores.
    thing to try here is **the warp tile, not the staging** — and this is the
    third time the `N=384`-shaped part of the model has eaten a GEMM gain that
    was real at square sizes.
+
+   **The register route out of that is now closed too**, which narrows it
+   further — [measured](#both-ways-to-hide-the-global-read-are-blocked-and-by-different-resources).
+   Prefetching the next k-chunk into registers costs no shared memory at all, so
+   it should have sidestepped the footprint wall entirely; it spills instead,
+   because `__launch_bounds__` caps the narrow tile at 128 registers and the
+   kernel already sits at 125 with nothing spilled. 5–22% slower at every model
+   shape. Shared memory blocks one way to overlap the global read and the
+   register file blocks the other, so the remaining move really is the warp
+   tile: 64×64 moves 128 bytes of shared traffic per `mma` against the current
+   32×64's 192, which is *less* staging rather than better-hidden staging.
 3. ~~**The attention backward**~~ — [measured](#chunking-the-head-dimension-and-the-bug-that-made-it-look-four-times-better),
    and the prescribed cure works without paying off. Chunking the head dimension
    frees the shared memory the bigger register tile needed and doubles blocks/SM
