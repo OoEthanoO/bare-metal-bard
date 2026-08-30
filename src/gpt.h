@@ -43,7 +43,7 @@ struct Gradients {
     float *dln1, *dln2, *datty;
     float *dqkv, *dqkvr, *datt;
     float *dsum;  // fused path: (B, NH, T) rowsum(dout * out)
-    float *dfch, *dfch_gelu;
+    float *dfch;
     float *dlogits, *dlnf;
 };
 

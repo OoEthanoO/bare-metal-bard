@@ -155,7 +155,9 @@ void gpt_alloc(GPT &g) {
                     + s.BTC * 3      // dln1, dln2, datty
                     + s.BT3C         // dqkv
                     + dattn_mem      // dqkvr + datt, or just dsum
-                    + s.BT4C * 2     // dfch, dfch_gelu
+                    + s.BT4C         // dfch (dfch_gelu is gone: the
+                                     // GELU derivative is applied in
+                                     // the dX gemm's epilogue now)
                     + (size_t)B * T * c.padded_vocab  // dlogits
                     + s.BTC;         // dlnf
     CUDA_CHECK(cudaMalloc(&g.grads_act_mem, g.num_grad_acts * sizeof(float)));
@@ -169,7 +171,6 @@ void gpt_alloc(GPT &g) {
     g.gr.datt      = g.use_flash ? nullptr : take(s.BTNHTT);
     g.gr.dsum      = g.use_flash ? take(s.lse) : nullptr;
     g.gr.dfch      = take(s.BT4C);
-    g.gr.dfch_gelu = take(s.BT4C);
     g.gr.dlogits   = take((size_t)B * T * c.padded_vocab);
     g.gr.dlnf      = take(s.BTC);
 
@@ -383,17 +384,22 @@ void gpt_backward(GPT &g) {
         // gr.dres currently holds d(residual3). Since residual3 =
         // residual2 + fcproj, that is also d(fcproj) exactly.
         PROF_BEGIN("GEMM bwd dX");
-        gemm(false, false, N, 4 * C, C, 1.0f, gr.dres, fpw, 0.0f, gr.dfch_gelu);
+        // The GELU derivative rides in this gemm's epilogue. It used to be its
+        // own kernel over the [N, 4C] tensor -- read d(gelu out), read the
+        // pre-activation, write dfch -- for one multiply per element, and the
+        // value is already in a register here.
+        {
+            GemmEpilogue ep;
+            ep.dgelu_pre = fch;
+            gemm(false, false, N, 4 * C, C, 1.0f, gr.dres, fpw, 0.0f, gr.dfch,
+                 0, ep);
+        }
         PROF_END();
         PROF_BEGIN("GEMM bwd dW");
         gemm(true, false, C, 4 * C, N, 1.0f, gr.dres, fch_gelu, 1.0f, dfpw);
         PROF_END();
         PROF_BEGIN("bias backward");
         bias_backward(dfpb, gr.dres, N, C);
-        PROF_END();
-
-        PROF_BEGIN("GELU backward");
-        gelu_backward(gr.dfch, fch, gr.dfch_gelu, N * 4 * C);
         PROF_END();
 
         PROF_BEGIN("GEMM bwd dX");

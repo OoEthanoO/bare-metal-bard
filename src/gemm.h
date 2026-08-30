@@ -31,6 +31,17 @@ struct GemmEpilogue {
     const float *bias = nullptr;      // one value per COLUMN
     const float *add = nullptr;       // full tensor, same shape as C (residual)
     float *gelu_out = nullptr;        // second output, gelu(y), same shape as C
+
+    // The BACKWARD of the fusion above, and the reason it is worth a slot of
+    // its own: the MLP's dX gemm produces d(gelu output), and the very next
+    // kernel used to read that whole tensor back, multiply it by gelu'(pre),
+    // and write it out again. At 4096x1536 that is three passes over 25 MB per
+    // layer to do one multiply per element.
+    //
+    // With this set, C[i] = dgelu(dgelu_pre[i], y) instead of y -- the
+    // derivative is applied where the value is already in a register and the
+    // separate pass disappears. Only the pre-activation has to be read.
+    const float *dgelu_pre = nullptr;  // pre-activation, same shape as C
 };
 
 void gemm(bool transA, bool transB, int M, int N, int K, float alpha,

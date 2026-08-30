@@ -33,6 +33,7 @@ using namespace nvcuda;
 #include <type_traits>
 #include "kernels.h"
 #include <cstdio>
+#include <cstdlib>  // abort(), for the epilogue dispatch default
 
 #define VEC4(ptr) (reinterpret_cast<float4 *>(&(ptr))[0])
 #define CVEC4(ptr) (reinterpret_cast<const float4 *>(&(ptr))[0])
@@ -47,7 +48,7 @@ constexpr int WARPSIZE = 32;
 // 6% slower for carrying code it never executed. `if constexpr` makes the
 // unused branches -- and their instruction footprint -- actually disappear.
 namespace epi {
-constexpr int BIAS = 1, ADD = 2, GELU = 4;
+constexpr int BIAS = 1, ADD = 2, GELU = 4, DGELU = 8;
 }
 
 // ---------------------------------------------------------------- fast path
@@ -247,6 +248,13 @@ __global__ __launch_bounds__(NUM_THREADS) void gemm_fast(
                     old.y = alpha * acc[wSubRow * TM + i][wSubCol * TN + j + 1] + beta * old.y + bv.y;
                     old.z = alpha * acc[wSubRow * TM + i][wSubCol * TN + j + 2] + beta * old.z + bv.z;
                     old.w = alpha * acc[wSubRow * TM + i][wSubCol * TN + j + 3] + beta * old.w + bv.w;
+                    if constexpr (EPI & epi::DGELU) {
+                        const float4 pv = CVEC4(ep.dgelu_pre[r * N + c]);
+                        old.x = dgelu_scalar(pv.x, old.x);
+                        old.y = dgelu_scalar(pv.y, old.y);
+                        old.z = dgelu_scalar(pv.z, old.z);
+                        old.w = dgelu_scalar(pv.w, old.w);
+                    }
                     VEC4(C[r * N + c]) = old;
                     if constexpr (EPI & epi::GELU) {
                         float4 gv;
@@ -456,6 +464,7 @@ __global__ void gemm_generic(int M, int N, int K, float alpha, const float *A,
         float y = alpha * acc + beta * old;
         if constexpr (EPI & epi::BIAS) y += ep.bias[cCol + col];
         if constexpr (EPI & epi::ADD) y += ep.add[idx];
+        if constexpr (EPI & epi::DGELU) y = dgelu_scalar(ep.dgelu_pre[idx], y);
         C[idx] = y;
         if constexpr (EPI & epi::GELU) ep.gelu_out[idx] = gelu_scalar(y);
     }
@@ -693,6 +702,21 @@ __global__ __launch_bounds__(NUM_THREADS, MINB) void gemm_mma(
                 o0.y = alpha * r[1] + beta * o0.y + bv.y + a0v.y;
                 o1.x = alpha * r[2] + beta * o1.x + bv.x + a1v.x;
                 o1.y = alpha * r[3] + beta * o1.y + bv.y + a1v.y;
+                // Two floats of pre-activation per lane out of L1, against the
+                // read and the write of a whole tensor that the separate GELU
+                // backward kernel was doing.
+                if constexpr (EPI & epi::DGELU) {
+                    const size_t i0 = (size_t)(m0 + g) * N + n0;
+                    const size_t i1 = (size_t)(m0 + g + 8) * N + n0;
+                    const float2 q0 =
+                        reinterpret_cast<const float2 *>(&ep.dgelu_pre[i0])[0];
+                    const float2 q1 =
+                        reinterpret_cast<const float2 *>(&ep.dgelu_pre[i1])[0];
+                    o0.x = dgelu_scalar(q0.x, o0.x);
+                    o0.y = dgelu_scalar(q0.y, o0.y);
+                    o1.x = dgelu_scalar(q1.x, o1.x);
+                    o1.y = dgelu_scalar(q1.y, o1.y);
+                }
                 reinterpret_cast<float2 *>(p0)[0] = o0;
                 reinterpret_cast<float2 *>(p1)[0] = o1;
                 if constexpr (EPI & epi::GELU) {
@@ -935,6 +959,7 @@ __global__ void epilogue_only_k(float *C, GemmEpilogue ep, int N, size_t total) 
     float y = C[i];
     if (ep.bias) y += ep.bias[i % (unsigned)N];
     if (ep.add) y += ep.add[i];
+    if (ep.dgelu_pre) y = dgelu_scalar(ep.dgelu_pre[i], y);
     C[i] = y;
     if (ep.gelu_out) ep.gelu_out[i] = gelu_scalar(y);
 }
@@ -954,6 +979,7 @@ __global__ void splitk_reduce_k(float *C, const float *partial, int N,
     if (beta != 0.0f) y += beta * C[i];
     if constexpr (EPI & epi::BIAS) y += ep.bias[i % (unsigned)N];
     if constexpr (EPI & epi::ADD) y += ep.add[i];
+    if constexpr (EPI & epi::DGELU) y = dgelu_scalar(ep.dgelu_pre[i], y);
     C[i] = y;
     if constexpr (EPI & epi::GELU) ep.gelu_out[i] = gelu_scalar(y);
 }
@@ -1128,14 +1154,23 @@ void dispatch_epi(int M, int N, int K, float alpha, const float *A,
     }
 }
 
-// All eight combinations are instantiated. Seven is not enough: an EPI mask
-// that claims a feature the caller did not supply would dereference a null
-// pointer, so the mask must always describe the pointers exactly.
+// All eight BIAS/ADD/GELU combinations are instantiated. Seven is not enough:
+// an EPI mask that claims a feature the caller did not supply would dereference
+// a null pointer, so the mask must always describe the pointers exactly.
+//
+// DGELU is the ninth, and it is deliberately NOT crossed with the other three.
+// It exists for exactly one call -- the MLP's dX gemm, which has no bias, no
+// residual and no forward activation -- and crossing it would double every
+// instantiation in this file, across four transpose cases and two tiles, to
+// cover combinations nothing calls. The `default` below is what keeps that a
+// safe trade instead of a silent one: an unsupported combination aborts rather
+// than falling through and leaving C untouched.
 template <bool TA, bool TB>
 void dispatch(int M, int N, int K, float alpha, const float *A, const float *B,
               float beta, float *C, cudaStream_t stream, GemmEpilogue ep) {
     const int e = (ep.bias ? epi::BIAS : 0) | (ep.add ? epi::ADD : 0) |
-                  (ep.gelu_out ? epi::GELU : 0);
+                  (ep.gelu_out ? epi::GELU : 0) |
+                  (ep.dgelu_pre ? epi::DGELU : 0);
 #define CASE(m)                                                                    case (m):                                                                          dispatch_epi<TA, TB, (m)>(M, N, K, alpha, A, B, beta, C, stream, ep);          break;
     switch (e) {
         CASE(0)
@@ -1146,6 +1181,12 @@ void dispatch(int M, int N, int K, float alpha, const float *A, const float *B,
         CASE(epi::BIAS | epi::GELU)
         CASE(epi::ADD | epi::GELU)
         CASE(epi::BIAS | epi::ADD | epi::GELU)
+        CASE(epi::DGELU)
+        default:
+            fprintf(stderr,
+                    "gemm: epilogue combination %d is not instantiated "
+                    "(DGELU is only supported on its own)\n", e);
+            abort();
     }
 #undef CASE
 }

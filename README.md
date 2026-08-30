@@ -817,6 +817,52 @@ the rest of the largest line in the step lives, and it is not a split-K problem.
 measured 10.649 — a cross-check that the new instrument is telling the truth.)*
 
 
+### The GELU backward did not need to exist either
+
+*Same session, same clock caveat as below.*
+
+With the weight gradients fixed, the largest non-GEMM line left was `GELU
+backward` at 3.2% of a step. It reads d(gelu output), reads the pre-activation,
+and writes dfch — three passes over a `[4096, 1536]` tensor per layer, 25 MB
+each, to do one multiply per element.
+
+The forward already avoids exactly this: bias, residual and GELU ride in the
+GEMM epilogue where the value is in a register with a store about to happen
+anyway. The backward never got the same treatment, and the tensor it consumes
+is produced by the `dX` GEMM immediately before it. So `GemmEpilogue` gained a
+`dgelu_pre` slot: with it set, the GEMM stores `dgelu(pre[i], y)` instead of
+`y`, and the separate kernel disappears.
+
+| region | separate kernel | fused |
+|---|---:|---:|
+| GEMM bwd dX | 9.236 | 9.287 |
+| GELU backward | 1.361 | **—** |
+| **measured total** | **41.965** | **40.749** |
+
+**A 1.361 ms kernel for 0.051 ms of epilogue** — a 26× return, because the
+pre-activation is read through L1/L2 two floats per lane at the moment it is
+needed, against a full extra pass over the tensor. End to end that is 42.2/42.3
+→ 41.1/41.2 ms, **2.9% of a step**.
+
+The gradient check returns *bit-identical* norms to the unfused version
+(1.993421 / 1.990552, rel 1.44e-03 across 421376 elements), which is the useful
+kind of confirmation: the fusion changes when the multiply happens, not what is
+computed.
+
+It also deletes a tensor. `dfch_gelu` existed only to hold the GEMM's output
+until the GELU kernel could consume it; with the derivative applied in the
+epilogue the GEMM writes `dfch` directly, and resident memory goes **0.84 →
+0.81 GB**.
+
+**One design note, because it is a real trade.** `DGELU` is a fourth epilogue
+bit but it is deliberately not crossed with the other three: it is instantiated
+alone. Crossing it would double every instantiation in `gemm.cu` — four
+transpose cases, two tiles, both precisions — to cover combinations nothing
+calls. What makes that safe rather than silent is a `default:` in the dispatch
+switch that aborts on an uninstantiated combination, instead of falling through
+and leaving C untouched, which is what the previous version would have done.
+
+
 ### The split count was aimed at a target instead of measured against a curve
 
 *Measured on the 5070 Ti, sm_120, CUDA 13.3. The clock pin held 1162-1177 MHz
@@ -2162,6 +2208,18 @@ four scalar stores.
    profile to be worth a third tile. **The largest line in the step is now
    `GEMM bwd dX` at 22%**, which is the first time since the profiler was
    written that dW has not been on top.
+
+6. ~~**The GELU backward**~~ — [done](#the-gelu-backward-did-not-need-to-exist-either),
+   folded into the `dX` GEMM's epilogue the way the forward's bias, residual and
+   GELU already were. A 1.361 ms kernel for 0.051 ms of epilogue, **2.9% of a
+   step**, bit-identical gradients, and one fewer activation tensor (0.84 →
+   0.81 GB).
+
+   The same question is now open for the two backward lines still standing on
+   their own: `bias backward` (4.0%) is a column sum of the same `dY` that the
+   `dW` GEMM reads, and `layernorm bwd` (4.2%) feeds the `dX` GEMM. Neither is
+   as clean as this one — a column reduction is not an epilogue — but both read
+   a tensor another kernel already has in registers.
 
 4. ~~**The N=384 tail.**~~ — [largely answered](#the-tile-rule-was-stale-and-my-explanation-for-it-was-wrong-twice),
    and not by anything specific to N=384: the two-tile rule was calibrated on a
