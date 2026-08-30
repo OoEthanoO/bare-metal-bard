@@ -54,6 +54,14 @@ void batched_gemm(bool transA, bool transB, int batch, int M, int N, int K,
 void gemm_set_tf32(bool on);
 bool gemm_tf32();
 
+// Force the K-split count instead of deriving it from the shape and the SM
+// count. Zero restores the derived rule. This exists so the rule can be
+// MEASURED against a sweep rather than argued about: the derived value is one
+// point on a curve, and the only way to know it is the right point is to have
+// seen the curve. tools/test_gemm.cu --splitk prints it.
+void gemm_set_splitk(int splits);
+int gemm_splitk();
+
 // False on pre-Ampere hardware, where the TF32 kernels are not compiled in
 // at all. gemm_set_tf32(true) is then a no-op rather than an error.
 bool gemm_tf32_available();

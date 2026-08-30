@@ -803,8 +803,128 @@ are 67% of dW's flops, their split count was already correct, and they sit at
 ~8620 GF/s against `mlp up`'s 11292 in the same transpose case. That is where
 the rest of the largest line in the step lives, and it is not a split-K problem.
 
+> **That last sentence is wrong, and it was wrong for the usual reason: I
+> checked whether the split count had *changed*, not whether it was *right*.**
+> Those two shapes kept two splits across the SM-count fix, so I read them as
+> settled. Sweeping the parameter instead of trusting the rule that produced it
+> says two splits is 8232 GF/s and seven is 10968 — it was a split-K problem all
+> along, and worth [3.8% of a
+> step](#the-split-count-was-aimed-at-a-target-instead-of-measured-against-a-curve).
+> A constant that survives a change to the formula around it has not been
+> validated by surviving.
+
 *(Predicted dW total before the change, 10.36 ms, against the profiler's
 measured 10.649 — a cross-check that the new instrument is telling the truth.)*
+
+
+### The split count was aimed at a target instead of measured against a curve
+
+*Measured on the 5070 Ti, sm_120, CUDA 13.3. The clock pin held 1162-1177 MHz
+under sustained load this session rather than the 1185-1192 this repo's
+convention assumes, so absolute times here run ~2% high against older numbers.
+Every comparison below is interleaved A/B in one session, which is what the
+ratio depends on.*
+
+The `dW` matmuls were still the largest line in the step, and the reason turned
+out not to be in the kernel at all. Asking `--bench` for cuBLAS at the model's
+own shapes — rather than extrapolating from the square-N ladder — says so in one
+row pair, TF32 GFLOP/s, TN:
+
+| shape | mine | cuBLAS TF32 | |
+|---|---:|---:|---:|
+| `mlp up` 4096×1536×384 | 11355 | 12468 | **91%** |
+| `dW fc` 384×1536×4096 | 8583 | 12224 | **70%** |
+
+Same kernel, same instruction, same flop count, and **cuBLAS is flat at ~12,300
+on both** while mine drops 25%. Whatever the gap is, it is a property of my
+decomposition and not of the shape.
+
+It was the split count. `splitk_for` cut K into `TARGET_BLOCKS / blocks` pieces
+by integer division — for `dW fc`, `184 / 72 = 2`. So I swept it
+(`./bench/test_gemm --splitk`) instead of arguing about it:
+
+| shape | blocks | chunks | s=1 | s=2 | s=4 | s=5 | s=7 | s=10 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `dW fc` 384×1536×4096 | 72 | 128 | 8232 | *8601* | 10064 | 10819 | **10968** | 10527 |
+| `dW qkv` 384×1152×4096 | 54 | 128 | 6212 | 8222 | 10042 | **10570** | 10149 | 10406 |
+| `dW attnproj` 384×384×4096 | 18 | 128 | 2831 | 5394 | 7377 | 8690 | 8278 | **8924** |
+| `mlp down` 4096×384×1536 | 192 | 48 | *9467* | 10064 | **10202** | 9985 | 9082 | 8205 |
+| `mlp up` 4096×1536×384 | 768 | 12 | ***11382*** | 7807 | 6925 | 6968 | 6969 | 6952 |
+| vocab head 4096×128×384 | 64 | 12 | **6266** | *5899* | 5658 | 5625 | 5471 | 5500 |
+
+*Italic* is what the old rule picked. It was leaving **27%** on the single
+largest line in the step profile, and it was also splitting the vocab head,
+which wants no split at all, and costing it 6.6%.
+
+**Two quantities decide it, and the old rule knew about one.** Every split
+re-writes the whole output tile and the reduction reads every plane back, so a
+split's cost is fixed while its benefit shrinks as K is cut thinner — below
+about a dozen k-chunks a split stops paying for its own epilogue. That is the
+term that pins every K=384 shape at one split: they have only 12 chunks in
+total, which is why `mlp up` falls off a cliff at s=2 and the old `K/(BK*4)`
+floor, permitting splits of four chunks, was far too generous. And past a few
+residencies of blocks the tail is already amortized, so further splits are pure
+reduction traffic — the term that stops a long-K shape with a big output from
+being cut to pieces.
+
+    s = min( chunks / 12,  ceil(4 * SMs * blocks_per_SM / blocks) )
+
+That lands within 0.3–4.4% of the swept optimum on **every** shape above.
+Both constants are calibrated rather than derived, and the honest cost is
+visible: the rule gives the `dW` shapes ten splits where they would prefer five
+to seven, worth ~2% of the ideal, and buys a rule with no per-shape special
+cases in it.
+
+**What it is worth.** Interleaved A/B, four rounds, median of the last five
+steps in each run:
+
+| | old rule | new rule |
+|---|---:|---:|
+| ms/step | 43.6 / 44.1 / 43.7 / 43.8 | 42.1 / 42.1 / 42.0 / 42.4 |
+| median | **43.75** | **42.10** |
+
+**3.8% of a training step**, and the two distributions barely touch. The
+profiler says the same thing region by region, which is the part that makes it
+a mechanism rather than a coincidence:
+
+| region | old | new | |
+|---|---:|---:|---:|
+| GEMM bwd dW | 11.133 | 9.749 | **−12.4%** |
+| GEMM bwd dX | 9.737 | 9.311 | −4.4% |
+| GEMM mlp down | 3.456 | 3.234 | −6.4% |
+| attention bwd | 5.776 | 5.792 | +0.3% |
+| **measured total** | **43.669** | **42.125** | **−3.5%** |
+
+`attention bwd` touches no GEMM that split-K reaches, and it did not move — a
+control that rides along in the same profile. `dX` was not predicted and moved
+anyway, because `dX` for the MLP is `4096×384×1536`, the same 48-chunk shape as
+`mlp down`, and the new rule splits it four ways too.
+
+Gradients still check (16 tensors, 0 failures) and the loss trajectory is
+unchanged to four decimals — a changed summation order in TF32 moves the last
+digit at three of nine checkpoints and nothing more.
+
+### Where the model GEMMs now stand against cuBLAS
+
+Same run, TN, TF32, this card. This replaces the 4070-era table below, which was
+measured on the other machine and against a kernel two rules ago:
+
+| shape | mine | cuBLAS TF32 | | was |
+|---|---:|---:|---:|---:|
+| `mlp up` 4096×1536×384 | 11327 | 12520 | **90.5%** | 91.1% |
+| `qkv proj` 4096×1152×384 | 11032 | 12331 | **89.5%** | 89.9% |
+| `dW fc` 384×1536×4096 | 10588 | 12189 | **86.9%** | 70.2% |
+| `dW qkv` 384×1152×4096 | 10441 | 12081 | **86.4%** | 76.4% |
+| `dW fcproj` 1536×384×4096 | 10547 | 12373 | **85.2%** | 70.5% |
+| `dW attnproj` 384×384×4096 | 8863 | 10413 | **85.1%** | 84.8% |
+| `mlp down` 4096×384×1536 | 10171 | 12375 | **82.2%** | 76.8% |
+| `attn proj` 4096×384×384 | 8676 | 10823 | **80.2%** | 81.1% |
+| vocab head 4096×128×384 | 6082 | 8690 | **70.0%** | 69.7% |
+
+The weight gradients have gone from the worst shapes in the model to the middle
+of the pack. What is left is `attn proj` and the vocab head — both N≤384 with
+K=384, both too small in every dimension at once for a 64×128 tile, and neither
+one big enough in the profile to be the next thing.
 
 
 ### Both ways to hide the global read are blocked, and by different resources
@@ -941,6 +1061,12 @@ one is settled.
 
 
 ### How much is still on the table
+
+*Superseded by [the table above](#where-the-model-gemms-now-stand-against-cublas),
+which is the same comparison on the card this project now runs on and after the
+split-K rule was fixed. This one is kept because the reasoning under it — that
+the split is by N and wave quantisation explains it — is wrong in a way worth
+leaving visible.*
 
 Against cuBLAS's own TF32 path at the same shapes:
 
@@ -2022,6 +2148,21 @@ four scalar stores.
    reads whichever register the SOURCE lane's own `par` chose. Both have to be
    shuffled and the selection applied after. The wrong version lands on the
    neighbouring column and stays entirely plausible.
+5. ~~**The weight-gradient matmuls**~~ — [done](#the-split-count-was-aimed-at-a-target-instead-of-measured-against-a-curve),
+   and it was the split count rather than anything inside the kernel. Sweeping
+   the parameter instead of trusting the rule found the old one leaving 27% on
+   `dW fc`; the new rule is worth **3.8% of a step** and takes the weight
+   gradients from 70% of cuBLAS TF32 to 87%. Getting there needed a measurement
+   this repo did not have — cuBLAS timed at the model's own shapes rather than
+   at square N, which is what showed the gap was mine and not the shape's.
+
+   What is left in the GEMMs is `attn proj` (4096×384×384, 80% of cuBLAS) and
+   the padded vocab head (4096×128×384, 70%). Both are small in *every*
+   dimension at once against a 64×128 tile, and neither is big enough in the
+   profile to be worth a third tile. **The largest line in the step is now
+   `GEMM bwd dX` at 22%**, which is the first time since the profiler was
+   written that dW has not been on top.
+
 4. ~~**The N=384 tail.**~~ — [largely answered](#the-tile-rule-was-stale-and-my-explanation-for-it-was-wrong-twice),
    and not by anything specific to N=384: the two-tile rule was calibrated on a
    36-SM card and re-measuring it is worth **7.6% of a step**, lifting every

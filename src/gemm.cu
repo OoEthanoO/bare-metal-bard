@@ -985,12 +985,65 @@ inline int fill_blocks() {
     return cached;
 }
 
+// Set by gemm_set_splitk() for sweeps; 0 means "use the derived rule".
+static int g_splitk_force = 0;
+
+// THE SPLIT COUNT, DERIVED FROM A SWEEP RATHER THAN FROM A TARGET.
+//
+// The old rule was `s = TARGET_BLOCKS / blocks` -- cut K until the grid reaches
+// four blocks per SM. It is wrong in both directions, and `--splitk` in
+// tools/test_gemm.cu shows the whole curve rather than the one point it landed
+// on. TF32 GF/s, TN, this card, clock pinned:
+//
+//   shape                  blocks  chunks   s=1    s=2    s=4    s=5    s=7   s=10
+//   dW fc    384x1536x4096     72     128  8232   8601  10064  10819  10968  10527
+//   dW qkv   384x1152x4096     54     128  6212   8222  10042  10570  10149  10406
+//   dW attnp  384x384x4096     18     128  2831   5394   7377   8690   8278   8924
+//   mlp down 4096x384x1536    192      48  9467  10064  10202   9985   9082   8205
+//   mlp up   4096x1536x384    768      12 11382   7807   6925   6968   6969   6952
+//   vocab hd  4096x128x384     64      12  6266   5899   5658   5625   5471   5500
+//
+// Integer division put `dW fc` at TWO splits, which is 8633 against 10968 --
+// the rule was leaving 27% on the largest line in the step profile. It also
+// split the vocab head, which wants no split at all, and cost it 6.6%.
+//
+// TWO QUANTITIES DECIDE IT, and the old rule knew about only one of them.
+//
+// MIN_CHUNKS_PER_SPLIT. Every split re-writes the WHOLE output tile and the
+// reduction reads every plane back, so a split's cost is fixed while its
+// benefit shrinks as K is cut thinner. Below about a dozen k-chunks a split no
+// longer pays for its own epilogue. This is the term that keeps every K=384
+// shape at one split -- they have only 12 chunks in total -- and it is why the
+// old `K/(BK*4)` floor, which allowed splits of four chunks, was too generous.
+//
+// GRID_DEPTH. Past a few residencies of blocks the tail is already amortized
+// and further splits are pure reduction traffic. This is the term that stops a
+// long-K shape with a big output from being cut to pieces: a square
+// 4096x4096x4096 has 128 chunks and would take ten splits on the first term
+// alone, at 25 MB of partials each.
+//
+// The two together get every shape above within 4% of its swept optimum, and
+// the two shapes that were most wrong are the two that matter most. Both
+// constants are CALIBRATED, not derived: 12 is where `mlp down` stops gaining
+// and every K=384 shape is protected, and the dW shapes prefer 5-7 while the
+// rule gives them 10, which costs ~2% of the ideal and buys a rule with no
+// per-shape special cases in it. Re-measure with --splitk on a new card rather
+// than trusting either number.
+constexpr int MIN_CHUNKS_PER_SPLIT = 12;
+constexpr int GRID_DEPTH = 4;
+
 inline int splitk_for(int blocks, int K, int BK) {
-    const int TARGET_BLOCKS = fill_blocks();
-    if (blocks >= TARGET_BLOCKS) return 1;
-    int s = TARGET_BLOCKS / blocks;
-    const int max_by_k = K / (BK * 4);  // keep >=4 K-chunks per split
-    if (s > max_by_k) s = max_by_k;
+    const int chunks = K / BK;
+    if (g_splitk_force > 0) {
+        int s = g_splitk_force;
+        const int cap = chunks / 4;  // sweeps may go deeper than the rule
+        if (s > cap) s = cap;
+        return s < 1 ? 1 : s;
+    }
+    if (blocks < 1) return 1;
+    int s = chunks / MIN_CHUNKS_PER_SPLIT;
+    const int by_grid = (GRID_DEPTH * fill_blocks() + blocks - 1) / blocks;
+    if (s > by_grid) s = by_grid;
     return s < 2 ? 1 : s;
 }
 
@@ -1125,3 +1178,6 @@ bool gemm_tf32_available() {
 #endif
 }
 bool gemm_tf32() { return g_tf32; }
+
+void gemm_set_splitk(int splits) { g_splitk_force = splits; }
+int gemm_splitk() { return g_splitk_force; }

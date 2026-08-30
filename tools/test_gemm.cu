@@ -71,14 +71,46 @@ static double time_gemm(bool TA, bool TB, int M, int N, int K, const float *A,
     return best;
 }
 
+// The same timing loop against cuBLAS, so a "% of cuBLAS" at a MODEL shape is
+// measured rather than extrapolated from the square-N ladder.
+//
+// The math mode is set per call and restored, matching what src/bench.cu does:
+// cuBLAS SGEMM is true fp32 unless opted in, so the fp32 and TF32 columns here
+// are the same two denominators the rest of this repo quotes.
+static double time_cublas(bool TA, bool TB, int M, int N, int K, const float *A,
+                          const float *B, float *C, int iters, bool tf32) {
+    CUBLAS_CHECK(cublasSetMathMode(
+        handle, tf32 ? CUBLAS_TF32_TENSOR_OP_MATH : CUBLAS_DEFAULT_MATH));
+    cudaEvent_t a, b;
+    cudaEventCreate(&a);
+    cudaEventCreate(&b);
+    for (int i = 0; i < 3; ++i) gemm_ref(TA, TB, M, N, K, 1.0f, A, B, 0.0f, C);
+    cudaDeviceSynchronize();
+    double best = 1e30;
+    for (int i = 0; i < iters; ++i) {
+        cudaEventRecord(a);
+        gemm_ref(TA, TB, M, N, K, 1.0f, A, B, 0.0f, C);
+        cudaEventRecord(b);
+        cudaEventSynchronize(b);
+        float ms = 0.f;
+        cudaEventElapsedTime(&ms, a, b);
+        if (ms < best) best = ms;
+    }
+    cudaEventDestroy(a);
+    cudaEventDestroy(b);
+    CUBLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+    return best;
+}
+
 int main(int argc, char **argv) {
     // --tf32 routes the same 56 cases through the tensor-core path. TF32 keeps
     // 10 mantissa bits, so the bar moves from 1e-4 to 5e-3: the point of the
     // run is that the transpose staging is right, not that the format is exact.
-    bool tf32 = false, bench = false;
+    bool tf32 = false, bench = false, splitk = false;
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--tf32")) tf32 = true;
         else if (!strcmp(argv[i], "--bench")) bench = true;
+        else if (!strcmp(argv[i], "--splitk")) splitk = true;
     }
     if (tf32) {
         gemm_set_tf32(true);
@@ -112,9 +144,11 @@ int main(int argc, char **argv) {
     // Timing the SAME entry point both ways, per shape and per transpose case,
     // is what tells you which of the four cases pays for it.
     if (bench) {
-        printf("%-22s %6s %6s %6s  %-4s %10s %10s %8s\n", "shape", "M", "N", "K",
-               "op", "fp32 GF/s", "tf32 GF/s", "ratio");
-        printf("--------------------------------------------------------------------------\n");
+        printf("%-22s %6s %6s %6s  %-4s %9s %9s %9s %10s %8s\n", "shape", "M",
+               "N", "K", "op", "mine f32", "mine tf32", "cuBLAS32",
+               "cuBLASTF32", "% cuTF32");
+        printf("------------------------------------------------------------"
+               "----------------------------------\n");
         for (const Shape &s : shapes) {
             if (s.M % 128 || s.N % 128 || s.K % 32) continue;  // tc path needs this
             size_t szA = (size_t)s.M * s.K, szB = (size_t)s.K * s.N,
@@ -134,10 +168,69 @@ int main(int argc, char **argv) {
                 gemm_set_tf32(true);
                 const double g = time_gemm(TA, TB, s.M, s.N, s.K, dA, dB, dC, 20);
                 gemm_set_tf32(false);
-                printf("%-22s %6d %6d %6d  %-4s %10.1f %10.1f %7.2fx\n", s.tag,
-                       s.M, s.N, s.K, tag, flop / (f * 1e-3) / 1e9,
-                       flop / (g * 1e-3) / 1e9, f / g);
+                // Interleaved with mine rather than run as its own sweep, so
+                // numerator and denominator come from the same few
+                // milliseconds of machine state.
+                const double cf =
+                    time_cublas(TA, TB, s.M, s.N, s.K, dA, dB, dC, 20, false);
+                const double ct =
+                    time_cublas(TA, TB, s.M, s.N, s.K, dA, dB, dC, 20, true);
+                printf("%-22s %6d %6d %6d  %-4s %9.1f %9.1f %9.1f %10.1f %7.1f%%\n",
+                       s.tag, s.M, s.N, s.K, tag, flop / (f * 1e-3) / 1e9,
+                       flop / (g * 1e-3) / 1e9, flop / (cf * 1e-3) / 1e9,
+                       flop / (ct * 1e-3) / 1e9, 100.0 * ct / g);
             }
+            cudaFree(dA); cudaFree(dB); cudaFree(dC);
+        }
+        cublasDestroy(handle);
+        return 0;
+    }
+
+    // --splitk sweeps the K-split count at every model shape, because the
+    // derived rule is one point on a curve and the point of having a rule is to
+    // land on the right one. Only the TN case is swept: every weight gradient
+    // in the model is gemm(true, false, ...), so that is the case that has to
+    // be right, and the forward shapes are here to show what the same rule
+    // would do to them -- a split-K rule that helps dW and quietly costs the
+    // forward pass is not an improvement.
+    if (splitk) {
+        gemm_set_tf32(true);
+        const int MAXSP = 16;
+        printf("K-split sweep, TF32, TN (what every dW runs). GF/s.%s%s", "\n", "\n");
+        printf("%-20s %5s", "shape", "blk");
+        for (int sp = 1; sp <= MAXSP; ++sp) printf("%6d", sp);
+        printf("   %8s %8s%s", "derived", "best@", "\n");
+        for (const Shape &s2 : shapes) {
+            if (s2.M % 128 || s2.N % 128 || s2.K % 32) continue;
+            if ((size_t)s2.M * s2.N * s2.K < 100000000ull) continue;  // skip toys
+            size_t szA = (size_t)s2.M * s2.K, szB = (size_t)s2.K * s2.N,
+                   szC = (size_t)s2.M * s2.N;
+            float *dA, *dB, *dC;
+            CUDA_CHECK(cudaMalloc(&dA, szA * 4));
+            CUDA_CHECK(cudaMalloc(&dB, szB * 4));
+            CUDA_CHECK(cudaMalloc(&dC, szC * 4));
+            CUDA_CHECK(cudaMemset(dA, 0, szA * 4));
+            CUDA_CHECK(cudaMemset(dB, 0, szB * 4));
+            const double flop = 2.0 * s2.M * s2.N * s2.K;
+            // The block count the narrow tile would make, which is what the
+            // rule keys on.
+            printf("%-20s %5d", s2.tag, (s2.M / 64) * (s2.N / 128));
+            double best = 0;
+            int bestsp = 0;
+            for (int sp = 1; sp <= MAXSP; ++sp) {
+                gemm_set_splitk(sp);
+                const double t =
+                    time_gemm(true, false, s2.M, s2.N, s2.K, dA, dB, dC, 20);
+                const double gf = flop / (t * 1e-3) / 1e9;
+                if (gf > best) { best = gf; bestsp = sp; }
+                printf("%6.0f", gf);
+            }
+            gemm_set_splitk(0);
+            const double t0 =
+                time_gemm(true, false, s2.M, s2.N, s2.K, dA, dB, dC, 20);
+            const double d0 = flop / (t0 * 1e-3) / 1e9;
+            printf("   %8.0f %5.0f@%-2d  %+.1f%%%s", d0, best, bestsp,
+                   100.0 * (best / d0 - 1.0), "\n");
             cudaFree(dA); cudaFree(dB); cudaFree(dC);
         }
         cublasDestroy(handle);
