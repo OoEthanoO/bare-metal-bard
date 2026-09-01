@@ -96,6 +96,22 @@ for n in 2 4 8; do
   ./bench/train_gpt -n 40 --gpus "$n" --eval 10000 --sample 10000 --len 0 2>&1 | tail -10
 done
 
+log "the prediction check: the configuration that measured 149 ms on 2x A40"
+# bench/logs/multigpu_a40.txt, finding 2: global batch 32 took 77.5 ms on one
+# rank and 149.1 on two, with comm at 6% -- the host loop, not the wire. The
+# per-step thread spawning that caused it (every thread_local per-device cache
+# rebuilt through cudaMallocHost each step) is now fixed with persistent rank
+# workers, and the prediction ON RECORD before this script was run: two ranks
+# land near one B=16 shard's step time plus comm (~41 ms + comm on A40-class
+# cards), not 149. Whatever this prints, it goes in the log next to that
+# prediction.
+for cfg in "1 16" "1 32" "2 32"; do
+  set -- $cfg
+  echo "--- $1 rank(s), global batch $2 ---"
+  ./bench/train_gpt -n 30 -b "$2" --gpus "$1" --eval 10000 --sample 10000 --len 0 2>&1 \
+    | grep -E "^step +30|^links"
+done
+
 log "weak scaling: keep the per-GPU batch fixed, grow the global batch"
 # Strong scaling (fixed global batch) shrinks each GPU's work until launch
 # overhead dominates and says more about the model size than the interconnect.
