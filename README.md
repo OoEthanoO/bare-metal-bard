@@ -817,6 +817,91 @@ the rest of the largest line in the step lives, and it is not a split-K problem.
 measured 10.649 — a cross-check that the new instrument is telling the truth.)*
 
 
+### A comment claimed the runs were reproducible; they were not
+
+*Measured on the 5070 Ti, sm_120, CUDA 13.3, clock pinned, interleaved A/B.*
+
+With the GEMMs at 85–90% of cuBLAS, the interesting lines left were the small
+ones. `bias backward` (4.4%) and `layernorm bwd` (4.3%) are both column
+reductions over the same `[4096, C]` shape, sitting next to each other in
+`nn.cu`, and reading them side by side turned up something better than a
+speedup.
+
+The bias reduction refuses to use atomics, with a comment explaining why:
+they would make the gradient depend on block scheduling order, "and this repo
+compares runs bit for bit." The layernorm backward, forty lines up, does
+`atomicAdd(&dweight[i], ...)` and `atomicAdd(&dbias[i], ...)` **once per
+element** — at N=4096, C=384 that is 3.1 million atomic adds contending on 768
+addresses.
+
+So the claim is testable. Two runs, same seed:
+
+```
+run1 4.2487  run2 4.2487  same
+run1 3.0670  run2 3.0670  same
+run1 2.7130  run2 2.7135  DIFFERS
+```
+
+**It does not compare runs bit for bit.** The comment was aspirational and had
+been sitting there being believed.
+
+#### The half that could go, and the half that could not
+
+I removed the layernorm's atomics — a block now owns a strided set of rows
+instead of one row, so a fixed 1:1 thread-to-column map lets the per-column sums
+live in shared memory with no atomic at all, and a second kernel sums a fixed
+number of partials in a fixed order.
+
+Then I re-ran the determinism check, got identical losses, and wrote down that
+it was fixed. **That was wrong, and the next seed said so.** `encoder_bwd_k`
+still uses atomics for `dwte`/`dwpe`, and there the conflicts are *real*: many
+`(b,t)` positions share a token id, so the accumulation genuinely collides
+however the kernel is arranged. The layernorm's collisions were the avoidable
+kind, an artifact of running one block per row. One seed agreeing across two
+runs is not evidence of determinism — it is one sample of a difference that
+shows up in the fourth decimal.
+
+#### What the micro-bench got wrong, and what it got right
+
+To tune the new kernel I wrote `tools/bench_nn.cu`, which reports each
+bandwidth-bound kernel as a fraction of the card's measured peak. It said the
+rewrite was **2.9× faster**. In the step it was **slower**.
+
+The reason is worth keeping: at N=4096, C=384 the bench's working set is ~19 MB
+against a 36 MB L2, and the timing loop re-reads it thirty times. It was
+measuring an L2 curve. In a step these buffers compete with the whole model and
+come from DRAM.
+
+What it *did* get right was the shape — both regimes put the optimum at the same
+place, 368 blocks, 8 per SM:
+
+| blocks | 92 | 184 | **368** | 736 | 1024 | 2048 | 4096 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| ms/step (in situ) | 2.79 | 1.75 | **1.53** | 1.82 | 2.02 | 2.75 | 4.49 |
+
+The far end is the interesting column: at one block per row — what the kernel
+used to launch — the reduction has 4096 partials per column to sum and the
+region costs 4.49 ms. The old kernel got away with that arrangement only
+because it had no partials at all, having paid in atomics instead.
+
+#### And a fourth stale 36-SM constant
+
+`bias_backward` split its rows against `ceil_div(144, cols)`, commented "~4
+blocks per SM at 36 SMs". The same 4070 constant as the tile rule, the split-K
+target and the split count — the fourth, and the first one outside `gemm.cu`.
+
+| region | before | after |
+|---|---:|---:|
+| bias backward | 1.616 | **1.445** |
+| layernorm bwd | 1.592 | **1.552** |
+| **measured total** | **37.079** | **36.893** |
+
+**Roughly 0.5% of a step**, and that is the least interesting thing here. Both
+kernels were at a tenth of the roofline and are now near half of it; the
+reproducibility claim is now accurate instead of flattering; and the tool that
+made me believe a 2.9× speedup carries the caveat that explains it.
+
+
 ### The GELU backward did not need to exist either
 
 *Same session, same clock caveat as below.*
@@ -2220,6 +2305,20 @@ four scalar stores.
    `dW` GEMM reads, and `layernorm bwd` (4.2%) feeds the `dX` GEMM. Neither is
    as clean as this one — a column reduction is not an epilogue — but both read
    a tensor another kernel already has in registers.
+
+7. ~~**Those two reductions**~~ — [looked at](#a-comment-claimed-the-runs-were-reproducible-they-were-not),
+   and not fused: both were instead losing to their own internals. The layernorm
+   backward was doing two atomics per element, the bias backward was splitting
+   against a fourth stale 36-SM constant, and both ran at about a tenth of the
+   roofline. Fixing them is worth only ~0.5% of a step; the reason it was worth
+   the session is that it disproved a reproducibility claim the repo had been
+   making in a comment, and produced `tools/bench_nn.cu` — which then had to be
+   annotated with why its own numbers disagreed with the step.
+
+   **Fusing them is still open.** `dbias` is a column sum of the same `dY` the
+   `dW` GEMM reduces over, along the same K axis, so a GEMM block already has
+   the values; the obstacle is that only the blocks in one column strip should
+   contribute, and split-K makes the bookkeeping worse.
 
 4. ~~**The N=384 tail.**~~ — [largely answered](#the-tile-rule-was-stale-and-my-explanation-for-it-was-wrong-twice),
    and not by anything specific to N=384: the two-tile rule was calibrated on a

@@ -83,34 +83,93 @@ __global__ void layernorm_fwd_k(float *out, float *mean, float *rstd,
 // The two subtracted terms are the corrections for mu and sigma themselves
 // depending on x; dropping them is a classic silent-wrongness bug, so both
 // means are reduced explicitly here.
-__global__ void layernorm_bwd_k(float *dinp, float *dweight, float *dbias,
+__global__ void layernorm_bwd_k(float *dinp, float *part_dw, float *part_db,
                                 const float *dout, const float *inp,
                                 const float *weight, const float *mean,
-                                const float *rstd, int C) {
-    const int row = blockIdx.x;
-    const float *x = inp + (size_t)row * C;
-    const float *dy = dout + (size_t)row * C;
-    float *dx = dinp + (size_t)row * C;
-    const float mu = mean[row], rs = rstd[row];
-
-    float sum_dxhat = 0.0f, sum_dxhat_xhat = 0.0f;
+                                const float *rstd, int N, int C) {
+    // TWO ATOMICS PER ELEMENT USED TO LIVE IN THE ROW LOOP, and they were both
+    // the slow part and a correctness claim this repo was not keeping.
+    //
+    // The old version ran one block per row and did
+    //     atomicAdd(&dweight[i], dy[i] * xhat);  atomicAdd(&dbias[i], dy[i]);
+    // for every element -- at N=4096, C=384 that is 3.1 MILLION atomic adds
+    // contending on 768 addresses, and it measured 64 GB/s against this card's
+    // 672. It also made the gradient depend on the order blocks happened to
+    // finish in: two runs at the same seed produce different losses by step 20.
+    // The bias reduction below already refuses atomics for exactly that reason,
+    // in a comment that claimed the repo compares runs bit for bit.
+    //
+    // IT DOES NOT, AND REMOVING THESE DOES NOT MAKE IT SO -- worth stating
+    // plainly because I believed the opposite for about ten minutes. One seed
+    // agreed across two runs and I called it fixed; the next seed did not.
+    // `encoder_bwd_k` still uses atomics for dwte/dwpe, and THERE the conflicts
+    // are real: many (b,t) positions share a token id, so the accumulation
+    // genuinely collides however the kernel is arranged. The layernorm's
+    // collisions were the avoidable kind -- an artifact of one block per row --
+    // and that is the whole claim being made here.
+    //
+    // So the accumulation moves out of the row loop. A block owns a strided set
+    // of ROWS instead of one row, and within a block thread t owns columns
+    // t, t+blockDim, ... for every row it visits -- a fixed 1:1 thread-to-column
+    // map, so the per-column running sums live in shared memory with no atomic
+    // and no race. One partial per block per column is written at the end, and
+    // a second kernel sums a FIXED number of partials in a FIXED order.
+    extern __shared__ float acc[];  // [C] dweight, then [C] dbias
+    float *acc_dw = acc, *acc_db = acc + C;
     for (int i = threadIdx.x; i < C; i += blockDim.x) {
-        const float xhat = (x[i] - mu) * rs;
-        const float dxhat = dy[i] * weight[i];
-        sum_dxhat += dxhat;
-        sum_dxhat_xhat += dxhat * xhat;
+        acc_dw[i] = 0.0f;
+        acc_db[i] = 0.0f;
     }
-    const float m1 = block_reduce<false>(sum_dxhat) / C;
-    const float m2 = block_reduce<false>(sum_dxhat_xhat) / C;
+    __syncthreads();
 
-    for (int i = threadIdx.x; i < C; i += blockDim.x) {
-        const float xhat = (x[i] - mu) * rs;
-        const float dxhat = dy[i] * weight[i];
-        dx[i] += rs * (dxhat - m1 - xhat * m2);
-        // Parameter grads accumulate across all N rows.
-        atomicAdd(&dweight[i], dy[i] * xhat);
-        atomicAdd(&dbias[i], dy[i]);
+    for (int row = blockIdx.x; row < N; row += gridDim.x) {
+        const float *x = inp + (size_t)row * C;
+        const float *dy = dout + (size_t)row * C;
+        float *dx = dinp + (size_t)row * C;
+        const float mu = mean[row], rs = rstd[row];
+
+        float sum_dxhat = 0.0f, sum_dxhat_xhat = 0.0f;
+        for (int i = threadIdx.x; i < C; i += blockDim.x) {
+            const float xhat = (x[i] - mu) * rs;
+            const float dxhat = dy[i] * weight[i];
+            sum_dxhat += dxhat;
+            sum_dxhat_xhat += dxhat * xhat;
+        }
+        const float m1 = block_reduce<false>(sum_dxhat) / C;
+        const float m2 = block_reduce<false>(sum_dxhat_xhat) / C;
+
+        for (int i = threadIdx.x; i < C; i += blockDim.x) {
+            const float xhat = (x[i] - mu) * rs;
+            const float g = dy[i];
+            const float dxhat = g * weight[i];
+            dx[i] += rs * (dxhat - m1 - xhat * m2);
+            acc_dw[i] += g * xhat;
+            acc_db[i] += g;
+        }
     }
+
+    __syncthreads();
+    for (int i = threadIdx.x; i < C; i += blockDim.x) {
+        part_dw[(size_t)blockIdx.x * C + i] = acc_dw[i];
+        part_db[(size_t)blockIdx.x * C + i] = acc_db[i];
+    }
+}
+
+// Fixed number of partials, summed in a fixed order: deterministic, and the
+// same shape as bias_bwd_reduce_k below.
+__global__ void layernorm_bwd_reduce_k(float *dweight, float *dbias,
+                                       const float *part_dw,
+                                       const float *part_db, int C,
+                                       int blocks) {
+    const int c = blockIdx.x * blockDim.x + threadIdx.x;
+    if (c >= C) return;
+    float sw = 0.0f, sb = 0.0f;
+    for (int i = 0; i < blocks; ++i) {
+        sw += part_dw[(size_t)i * C + c];
+        sb += part_db[(size_t)i * C + c];
+    }
+    dweight[c] += sw;
+    dbias[c] += sb;
 }
 
 // --------------------------------------------------------------------- gelu
@@ -185,7 +244,13 @@ __global__ void add_inplace_k(float *dst, const float *src, int n4) {
 // tensors still fill the machine -- at C=384 the column axis alone is only 12
 // blocks. The partials are written to a workspace and summed by a second
 // kernel rather than atomically, because atomics would make the gradient
-// depend on block scheduling order and this repo compares runs bit for bit.
+// depend on block scheduling order.
+//
+// THAT SENTENCE USED TO END "and this repo compares runs bit for bit", WHICH
+// WAS NOT TRUE -- two runs at the same seed diverge by step 20, checked rather
+// than assumed. Avoiding atomics here is still right; it buys determinism in
+// THIS reduction, not in the step. The layernorm backward above was the other
+// avoidable half, and encoder_bwd_k is the half that cannot go.
 constexpr int BIAS_COLS = 32, BIAS_ROWS = 8;
 
 __global__ void bias_bwd_k(float *partial, const float *dout, int N, int C) {
@@ -303,6 +368,23 @@ __global__ void reduce_mean_k(const float *in, float *out, int n) {
 }
 
 inline int ceil_div(int a, int b) { return (a + b - 1) / b; }
+
+// How many blocks it takes to fill this machine, derived rather than assumed.
+// gemm.cu learned this the hard way three times over: a constant written as
+// "4 blocks/SM x 36 SMs" is a 4070 fact, and it is wrong SILENTLY on every
+// other card -- no error, just quiet under-filling.
+inline int target_blocks() {
+    static int cached = 0;
+    if (cached) return cached;
+    int dev = 0, sms = 0;
+    if (cudaGetDevice(&dev) == cudaSuccess &&
+        cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, dev) ==
+            cudaSuccess && sms > 0)
+        cached = 4 * sms;
+    else
+        cached = 144;
+    return cached;
+}
 }  // namespace
 
 // ---------------------------------------------------------------- launchers
@@ -323,11 +405,49 @@ void layernorm_forward(float *out, float *mean, float *rstd, const float *inp,
     layernorm_fwd_k<<<N, 128>>>(out, mean, rstd, inp, weight, bias, C);
 }
 
+static int g_ln_blocks_force = 0;
+void layernorm_backward_set_blocks(int b) { g_ln_blocks_force = b; }
+
 void layernorm_backward(float *dinp, float *dweight, float *dbias,
                         const float *dout, const float *inp,
                         const float *weight, const float *mean,
                         const float *rstd, int N, int C) {
-    layernorm_bwd_k<<<N, 128>>>(dinp, dweight, dbias, dout, inp, weight, mean, rstd, C);
+    // One block per row was 4096 blocks doing one row each. Now a block owns a
+    // strided set of rows so the per-column sums can live in its shared memory
+    // for the whole walk -- which means the block count is a tuning parameter
+    // rather than the row count, and it is derived from the SM count for the
+    // usual reason (see fill_blocks in gemm.cu, and the three stale 36-SM
+    // constants that cost this project a session each).
+    // EIGHT BLOCKS PER SM, MEASURED IN THE STEP AND NOT IN A MICRO-BENCH.
+    //
+    // The block count trades two things against each other: more blocks give
+    // the row loop more parallelism, and each one costs the second pass another
+    // partial to sum per column. Swept in situ (`--ln-blocks`), on this card:
+    //
+    //   blocks       92    184    368    736   1024   2048   4096
+    //   ms/step    2.79   1.75   1.53   1.82   2.02   2.75   4.49
+    //
+    // 368 is 8 x 46 SMs. Note the far end: at one block per row -- what this
+    // kernel used to launch -- the reduction has 4096 partials per column to
+    // sum and the region costs 4.49 ms, nearly three times the tuned value.
+    // The old kernel got away with it only because it had no partials at all,
+    // having paid in atomics instead.
+    int blocks = g_ln_blocks_force > 0 ? g_ln_blocks_force : 2 * target_blocks();
+    if (blocks > N) blocks = N;
+
+    static thread_local float *part = nullptr;
+    static thread_local size_t cap = 0;
+    const size_t need = (size_t)blocks * C * 2;
+    if (need > cap) {
+        if (part) cudaFree(part);
+        cudaMalloc(&part, need * sizeof(float));
+        cap = need;
+    }
+    const size_t smem = (size_t)C * 2 * sizeof(float);
+    layernorm_bwd_k<<<blocks, 128, smem>>>(dinp, part, part + (size_t)blocks * C,
+                                           dout, inp, weight, mean, rstd, N, C);
+    layernorm_bwd_reduce_k<<<ceil_div(C, 256), 256>>>(
+        dweight, dbias, part, part + (size_t)blocks * C, C, blocks);
 }
 
 void gelu_forward(float *out, const float *inp, int n) {
@@ -343,13 +463,19 @@ void add_inplace(float *dst, const float *src, int n) {
     add_inplace_k<<<ceil_div(n / 4, 256), 256>>>(dst, src, n / 4);
 }
 
+static int g_bias_splits_force = 0;
+void bias_backward_set_splits(int splits) { g_bias_splits_force = splits; }
+
 void bias_backward(float *dbias, const float *dout, int N, int C) {
     // Enough row-splits to keep every SM busy on the narrow tensors, capped so
     // the second pass stays trivial. thread_local for the same reason
     // reduce_mean is: one host thread per GPU, one workspace per device.
     const int cols = ceil_div(C, BIAS_COLS);
-    int splits = ceil_div(144, cols);        // ~4 blocks per SM at 36 SMs
+    // THE FOURTH STALE 36-SM CONSTANT, and the first one outside gemm.cu. This
+    // read `ceil_div(144, cols)` with the comment "~4 blocks per SM at 36 SMs".
+    int splits = ceil_div(target_blocks(), cols);
     if (splits < 1) splits = 1;
+    if (g_bias_splits_force > 0) splits = g_bias_splits_force;
     const int max_splits = ceil_div(N, BIAS_ROWS);
     if (splits > max_splits) splits = max_splits;
 

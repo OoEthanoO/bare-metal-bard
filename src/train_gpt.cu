@@ -285,6 +285,14 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--bwd-cfg") && i + 1 < argc) bwd_cfg = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--fwd-cfg") && i + 1 < argc) fwd_cfg = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--profile")) do_profile = true;
+        // Tuning knob for the layernorm backward's block count. It is here and
+        // not only in bench_nn because the micro-bench turned out to measure a
+        // DIFFERENT regime: at N=4096, C=384 its working set is 19 MB against a
+        // 36 MB L2, so it re-reads everything out of cache and reports an L2
+        // curve. In the step these buffers compete with the whole model and
+        // come from DRAM, and the two disagree about which block count wins.
+        else if (!strcmp(argv[i], "--ln-blocks") && i + 1 < argc)
+            layernorm_backward_set_blocks(atoi(argv[++i]));
         else { fprintf(stderr, "unknown arg %s\n", argv[i]); return 1; }
     }
 

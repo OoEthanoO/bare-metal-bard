@@ -33,6 +33,17 @@ void add_inplace(float *dst, const float *src, int n);
 // column sum over the B*T dimension.
 void bias_backward(float *dbias, const float *dout, int N, int C);
 
+// Force the row-split count instead of deriving it from C and the SM count.
+// Zero restores the derived rule. Same reason gemm_set_splitk exists: a rule
+// that picks one point on a curve should be checked against the curve.
+// tools/bench_nn.cu --splits prints it.
+void bias_backward_set_splits(int splits);
+
+// Same, for the layernorm backward's block count. Its rows are independent, so
+// the block count trades parallelism against how many per-column partials the
+// second pass has to sum.
+void layernorm_backward_set_blocks(int blocks);
+
 // ---- loss ----
 // Vp is the padded vocabulary (a multiple of 128 so the head matmul hits the
 // fast GEMM path); V is the real vocabulary. Columns in [V, Vp) are masked out
