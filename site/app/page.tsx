@@ -1719,10 +1719,16 @@ run1 2.7130  run2 2.7135  DIFFERS`}</pre>
           repo. Anything further here is a redesign, not a parameter.
         </li>
         <li>
-          <strong><s>Multi-GPU</s></strong> — started, above. The collective is correct and cheap;
-          the data-parallel driver is not yet good enough to profit from it. Two ranks need to
-          genuinely overlap, which means one process per GPU or a step with no blocking calls left
-          in it. This is the next rented-cloud session.
+          <strong><s>Multi-GPU</s></strong> — started, above, and the missing time has now been
+          found in a place no GPU profile could see: the per-step worker threads were created
+          fresh each step, and every per-device cache in the codebase is{' '}
+          <code>thread_local</code> — deliberately, so each rank gets its own buffer on its own
+          device. A thread that lives for one step defeats every one of those caches at once,
+          paying <code>cudaMallocHost</code> under a process-wide lock each step and leaking the
+          old allocations as the thread dies. One persistent worker per rank fixes it; on the
+          one-GPU rehearsal the host overhead went from ~3 ms/step to ~0.4 and the books now
+          balance exactly. The prediction on record for the next rented session: 2×A40 lands near
+          41 ms + comm for the global batch that measured 149 before.
         </li>
       </ol>
 

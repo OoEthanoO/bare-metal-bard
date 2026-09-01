@@ -36,6 +36,9 @@
 #include "prof.cuh"
 #include <chrono>
 #include <thread>
+#include <mutex>
+#include <condition_variable>
+#include <functional>
 
 #define CUDA_CHECK(x)                                                          \
     do {                                                                       \
@@ -229,6 +232,71 @@ static bool load_checkpoint(GPT &g, const char *path, std::vector<char> &itos) {
     return true;
 }
 
+// One PERSISTENT worker thread per rank, woken twice a step, alive for the
+// whole run. The first version of the data-parallel driver created fresh
+// threads every step, and that was not merely thread-spawn overhead: every
+// per-device buffer this codebase caches -- reduce_mean's pinned scalar, the
+// split-K workspace, the bias-backward partials -- is `thread_local`,
+// deliberately, so that each rank gets its own allocation on its own device.
+// A thread that lives for one step defeats every one of those caches at once:
+// the new thread sees nullptr and pays cudaMalloc and cudaMallocHost again --
+// the latter takes a process-wide lock and pins pages, so the ranks serialize
+// against each other on the host for reasons invisible to any GPU profile --
+// and the old thread's allocations leak, because a dying thread's
+// thread_local pointers take their cudaMalloc'd memory with them.
+//
+// The single-rank path never paid any of this, because it runs on the main
+// thread, whose thread_locals persist. Which is why the single-GPU numbers
+// were always fine and the 2-rank step on the A40 box was 3.6x one rank's
+// shard time while communication measured 6%: the missing time was the two
+// ranks taking turns rebuilding their caches inside a driver lock.
+struct RankPool {
+    std::vector<std::thread> threads;
+    std::function<void(int)> job;
+    std::mutex mu;
+    std::condition_variable cv_start, cv_done;
+    unsigned long long epoch = 0;
+    int pending = 0;
+    bool quit = false;
+
+    void start(int n) {
+        for (int r = 0; r < n; ++r)
+            threads.emplace_back([this, r] {
+                unsigned long long seen = 0;
+                for (;;) {
+                    std::unique_lock<std::mutex> lk(mu);
+                    cv_start.wait(lk, [&] { return quit || epoch != seen; });
+                    if (quit) return;
+                    seen = epoch;
+                    auto fn = job;  // copied under the lock
+                    lk.unlock();
+                    fn(r);
+                    lk.lock();
+                    if (--pending == 0) cv_done.notify_one();
+                }
+            });
+    }
+    // Runs fn(r) on every rank's worker and returns when all have finished.
+    void run(const std::function<void(int)> &fn) {
+        std::unique_lock<std::mutex> lk(mu);
+        job = fn;
+        pending = (int)threads.size();
+        ++epoch;
+        cv_start.notify_all();
+        cv_done.wait(lk, [&] { return pending == 0; });
+    }
+    void stop() {
+        {
+            std::lock_guard<std::mutex> lk(mu);
+            quit = true;
+        }
+        cv_start.notify_all();
+        for (auto &t : threads) t.join();
+        threads.clear();
+    }
+    ~RankPool() { if (!threads.empty()) stop(); }
+};
+
 // Linear warmup then cosine decay to lr_max/10. Warmup matters here because
 // Adam's second-moment estimate is near-meaningless for the first few steps,
 // and a full-size step taken against it can knock the model into a bad basin
@@ -404,6 +472,9 @@ int main(int argc, char **argv) {
     double ema_ms = 0.0, ema_comm = 0.0;
     std::vector<float *> gbufs(nranks);
 
+    RankPool pool;
+    if (nranks > 1) pool.start(nranks);
+
     for (int step = 1; step <= steps; ++step) {
         get_batch(ds.train, B, T, rng, x, y);
 
@@ -419,8 +490,11 @@ int main(int argc, char **argv) {
         // Each rank runs its own shard of the batch. Averaging the shard means
         // reproduces the full-batch mean exactly, so N ranks of B/N compute the
         // same gradient as one rank of B.
-        // One host thread per rank. CUDA's current device is per-THREAD, so
-        // each thread simply selects its own GPU and the two run concurrently.
+        // One PERSISTENT host thread per rank (see RankPool above). CUDA's
+        // current device is per-THREAD, so each worker selects its own GPU and
+        // the ranks run concurrently -- and because the workers live for the
+        // whole run, every thread_local per-device cache in the codebase works
+        // as designed instead of being rebuilt through a driver lock each step.
         //
         // Driving both from one thread does not work: gpt_forward blocks on a
         // token upload and on the loss reduction, so rank 1 could not start
@@ -433,19 +507,14 @@ int main(int argc, char **argv) {
             rank_loss[0] = gpt_forward(reps[0], x.data(), y.data());
             gpt_backward(reps[0]);
         } else {
-            std::vector<std::thread> workers;
-            workers.reserve(nranks);
-            for (int r = 0; r < nranks; ++r) {
-                workers.emplace_back([&, r] {
-                    cudaSetDevice(devs[r]);
-                    const size_t off = (size_t)r * Bshard * T;
-                    rank_loss[r] =
-                        gpt_forward(reps[r], x.data() + off, y.data() + off);
-                    gpt_backward(reps[r]);
-                    cudaDeviceSynchronize();
-                });
-            }
-            for (auto &w : workers) w.join();
+            pool.run([&](int r) {
+                cudaSetDevice(devs[r]);
+                const size_t off = (size_t)r * Bshard * T;
+                rank_loss[r] =
+                    gpt_forward(reps[r], x.data() + off, y.data() + off);
+                gpt_backward(reps[r]);
+                cudaDeviceSynchronize();
+            });
         }
         double loss_sum = 0.0;
         for (int r = 0; r < nranks; ++r) loss_sum += rank_loss[r];
@@ -492,9 +561,7 @@ int main(int argc, char **argv) {
         if (nranks == 1) {
             opt_step(0);
         } else {
-            std::vector<std::thread> workers;
-            for (int r = 0; r < nranks; ++r) workers.emplace_back(opt_step, r);
-            for (auto &w : workers) w.join();
+            pool.run(opt_step);
         }
         for (int r = 0; r < nranks; ++r) {
             CUDA_CHECK(cudaSetDevice(devs[r]));

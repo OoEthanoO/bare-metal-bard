@@ -2448,4 +2448,29 @@ four scalar stores.
    Giving each rank its own thread helped (159 -> 149 ms) and is not enough.
    "Communication becomes the bottleneck" is the lesson everyone quotes, and it
    is not what the measurement says — which is exactly why it was worth
-   measuring. Next: one process per GPU, or a step with no blocking calls.
+   measuring.
+
+   **The missing time has now been found, and it was hiding in a place no GPU
+   profile could see.** The per-step worker threads were created fresh every
+   step — and every per-device cache in this codebase (`reduce_mean`'s pinned
+   scalar, the split-K workspace, the bias-backward partials) is
+   `thread_local` precisely so each rank gets its own buffer on its own
+   device. A thread that lives for one step defeats every one of those caches
+   at once: the new thread sees `nullptr` and pays `cudaMalloc` and
+   `cudaMallocHost` again — the latter pins pages under a process-wide lock,
+   so the ranks serialize on the host — and the dying thread leaks the old
+   allocations. The single-rank path never paid this because it runs on the
+   main thread, whose `thread_local`s persist. The fix is one persistent
+   worker per rank, woken twice a step (`RankPool` in
+   [`train_gpt.cu`](src/train_gpt.cu)).
+
+   Measured on the one-GPU rehearsal (`--gpus 2` places both ranks on this
+   card, same arithmetic, same collective): 44.7 → 41.9 ms/step, and the books
+   now balance exactly — a B=8 shard alone is 20.7 ms, two serialized shards
+   are 41.4, and the 2-rank step is 41.7–42.2 with 0.9 ms of comm inside.
+   **Host orchestration overhead went from ~3 ms/step to ~0.4** on a box where
+   `cudaMallocHost` is cheap and there is only one device to lock; on the
+   two-A40 box, where the same storm ran across two devices, it has to be
+   worth much more — that is the number the next rented session collects, and
+   the prediction on record is that 2×A40 lands near 41 ms + comm for the
+   B=32 global batch instead of 149.
