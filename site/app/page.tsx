@@ -1514,6 +1514,171 @@ O' = O * exp(m - m') + exp(S_j - m') @ V_j`}</code>
         labelled as such rather than dressed up as a law.
       </p>
 
+      <h2>The largest line was losing 27% to an integer division</h2>
+      <p>
+        The re-profile the list below asked for happened, and it named the weight-gradient matmuls:
+        26.2% of a step, the single largest line, and the slowest GEMMs in the model — 7,700–8,300
+        GF/s at the <code>dW</code> shapes against 11,300 for <code>mlp up</code> in the same
+        transpose case. Following that lead found the <em>third</em> stale 36-SM constant, in the
+        split-K rule this time, and fixing it the obvious way — derive the target from the SM
+        count — moved the two small shapes 13–17% and the end-to-end step by an amount three
+        samples genuinely could not separate from noise. I wrote down that the two big{' '}
+        <code>dW</code> shapes were not a split-K problem, because their split count had not
+        changed.
+      </p>
+      <p>
+        <strong>That sentence was wrong, and it was wrong for the usual reason: I checked whether
+        the count had <em>changed</em>, not whether it was <em>right</em>.</strong> Asking cuBLAS
+        for its throughput at the model&rsquo;s own shapes — rather than extrapolating from square
+        N — showed it flat at ~12,300 GF/s on both <code>mlp up</code> and <code>dW fc</code>,
+        while mine dropped 25% between them. Same kernel, same instruction, same flop count: the
+        gap was a property of my decomposition, not of the shape. So instead of trusting the rule,
+        I swept the parameter it produces:
+      </p>
+      <div className="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>shape (TN, TF32 GF/s)</th>
+              <th className="n">s=1</th>
+              <th className="n">s=2</th>
+              <th className="n">s=5</th>
+              <th className="n">s=7</th>
+              <th className="n">s=10</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="hi"><td><code>dW fc</code> 384×1536×4096</td><td className="n">8232</td><td className="n"><em>8601</em></td><td className="n">10819</td><td className="n"><strong>10968</strong></td><td className="n">10527</td></tr>
+            <tr><td><code>dW qkv</code> 384×1152×4096</td><td className="n">6212</td><td className="n">8222</td><td className="n"><strong>10570</strong></td><td className="n">10149</td><td className="n">10406</td></tr>
+            <tr><td><code>mlp up</code> 4096×1536×384</td><td className="n"><strong><em>11382</em></strong></td><td className="n">7807</td><td className="n">6968</td><td className="n">6969</td><td className="n">6952</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        Italic is what the old rule picked: integer division put <code>dW fc</code> at two splits,
+        8,601 against a swept 10,968 — <strong>27% left on the largest line in the step</strong>.
+        The replacement rule keeps two quantities the old one conflated: a split&rsquo;s cost is
+        fixed (every split rewrites the whole output and the reduction reads every plane back)
+        while its benefit shrinks as K is cut thinner, so no split may own fewer than a dozen
+        k-chunks — the term that protects every K=384 shape, which fall off a cliff at s=2 — and
+        past a few grid-fulls of blocks further splits are pure reduction traffic. Interleaved
+        A/B, four rounds: <strong>3.8% of a training step</strong>, and the weight gradients went
+        from 70% of cuBLAS TF32 to 87% — from the worst shapes in the model to the middle of the
+        pack.
+      </p>
+      <div className="note">
+        <p style={{ margin: 0 }}>
+          A constant that survives a change to the formula around it has not been validated by
+          surviving. The sweep now lives in <code>test_gemm --splitk</code>, because the derived
+          value is one point on a curve, and the only way to know it is the right point is to have
+          seen the curve.
+        </p>
+      </div>
+      <p>
+        What did <em>not</em> work on the same line is worth recording too. The tensor-core kernel
+        overlaps nothing across its global reads, and both ways to fix that are blocked by
+        different resources: a second <code>cp.async</code> stage costs the second resident block
+        (shared memory), and prefetching the next k-chunk into registers — 48 of them — buys a
+        176–284 byte stack frame per thread, because the narrow tile already sits at 126 of its
+        128-register budget with nothing spilled. 5–22% slower at every model shape.{' '}
+        <strong>It is not near its budget; it is at it.</strong> That is a wall, not a missing
+        optimization, and knowing which resource blocks which route is what the failed experiment
+        bought.
+      </p>
+
+      <h2>A comment claimed bit-for-bit runs. The fourth decimal disagreed.</h2>
+      <p>
+        The bias-gradient reduction refuses atomics, with a comment explaining why: they would
+        make the gradient depend on block scheduling order, &ldquo;and this repo compares runs bit
+        for bit.&rdquo; Forty lines up, the layernorm backward did{' '}
+        <code>atomicAdd</code> twice per element — 3.1 million contended adds on 768 addresses.
+        Both could not be right, and the claim is testable: two runs, same seed, print the losses.
+      </p>
+      <pre>{`run1 4.2487  run2 4.2487  same
+run1 3.0670  run2 3.0670  same
+run1 2.7130  run2 2.7135  DIFFERS`}</pre>
+      <p>
+        The comment was aspirational and had been sitting there being believed. I removed the
+        layernorm&rsquo;s atomics — a fixed thread-to-column map with partials summed in a fixed
+        order — re-ran the check, got identical losses, and wrote down that it was fixed.{' '}
+        <strong>That was wrong too, and the next seed said so:</strong> the embedding backward
+        still accumulates by atomics, and there the collisions are real — many positions share a
+        token id — rather than an artifact of kernel arrangement. One seed agreeing across two
+        runs is one sample of a difference that lives in the fourth decimal. The honest state,
+        now written where the claim used to be: the avoidable nondeterminism is gone, the
+        structural kind remains, and the repo no longer says otherwise.
+      </p>
+      <p>
+        The tuning pass on those two reductions was worth only ~0.5% of a step — both were at a
+        tenth of the roofline and are now near half, one of them held back by a{' '}
+        <em>fourth</em> stale 36-SM constant. The micro-benchmark written to tune them said the
+        rewrite was 2.9× faster; in the step it was slower. Its working set fit in L2 and the
+        timing loop re-read it thirty times — it was measuring a cache curve, and in a step these
+        buffers compete with the whole model and come from DRAM. The benchmark survives with that
+        caveat written on it, which is the only condition under which a benchmark that lied
+        should survive.
+      </p>
+
+      <h2>Two kernels that did not need to exist</h2>
+      <p>
+        The forward pass learned this early: bias, residual and GELU ride the GEMM epilogue,
+        where the value is in a register with a store already happening. The backward never got
+        the same treatment, and the profiler kept pointing at the two places it showed.
+      </p>
+      <p>
+        <strong>The GELU backward</strong> read the gradient, read the pre-activation, and wrote
+        the product — three passes over 25 MB per layer for one multiply per element — consuming
+        a tensor the <code>dX</code> GEMM had produced microseconds earlier. The derivative now
+        rides that GEMM&rsquo;s epilogue: a 1.361 ms kernel became 0.051 ms of epilogue,{' '}
+        <strong>2.9% of a step</strong>, with bit-identical gradient norms, and the tensor that
+        existed only to hand data between the two kernels is deleted outright — resident memory
+        0.84 → 0.81 GB.
+      </p>
+      <p>
+        <strong>The bias gradient</strong> is the better story. Every weight gradient is{' '}
+        <code>dW = dY&#8239;ᵀ&#8239;@&#8239;X</code>, and the same layer&rsquo;s bias gradient is
+        the column sum of the same <code>dY</code> — along exactly the K axis that GEMM iterates,
+        over exactly the values its staging already loads into registers. As its own kernel the
+        sum cost 1.458 ms a step re-reading 100 MB a GEMM had just read. Fused, one block column
+        accumulates four FADDs per staged <code>float4</code>, folds partials through shared
+        memory the operand tile no longer needs, and — the part the next-steps note worried
+        about — split-K turns out to be bookkeeping, not a wall: per-split partials share the
+        workspace the output planes already use, and the existing reduction folds them in a fixed
+        order. No atomics, and the test suite holds it to that the only way that means anything:
+        two identical calls must return bitwise-identical gradients, at every split count.
+      </p>
+      <div className="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>narrow tile, TN</th>
+              <th className="n">registers</th>
+              <th className="n">spill</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>without <code>dbias_out</code></td><td className="n">126</td><td className="n">0 B</td></tr>
+            <tr className="hi"><td>with <code>dbias_out</code></td><td className="n">128</td><td className="n">4–8 B</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        The cost is the same register wall that blocked the prefetch, priced small enough to pay
+        this time: four registers instead of 48, four bytes of spill instead of hundreds, about
+        1% on the dW region for deleting a kernel worth sixteen times that. Interleaved A/B,
+        four rounds: 36.55 → 35.30 ms median, <strong>3.4% of a training step</strong>, and the
+        profiler shows the mechanism exactly — <code>bias backward</code> gone from the profile,{' '}
+        <code>GEMM bwd dW</code> up 0.092 ms. The fp32 path keeps the standalone reduction and
+        matches the old build to every printed digit, which is the control that says the machine
+        held still.
+      </p>
+      <p>
+        The layernorm backward is the reduction that does <em>not</em> get this treatment, for a
+        structural reason worth stating: its column sum is over <code>dY·x̂</code> — a product no
+        GEMM ever stages — so there is no free ride to hitch. Knowing why the trick stops is
+        worth almost as much as the trick.
+      </p>
+
       <h2>What I&rsquo;d do next</h2>
       <ol>
         <li>
@@ -1537,17 +1702,27 @@ O' = O * exp(m - m') + exp(S_j - m') @ V_j`}</code>
           Attention is no longer computing anything on fp32 FMAs.
         </li>
         <li>
-          <strong>Re-profile before choosing the next thing.</strong> The step has gone 46.8 → 40.2
-          ms, and the two largest costs both moved a lot, so the old ranking cannot be trusted.
-          This project is three-for-three on my intuitions losing to the profiler, and the honest
-          move is to measure the new distribution rather than guess which of layernorm, the bias
-          reductions or the remaining GEMM headroom is now on top.
+          <strong><s>Re-profile before choosing the next thing.</s></strong> — done, and it drove
+          the three sections above: the profile named the weight gradients, the weight gradients
+          exposed the split-K curve, and the curve&rsquo;s fix left the two epilogue fusions as
+          the largest non-GEMM lines standing. The step is now ~35 ms TF32 against the 46.8 that
+          list item was written at — with the caveat that absolute times drift a couple of percent
+          with how well the clock pin holds, which is why every claim above is an interleaved
+          ratio rather than a pair of numbers from different days.
+        </li>
+        <li>
+          <strong>What the profile says now:</strong> the backward matmuls, <code>dW</code> and{' '}
+          <code>dX</code>, are ~25% of a step each, and the cheap routes into both are measured
+          shut — the staging overlaps are blocked by shared memory on one side and the register
+          file on the other, and the split counts now sit on their measured curve. Attention&rsquo;s
+          backward is 14% at 2.2 TFLOP/s and remains the least tensor-core-shaped kernel in the
+          repo. Anything further here is a redesign, not a parameter.
         </li>
         <li>
           <strong><s>Multi-GPU</s></strong> — started, above. The collective is correct and cheap;
           the data-parallel driver is not yet good enough to profit from it. Two ranks need to
           genuinely overlap, which means one process per GPU or a step with no blocking calls left
-          in it.
+          in it. This is the next rented-cloud session.
         </li>
       </ol>
 

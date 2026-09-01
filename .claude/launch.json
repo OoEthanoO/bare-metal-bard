@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "writeup",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "site"],
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "set PATH=C:\\Program Files\\nodejs;%PATH%&& npm run dev --prefix site"],
       "port": 3000
     }
   ]
