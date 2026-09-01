@@ -221,8 +221,14 @@ __global__ void add_inplace_k(float *dst, const float *src, int n4) {
 // The forward bias used to live here as its own kernel. It now rides in the
 // GEMM epilogue (see gemm.h): a standalone pass reads and writes the entire
 // output tensor to do one add per element, and the step profile put the four
-// of them together at 8.2% of a training step. The backward stays, because a
-// column reduction is not something an epilogue can do -- it needs every row.
+// of them together at 8.2% of a training step.
+//
+// The backward now rides a GEMM too, but a different one and a different way:
+// a column reduction is not something an OUTPUT epilogue can do -- it needs
+// every row -- but the dW gemm's A staging touches every row of dY anyway, so
+// on the tensor-core path the sum accumulates there instead (see
+// GemmEpilogue::dbias_out). What is below is the fp32 path's reduction, and
+// the fallback for any shape the fused path declines.
 
 // dbias[c] = sum over all N rows of dout[n][c].
 //

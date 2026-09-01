@@ -395,22 +395,38 @@ void gpt_backward(GPT &g) {
                  0, ep);
         }
         PROF_END();
+        // Each weight-gradient gemm below is dW = dY^T @ X, and the layer's
+        // bias gradient is a column sum of the same dY along the same axis the
+        // gemm reduces over -- so on the tensor-core path it rides the gemm's
+        // A staging (see GemmEpilogue::dbias_out) and the standalone pass over
+        // dY disappears. The fp32 path keeps the separate reduction.
         PROF_BEGIN("GEMM bwd dW");
-        gemm(true, false, C, 4 * C, N, 1.0f, gr.dres, fch_gelu, 1.0f, dfpw);
+        GemmEpilogue epW1;
+        if (gemm_dbias_supported(true, false, C, 4 * C, N))
+            epW1.dbias_out = dfpb;
+        gemm(true, false, C, 4 * C, N, 1.0f, gr.dres, fch_gelu, 1.0f, dfpw, 0,
+             epW1);
         PROF_END();
-        PROF_BEGIN("bias backward");
-        bias_backward(dfpb, gr.dres, N, C);
-        PROF_END();
+        if (!epW1.dbias_out) {
+            PROF_BEGIN("bias backward");
+            bias_backward(dfpb, gr.dres, N, C);
+            PROF_END();
+        }
 
         PROF_BEGIN("GEMM bwd dX");
         gemm(false, false, N, C, 4 * C, 1.0f, gr.dfch, fcw, 0.0f, gr.dln2);
         PROF_END();
         PROF_BEGIN("GEMM bwd dW");
-        gemm(true, false, 4 * C, C, N, 1.0f, gr.dfch, ln2, 1.0f, dfcw);
+        GemmEpilogue epW2;
+        if (gemm_dbias_supported(true, false, 4 * C, C, N))
+            epW2.dbias_out = dfcb;
+        gemm(true, false, 4 * C, C, N, 1.0f, gr.dfch, ln2, 1.0f, dfcw, 0, epW2);
         PROF_END();
-        PROF_BEGIN("bias backward");
-        bias_backward(dfcb, gr.dfch, N, 4 * C);
-        PROF_END();
+        if (!epW2.dbias_out) {
+            PROF_BEGIN("bias backward");
+            bias_backward(dfcb, gr.dfch, N, 4 * C);
+            PROF_END();
+        }
 
         // Accumulates into gr.dres, turning d(residual3) into d(residual2).
         PROF_BEGIN("layernorm bwd");
@@ -423,11 +439,16 @@ void gpt_backward(GPT &g) {
         gemm(false, false, N, C, C, 1.0f, gr.dres, apw, 0.0f, gr.datty);
         PROF_END();
         PROF_BEGIN("GEMM bwd dW");
-        gemm(true, false, C, C, N, 1.0f, gr.dres, atty, 1.0f, dapw);
+        GemmEpilogue epW3;
+        if (gemm_dbias_supported(true, false, C, C, N))
+            epW3.dbias_out = dapb;
+        gemm(true, false, C, C, N, 1.0f, gr.dres, atty, 1.0f, dapw, 0, epW3);
         PROF_END();
-        PROF_BEGIN("bias backward");
-        bias_backward(dapb, gr.dres, N, C);
-        PROF_END();
+        if (!epW3.dbias_out) {
+            PROF_BEGIN("bias backward");
+            bias_backward(dapb, gr.dres, N, C);
+            PROF_END();
+        }
 
         // The fused backward reads the raw qkv and the attention output, both
         // already saved, and rebuilds the probabilities from lse. That is why
@@ -446,11 +467,16 @@ void gpt_backward(GPT &g) {
         gemm(false, false, N, C, 3 * C, 1.0f, gr.dqkv, qkvw, 0.0f, gr.dln1);
         PROF_END();
         PROF_BEGIN("GEMM bwd dW");
-        gemm(true, false, 3 * C, C, N, 1.0f, gr.dqkv, ln1, 1.0f, dqkvw);
+        GemmEpilogue epW4;
+        if (gemm_dbias_supported(true, false, 3 * C, C, N))
+            epW4.dbias_out = dqkvb;
+        gemm(true, false, 3 * C, C, N, 1.0f, gr.dqkv, ln1, 1.0f, dqkvw, 0, epW4);
         PROF_END();
-        PROF_BEGIN("bias backward");
-        bias_backward(dqkvb, gr.dqkv, N, 3 * C);
-        PROF_END();
+        if (!epW4.dbias_out) {
+            PROF_BEGIN("bias backward");
+            bias_backward(dqkvb, gr.dqkv, N, 3 * C);
+            PROF_END();
+        }
 
         // Accumulates again, turning d(residual2) into d(layer input).
         PROF_BEGIN("layernorm bwd");

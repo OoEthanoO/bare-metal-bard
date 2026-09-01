@@ -42,6 +42,26 @@ struct GemmEpilogue {
     // derivative is applied where the value is already in a register and the
     // separate pass disappears. Only the pre-activation has to be read.
     const float *dgelu_pre = nullptr;  // pre-activation, same shape as C
+
+    // The bias gradient, computed from data the GEMM already stages.
+    //
+    // Every weight gradient in the backward is dW = dY^T @ X -- a TN gemm with
+    // dY as the A operand -- and the bias gradient of the same layer is
+    // dbias[m] = sum_k dY[k][m]: a sum along exactly the K axis the gemm
+    // already iterates, over exactly the values its A staging already loads.
+    // As its own kernel that sum costs a full extra pass over dY (3.9% of a
+    // training step for the four of them); here it costs four FADDs per staged
+    // float4 in one block column, and no extra global reads at all.
+    //
+    // With this set, dbias_out[m] += sum over k of op(A)[m][k], accumulated in
+    // fp32 from the raw values (before any TF32 rounding), deterministically
+    // (fixed-order reductions, no atomics). alpha and beta do not apply to it.
+    //
+    // Only the tensor-core path implements it, and only for transA=true (the
+    // orientation backprop uses). Callers must check gemm_dbias_supported()
+    // and fall back to a separate reduction; a call that sets this where it is
+    // not supported aborts loudly rather than skipping the sum silently.
+    float *dbias_out = nullptr;  // length M, accumulated +=
 };
 
 void gemm(bool transA, bool transB, int M, int N, int K, float alpha,
@@ -76,3 +96,10 @@ int gemm_splitk();
 // False on pre-Ampere hardware, where the TF32 kernels are not compiled in
 // at all. gemm_set_tf32(true) is then a no-op rather than an error.
 bool gemm_tf32_available();
+
+// Whether a gemm with these arguments would honor GemmEpilogue::dbias_out.
+// True exactly when the tensor-core path will be taken (TF32 on, aligned
+// shape) with transA set. The caller uses this to decide between fusing the
+// bias gradient and running the standalone reduction -- the decision has to
+// live with the caller because the fallback kernel does.
+bool gemm_dbias_supported(bool transA, bool transB, int M, int N, int K);

@@ -350,6 +350,115 @@ int main(int argc, char **argv) {
         cudaFree(dA); cudaFree(dB); cudaFree(dC); cudaFree(dR);
     }
 
+    // ---- fused bias gradient (GemmEpilogue::dbias_out) ----
+    //
+    // dbias[m] = sum_k op(A)[m][k], accumulated += onto what is already there.
+    // The sum is taken from the raw fp32 values BEFORE any TF32 rounding, so
+    // the reference is an exact column sum and the bar is fp32 summation
+    // order (1e-4), far tighter than the matmul's TF32 bar. Three properties
+    // are checked per shape: the sum itself (against a double-precision CPU
+    // reference, += included), that C is still the correct matmul (the fusion
+    // must not disturb the output it rides on), and that two identical calls
+    // give bitwise-identical dbias -- this repo forbids gradients that depend
+    // on block scheduling order, so determinism is a spec, not a nicety.
+    printf("\nfused bias gradient (dbias_out), TN, vs CPU column sum\n");
+    printf("--------------------------------------------------------------------------\n");
+    if (!gemm_dbias_supported(true, false, 384, 1536, 4096)) {
+        printf("not available (needs --tf32 and the sm_80+ mma path) -- skipped\n");
+    } else {
+        struct DShape { int M, N, K, force_sp; const char *tag; };
+        const DShape dshapes[] = {
+            {384, 1536, 4096, 0, "dW fcproj-like, derived"},
+            {1536, 384, 4096, 0, "dW fc-like, derived"},
+            {1152, 384, 4096, 0, "dW qkv-like, derived"},
+            {384, 384, 4096, 0, "dW attnproj-like"},
+            {1536, 384, 384, 0, "K=384: never splits"},
+            {384, 1536, 4096, 1, "forced s=1"},
+            {384, 1536, 4096, 2, "forced s=2"},
+            {384, 1536, 4096, 5, "forced s=5"},
+            {256, 128, 128, 0, "tiny aligned"},
+        };
+        for (const DShape &s : dshapes) {
+            const size_t szA = (size_t)s.K * s.M;  // A stored K x M (transA)
+            const size_t szB = (size_t)s.K * s.N, szC = (size_t)s.M * s.N;
+            std::vector<float> hA(szA), hB(szB), hPre(s.M);
+            fill(hA, 0x7777u); fill(hB, 0x8888u);
+            for (int m = 0; m < s.M; ++m) hPre[m] = 0.25f * (m % 7) - 0.5f;
+
+            float *dA, *dB, *dC, *dR, *dDB;
+            CUDA_CHECK(cudaMalloc(&dA, szA * 4));
+            CUDA_CHECK(cudaMalloc(&dB, szB * 4));
+            CUDA_CHECK(cudaMalloc(&dC, szC * 4));
+            CUDA_CHECK(cudaMalloc(&dR, szC * 4));
+            CUDA_CHECK(cudaMalloc(&dDB, (size_t)s.M * 4));
+            CUDA_CHECK(cudaMemcpy(dA, hA.data(), szA * 4, cudaMemcpyHostToDevice));
+            CUDA_CHECK(cudaMemcpy(dB, hB.data(), szB * 4, cudaMemcpyHostToDevice));
+            CUDA_CHECK(cudaMemset(dC, 0, szC * 4));
+            CUDA_CHECK(cudaMemset(dR, 0, szC * 4));
+
+            gemm_set_splitk(s.force_sp);
+            GemmEpilogue ep;
+            ep.dbias_out = dDB;
+
+            std::vector<float> got1(s.M), got2(s.M), gotC(szC), refC(szC);
+            CUDA_CHECK(cudaMemcpy(dDB, hPre.data(), (size_t)s.M * 4,
+                                  cudaMemcpyHostToDevice));
+            gemm(true, false, s.M, s.N, s.K, 1.0f, dA, dB, 0.0f, dC, 0, ep);
+            CUDA_CHECK(cudaDeviceSynchronize());
+            CUDA_CHECK(cudaGetLastError());
+            CUDA_CHECK(cudaMemcpy(got1.data(), dDB, (size_t)s.M * 4,
+                                  cudaMemcpyDeviceToHost));
+            // Same prefill, same call: the gradient must come back bit for bit.
+            CUDA_CHECK(cudaMemcpy(dDB, hPre.data(), (size_t)s.M * 4,
+                                  cudaMemcpyHostToDevice));
+            gemm(true, false, s.M, s.N, s.K, 1.0f, dA, dB, 0.0f, dC, 0, ep);
+            CUDA_CHECK(cudaDeviceSynchronize());
+            CUDA_CHECK(cudaMemcpy(got2.data(), dDB, (size_t)s.M * 4,
+                                  cudaMemcpyDeviceToHost));
+            gemm_set_splitk(0);
+
+            gemm_ref(true, false, s.M, s.N, s.K, 1.0f, dA, dB, 0.0f, dR);
+            CUDA_CHECK(cudaDeviceSynchronize());
+            CUDA_CHECK(cudaMemcpy(gotC.data(), dC, szC * 4, cudaMemcpyDeviceToHost));
+            CUDA_CHECK(cudaMemcpy(refC.data(), dR, szC * 4, cudaMemcpyDeviceToHost));
+
+            // The error is judged against the sum of ABSOLUTE values, not the
+            // signed sum: a column whose terms nearly cancel has a tiny result
+            // sitting on a large accumulation, and fp32 rounding there is
+            // condition, not a bug. Against the absolute sum the noise floor
+            // is ~1e-7 and a single dropped or double-counted element is
+            // ~5e-4, so 1e-6 separates them by three orders each way.
+            double maxrel = 0;
+            for (int m = 0; m < s.M; ++m) {
+                double r = (double)hPre[m], asum = std::fabs((double)hPre[m]);
+                for (int k = 0; k < s.K; ++k) {
+                    const double a = (double)hA[(size_t)k * s.M + m];
+                    r += a;
+                    asum += std::fabs(a);
+                }
+                maxrel = std::max(maxrel, std::fabs((double)got1[m] - r) /
+                                              std::max(asum, 1e-3));
+            }
+            int bitdiff = 0;
+            for (int m = 0; m < s.M; ++m)
+                if (memcmp(&got1[m], &got2[m], 4) != 0) ++bitdiff;
+            double maxabs = 0, refinf = 0;
+            for (size_t i = 0; i < szC; ++i) {
+                maxabs = std::max(maxabs, std::fabs((double)gotC[i] - (double)refC[i]));
+                refinf = std::max(refinf, std::fabs((double)refC[i]));
+            }
+            const double crel = maxabs / std::max(refinf, 1e-30);
+
+            const bool ok = maxrel < 1e-6 && bitdiff == 0 && crel < TOL;
+            if (!ok) ++failures;
+            printf("%-22s %6d %6d %6d  %-6s %10.2e  %s%s%s\n", s.tag, s.M, s.N,
+                   s.K, "TN", maxrel, ok ? "ok" : "FAIL",
+                   bitdiff ? "  NONDETERMINISTIC" : "",
+                   crel >= TOL ? "  C-CORRUPTED" : "");
+            cudaFree(dA); cudaFree(dB); cudaFree(dC); cudaFree(dR); cudaFree(dDB);
+        }
+    }
+
     printf("--------------------------------------------------------------------------\n");
     printf("%s (%d failures)\n", failures ? "FAILED" : "all passed", failures);
     cublasDestroy(handle);

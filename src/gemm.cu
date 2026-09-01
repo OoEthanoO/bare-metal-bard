@@ -48,7 +48,7 @@ constexpr int WARPSIZE = 32;
 // 6% slower for carrying code it never executed. `if constexpr` makes the
 // unused branches -- and their instruction footprint -- actually disappear.
 namespace epi {
-constexpr int BIAS = 1, ADD = 2, GELU = 4, DGELU = 8;
+constexpr int BIAS = 1, ADD = 2, GELU = 4, DGELU = 8, DBIAS = 16;
 }
 
 // ---------------------------------------------------------------- fast path
@@ -583,6 +583,14 @@ __global__ __launch_bounds__(NUM_THREADS, MINB) void gemm_mma(
 
     float acc[WMITER][WNITER][2][4] = {};
 
+    // The bias-gradient accumulator. In the TA staging map each thread's
+    // float4 covers four consecutive m at one k, and the SAME four m-columns
+    // on every iteration -- off varies only the k row -- so one float4 of
+    // registers accumulates a thread's whole contribution across the K loop.
+    // Only the blockIdx.x == 0 column strip contributes; every other block
+    // column reads the same A rows and would count them again.
+    float4 dbAcc = {0.f, 0.f, 0.f, 0.f};
+
     for (int k0 = kBegin; k0 < kEnd; k0 += BK) {
 #pragma unroll
         for (int it = 0; it < aIters; ++it) {
@@ -594,6 +602,15 @@ __global__ __launch_bounds__(NUM_THREADS, MINB) void gemm_mma(
             const float4 v =
                 TA ? CVEC4(A[(size_t)(k0 + aRow + off) * M + cRow + aCol * 4])
                    : CVEC4(A[(size_t)(cRow + aRow + off) * K + k0 + aCol * 4]);
+            // Four FADDs on a value already in a register, in one block column
+            // of one instantiation. This is the entire marginal cost of the
+            // bias gradient's data pass.
+            if constexpr ((EPI & epi::DBIAS) != 0 && TA) {
+                if (blockIdx.x == 0) {
+                    dbAcc.x += v.x; dbAcc.y += v.y;
+                    dbAcc.z += v.z; dbAcc.w += v.w;
+                }
+            }
             const int unit = (k / MMA_K) * (BM / MMA_M) + m / MMA_M;
             const int base =
                 unit * UNIT + (((k % MMA_K) / 4) * 2 + ((m % MMA_M) / 8));
@@ -656,6 +673,35 @@ __global__ __launch_bounds__(NUM_THREADS, MINB) void gemm_mma(
                 }
         }
         __syncthreads();
+    }
+
+    // Fold the per-thread bias-gradient partials down to one value per m.
+    // As[] is free once the K loop's final barrier has passed, so it becomes
+    // the scratch: aStride rows of BM partials, summed in a fixed order by a
+    // fixed thread per column -- deterministic, like every reduction here.
+    //
+    // With K split, each z writes its own plane of a workspace and
+    // splitk_reduce_k sums the planes (also in fixed order); unsplit, this
+    // accumulates straight into the caller's dbias.
+    if constexpr ((EPI & epi::DBIAS) != 0 && TA) {
+        if (blockIdx.x == 0) {
+            float *scratch = As;
+            scratch[aRow * BM + aCol * 4 + 0] = dbAcc.x;
+            scratch[aRow * BM + aCol * 4 + 1] = dbAcc.y;
+            scratch[aRow * BM + aCol * 4 + 2] = dbAcc.z;
+            scratch[aRow * BM + aCol * 4 + 3] = dbAcc.w;
+            __syncthreads();
+            constexpr int R = NUM_THREADS / (BM / 4);  // = aStride when TA
+            for (int m = tid; m < BM; m += NUM_THREADS) {
+                float s = 0.f;
+#pragma unroll
+                for (int r = 0; r < R; ++r) s += scratch[r * BM + m];
+                if (gridDim.z > 1)
+                    ep.dbias_out[(size_t)blockIdx.z * M + cRow + m] = s;
+                else
+                    ep.dbias_out[cRow + m] += s;
+            }
+        }
     }
 
     // A lane's c0/c1 are adjacent columns, so the epilogue stores float2.
@@ -972,6 +1018,18 @@ __global__ void splitk_reduce_k(float *C, const float *partial, int N,
                                 size_t total, int splits, float alpha,
                                 float beta, GemmEpilogue ep) {
     const size_t i = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    // The bias-gradient planes sit after the C planes in the same workspace:
+    // one [M] row per split, written by the split kernel's block column zero.
+    // The first M threads of this grid fold them, which costs no extra launch.
+    if constexpr (EPI & epi::DBIAS) {
+        const size_t M = total / (unsigned)N;
+        if (i < M) {
+            const float *pb = partial + total * splits;
+            float s = 0.0f;
+            for (int sp = 0; sp < splits; ++sp) s += pb[(size_t)sp * M + i];
+            ep.dbias_out[i] += s;
+        }
+    }
     if (i >= total) return;
     float acc = 0.0f;
     for (int sp = 0; sp < splits; ++sp) acc += partial[sp * total + i];
@@ -1110,23 +1168,32 @@ void dispatch_epi(int M, int N, int K, float alpha, const float *A,
             static thread_local float *ws = nullptr;
             static thread_local size_t cap = 0;
             const size_t total = (size_t)M * N;
-            const size_t need = total * splits;
+            size_t need = total * splits;
+            // The bias gradient cannot wait for the reduction the way the C
+            // epilogue does -- it is computed from the A tiles, which only the
+            // split kernel sees. So DBIAS alone rides the split kernel, its
+            // per-split partials appended to the same workspace, and the
+            // reduction folds them.
+            constexpr int SEPI = EPI & epi::DBIAS;
+            if constexpr (SEPI) need += (size_t)M * splits;
             if (need > cap) {
                 if (ws) cudaFree(ws);
                 cudaMalloc(&ws, need * sizeof(float));
                 cap = need;
             }
             const int chunk = ((K / splits + bk - 1) / bk) * bk;
+            GemmEpilogue eps;
+            if constexpr (SEPI) eps.dbias_out = ws + total * splits;
             // The split kernels compute raw partials: alpha, beta and the
             // epilogue are applied once, by the reduction.
             if (narrow)
-                gemm_mma<TA, TB, SBM, SBN, SBK, SWM, SWN, STHREADS, SMINB, 0>
+                gemm_mma<TA, TB, SBM, SBN, SBK, SWM, SWN, STHREADS, SMINB, SEPI>
                     <<<g2, STHREADS, 0, stream>>>(M, N, K, 1.0f, A, B, 0.0f, ws,
-                                                  GemmEpilogue(), 0, chunk);
+                                                  eps, 0, chunk);
             else
-                gemm_mma<TA, TB, TBM, TBN, TBK, TWM, TWN, TTHREADS, TMINB, 0>
+                gemm_mma<TA, TB, TBM, TBN, TBK, TWM, TWN, TTHREADS, TMINB, SEPI>
                     <<<g2, TTHREADS, 0, stream>>>(M, N, K, 1.0f, A, B, 0.0f, ws,
-                                                  GemmEpilogue(), 0, chunk);
+                                                  eps, 0, chunk);
             splitk_reduce_k<EPI><<<(unsigned)((total + 255) / 256), 256, 0, stream>>>(
                 C, ws, N, total, splits, alpha, beta, ep);
         } else if (narrow) {
@@ -1158,19 +1225,21 @@ void dispatch_epi(int M, int N, int K, float alpha, const float *A,
 // an EPI mask that claims a feature the caller did not supply would dereference
 // a null pointer, so the mask must always describe the pointers exactly.
 //
-// DGELU is the ninth, and it is deliberately NOT crossed with the other three.
-// It exists for exactly one call -- the MLP's dX gemm, which has no bias, no
-// residual and no forward activation -- and crossing it would double every
-// instantiation in this file, across four transpose cases and two tiles, to
-// cover combinations nothing calls. The `default` below is what keeps that a
-// safe trade instead of a silent one: an unsupported combination aborts rather
-// than falling through and leaving C untouched.
+// DGELU and DBIAS are the ninth and tenth, and each is deliberately NOT
+// crossed with the others. DGELU exists for exactly one call -- the MLP's dX
+// gemm -- and DBIAS for the four weight-gradient gemms, none of which carries
+// any other epilogue. Crossing them would double every instantiation in this
+// file, across four transpose cases and two tiles, to cover combinations
+// nothing calls. The `default` below is what keeps that a safe trade instead
+// of a silent one: an unsupported combination aborts rather than falling
+// through and leaving C untouched.
 template <bool TA, bool TB>
 void dispatch(int M, int N, int K, float alpha, const float *A, const float *B,
               float beta, float *C, cudaStream_t stream, GemmEpilogue ep) {
     const int e = (ep.bias ? epi::BIAS : 0) | (ep.add ? epi::ADD : 0) |
                   (ep.gelu_out ? epi::GELU : 0) |
-                  (ep.dgelu_pre ? epi::DGELU : 0);
+                  (ep.dgelu_pre ? epi::DGELU : 0) |
+                  (ep.dbias_out ? epi::DBIAS : 0);
 #define CASE(m)                                                                    case (m):                                                                          dispatch_epi<TA, TB, (m)>(M, N, K, alpha, A, B, beta, C, stream, ep);          break;
     switch (e) {
         CASE(0)
@@ -1182,10 +1251,11 @@ void dispatch(int M, int N, int K, float alpha, const float *A, const float *B,
         CASE(epi::ADD | epi::GELU)
         CASE(epi::BIAS | epi::ADD | epi::GELU)
         CASE(epi::DGELU)
+        CASE(epi::DBIAS)
         default:
             fprintf(stderr,
                     "gemm: epilogue combination %d is not instantiated "
-                    "(DGELU is only supported on its own)\n", e);
+                    "(DGELU and DBIAS are only supported on their own)\n", e);
             abort();
     }
 #undef CASE
@@ -1195,6 +1265,18 @@ void dispatch(int M, int N, int K, float alpha, const float *A, const float *B,
 void gemm(bool transA, bool transB, int M, int N, int K, float alpha,
           const float *A, const float *B, float beta, float *C,
           cudaStream_t stream, GemmEpilogue ep) {
+    // A dbias_out the taken path would ignore is a silently missing gradient
+    // -- the worst failure mode this file knows -- so it dies here instead.
+    // Callers decide between fusing and the standalone reduction by asking
+    // gemm_dbias_supported() first.
+    if (ep.dbias_out && !gemm_dbias_supported(transA, transB, M, N, K)) {
+        fprintf(stderr,
+                "gemm: dbias_out set on an unsupported call "
+                "(transA=%d tf32=%d M=%d N=%d K=%d); check "
+                "gemm_dbias_supported() and fall back\n",
+                (int)transA, (int)gemm_tf32(), M, N, K);
+        abort();
+    }
     if (!transA && !transB)      dispatch<false, false>(M, N, K, alpha, A, B, beta, C, stream, ep);
     else if (!transA && transB)  dispatch<false, true >(M, N, K, alpha, A, B, beta, C, stream, ep);
     else if (transA && !transB)  dispatch<true,  false>(M, N, K, alpha, A, B, beta, C, stream, ep);
@@ -1208,6 +1290,21 @@ void gemm_set_tf32(bool on) {
     // Pre-Ampere: asking for TF32 is not an error, it just has no effect. The
     // caller gets fp32, which is what the hardware can do.
     (void)on;
+#endif
+}
+
+bool gemm_dbias_supported(bool transA, bool transB, int M, int N, int K) {
+    (void)transB;  // both B orientations work; the sum only touches A
+#if BMB_TF32 && !defined(GEMM_USE_WMMA)
+    // Mirrors the dispatch: this is true exactly when gemm_mma will run.
+    // TBM/TBN/TBK is the wide tile's alignment; the narrow tile only tightens
+    // the choice between the two, never the eligibility (SBM divides TBM).
+    // WMMA cannot see which register holds which column, so the comparison
+    // build reports false and pays the separate pass, as it should.
+    return g_tf32 && transA && M % TBM == 0 && N % TBN == 0 && K % TBK == 0;
+#else
+    (void)transA; (void)M; (void)N; (void)K;
+    return false;
 #endif
 }
 

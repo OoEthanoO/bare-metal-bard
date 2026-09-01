@@ -902,6 +902,78 @@ reproducibility claim is now accurate instead of flattering; and the tool that
 made me believe a 2.9× speedup carries the caveat that explains it.
 
 
+### The bias gradient was riding along the whole time
+
+*Measured on the 5070 Ti, sm_120, CUDA 13.3, on the native Windows toolchain
+(the first change built and measured there — the WSL and Windows builds agree
+to 0.13% on this card, so nothing above is invalidated). The 1200 MHz pin held
+~1150–1170 under sustained load this session, so absolute times run ~2% high
+against older numbers; every claim below is interleaved A/B in one session.*
+
+Every weight gradient in the backward is `dW = dY^T @ X` — a TN GEMM with dY
+as the A operand — and the bias gradient of the same layer is
+`dbias[m] = Σ_k dY[k][m]`: a sum along exactly the K axis that GEMM already
+iterates, over exactly the values its A staging already loads into registers.
+As its own kernel that sum cost 1.458 ms a step, reading 100 MB of dY that a
+GEMM launched microseconds earlier had already read.
+
+So `GemmEpilogue` gained a `dbias_out` slot. Blocks in one column strip of the
+grid — the others read the same rows of dY and would count them twice — add
+four FADDs per staged `float4`, fold their partials through shared memory
+after the K loop (reusing the operand tile's space, which is dead by then),
+and accumulate into the caller's `dbias`. Split-K was the obstacle the
+next-steps note worried about, and it turned out to be bookkeeping rather than
+a wall: each split writes its `[M]` partial row into the same workspace that
+already holds the C planes, and the split reduction folds them — same kernel,
+no extra launch, fixed order, so the gradient stays deterministic. That
+determinism is a spec here, not a nicety, and the unit test checks it the only
+way that means anything: two identical calls must return bitwise-identical
+gradients, at every split count.
+
+**The interesting cost is registers, and it rhymes with the wall the prefetch
+hit.** The narrow tile sits at its `__launch_bounds__` budget — 126 of 128
+registers, nothing spilled. Prefetching the next k-chunk wanted 48 more and
+bought a 176–284 byte stack frame, which cost 5–22%. The bias accumulator
+wants four:
+
+| narrow tile, TN | registers | spill |
+|---|---:|---:|
+| without `dbias_out` | 126 | 0 B |
+| with `dbias_out` | 128 | **4–8 B** |
+
+Four bytes of spill against the prefetch's hundreds, and it shows up in the
+measurement as about 1% on the dW region — the whole price of deleting a
+kernel that cost sixteen times that. Same wall, small enough toll to pay.
+
+Interleaved A/B, four rounds, TF32:
+
+| | prev | fused |
+|---|---:|---:|
+| ms/step | 37.1 / 36.6 / 36.5 / 36.5 | 35.3 / 35.4 / 35.3 / 35.3 |
+| median | **36.55** | **35.30** |
+
+**3.4% of a training step**, and the profiler names the mechanism: `bias
+backward` (1.458 ms) is gone from the profile entirely, and `GEMM bwd dW`
+absorbed it for 0.092 ms (8.834 → 8.926). A 1.458 ms kernel for 0.092 ms of
+epilogue — a 16× return, the same shape as the GELU backward's 26× below, and
+for the same reason: the value was already in a register next to a store that
+was already happening.
+
+The controls: the fp32 path takes the standalone reduction as before and
+matches the old build to every printed digit of loss and gradient norm. The
+TF32 trajectory matches to four decimals through step 20 and moves in the last
+digit by step 30, which is what a changed summation order does and all it does
+— the same signature the split-K change left. The fp32 gradient check still
+passes 16 of 16, and the fused path carries its own test now: column sums
+against a double-precision reference at nine shape/split combinations, judged
+against the sum of absolute values so that near-cancelling columns test the
+kernel rather than the condition number.
+
+What did *not* go: `layernorm bwd` (1.55 ms) computes the same kind of column
+reduction, but over `dY·x̂` rather than dY — a product the GEMM never stages —
+so it has no free ride to hitch. The remaining fusion candidate there would
+have to earn its complexity separately.
+
 ### The GELU backward did not need to exist either
 
 *Same session, same clock caveat as below.*
@@ -2315,10 +2387,14 @@ four scalar stores.
    making in a comment, and produced `tools/bench_nn.cu` — which then had to be
    annotated with why its own numbers disagreed with the step.
 
-   **Fusing them is still open.** `dbias` is a column sum of the same `dY` the
-   `dW` GEMM reduces over, along the same K axis, so a GEMM block already has
-   the values; the obstacle is that only the blocks in one column strip should
-   contribute, and split-K makes the bookkeeping worse.
+   ~~**Fusing them is still open.**~~ — the `dbias` half is
+   [done](#the-bias-gradient-was-riding-along-the-whole-time): it rides the
+   `dW` GEMM's A staging for four FADDs per staged `float4` and four bytes of
+   spill, and split-K turned out to be bookkeeping rather than a wall — the
+   per-split partials share the C-planes workspace and the existing reduction
+   folds them. **3.4% of a step**, deterministic by construction and by test.
+   The layernorm half stays unfused for a structural reason: its column sum is
+   over `dY·x̂`, a product no GEMM stages, so there is no free ride there.
 
 4. ~~**The N=384 tail.**~~ — [largely answered](#the-tile-rule-was-stale-and-my-explanation-for-it-was-wrong-twice),
    and not by anything specific to N=384: the two-tile rule was calibrated on a
