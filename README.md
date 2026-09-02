@@ -902,6 +902,44 @@ reproducibility claim is now accurate instead of flattering; and the tool that
 made me believe a 2.9× speedup carries the caveat that explains it.
 
 
+### The attention backward was starved of warps, not bandwidth
+
+*Measured on the 5070 Ti, sm_120, CUDA 13.3. The fused-kernel ratio is from
+`test_flash`, the region figure from `--profile`; both at an unpinned clock,
+so the numbers are ratios within one run and not step times. The pinned
+step-time A/B is the next measurement, not this one.*
+
+The fused attention backward was 14% of a step at about 60% of the forward's
+efficiency, and every tile sweep in this repo had assumed the reason was the
+usual one for this kernel: shared-memory traffic. The profile
+([`flash_ncu_tf32.txt`](bench/logs/flash_ncu_tf32.txt)) says otherwise. Both
+tensor-core backward kernels run at **8.3% theoretical occupancy** — 64-thread
+blocks, shared memory capping them at two per SM, four warps per SM in total
+— with compute at 28%, shared at 39%, DRAM at 16%, and a third of the stall
+cycles waiting on shared-memory loads that four warps cannot hide. The
+forward, at 25% occupancy, reaches twice the utilisation. The register limit
+would allow six blocks. Nothing is saturated; the kernel is simply alone.
+
+The cheapest way to double the warps without touching the footprint is to
+split each 16-key tile's *queries* across two warps: warp (kt, qh) computes
+S^T for its keys against its half of the query tile, accumulates dK and dV
+over that half, and the two halves are summed once per block through the
+Q/dO region after the loop is done with it — same lane mapping on both sides,
+so the reduction is a straight copy and add. `QSPLIT` is a template
+parameter, the config's thread count selects it, and the original two-warp
+kernel stays in the table as config 20 so the comparison is the same binary:
+
+| fused backward, `test_flash`, T=256 | ms | TFLOP/s | |
+|---|---:|---:|---:|
+| config 20: one warp per key tile (was the default) | 0.451 | 6270 | |
+| config 18: two warps per key tile | **0.361** | **7835** | **1.25×** |
+
+Error figures identical to the last digit, ragged shapes pass, and the TF32
+training trajectory matches the recorded one to every printed digit through
+step 30 — the two partial sums are added in a fixed order. In the step's
+region profile `attention bwd` went 3.129 → 2.646 ms (−15%). The dQ kernel
+sits at the same 8.3% for the same reason and is the next half of this.
+
 ### The bias gradient was riding along the whole time
 
 *Measured on the 5070 Ti, sm_120, CUDA 13.3, on the native Windows toolchain

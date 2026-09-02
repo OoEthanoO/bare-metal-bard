@@ -1230,21 +1230,38 @@ __global__ __launch_bounds__(NT) void flash_bwd_q_k(
 // Q and dO appear in two B layouts each, which is four staging passes off two
 // global reads. That is the whole reason this kernel wants BR = BC = 32: at 48
 // KB it keeps two blocks per SM, and at BR = 64 it would be 80 KB and one.
-template <int BR, int BC, int HS, int NT>
+//
+// QSPLIT WARPS PER KEY TILE. With one warp per 16-key tile a 32-key block is
+// two warps, and two blocks per SM is FOUR warps per SM: 8.3% occupancy. The
+// profile (bench/logs/flash_ncu_tf32.txt) says that is the whole story --
+// compute 28%, shared 39%, DRAM 16%, nothing saturated, 5.6 cycles per issue
+// with a third of the stalls waiting on shared memory, and the register limit
+// would allow six blocks. The forward, at 25% occupancy, reaches twice the
+// utilisation. So this kernel can also split each key tile's QUERIES across
+// QSPLIT warps: warp (kt, qh) computes S^T for its 16 keys against its share
+// of the query tile, accumulates dK/dV over that share, and the shares are
+// summed once per block through shared memory the loop has finished with.
+// Same footprint, twice the warps.
+template <int BR, int BC, int HS, int NT, int QSPLIT>
 __global__ __launch_bounds__(NT) void flash_bwd_kv_mma_k(
     float *__restrict__ dqkv, const float *__restrict__ qkv,
     const float *__restrict__ dout, const float *__restrict__ lse,
     const float *__restrict__ dsum, int T, int NH, float scale) {
     constexpr int NW = NT / WARPSIZE;
+    constexpr int KT = BC / MMA_M;   // 16-key tiles in the block
     constexpr int NR = BR / MMA_N;   // n-tiles of S^T, then k-chunks of P^T
+    constexpr int NRW = NR / QSPLIT; // ... of which this warp owns NRW
     constexpr int NO = HS / MMA_N;   // n-tiles of dK and dV
     constexpr int NK = HS / MMA_K;   // k-chunks of S^T
     constexpr int V4 = HS / 4;
 
-    static_assert(BC == MMA_M * NW, "one 16-key tile per warp");
+    static_assert(NW == KT * QSPLIT, "QSPLIT warps per 16-key tile");
+    static_assert(NR % QSPLIT == 0 && NRW % 2 == 0, "each warp owns whole 16-wide units");
     static_assert(BR % 16 == 0 && HS % 16 == 0, "B operands pack 16 wide");
     static_assert(BR % MMA_K == 0, "P^T's k chunks divide the query tile");
     static_assert(NT % V4 == 0, "staging tiles evenly");
+    static_assert(QSPLIT == 1 || (QSPLIT - 1) * KT * 2 * MMA_M * HS <= 4 * BR * HS,
+                  "the partial-sum scratch must fit in the Q/dO region");
 
     extern __shared__ float smem[];
     float *Ks = smem;                  // a_off<BC>(key, head dim)
@@ -1258,6 +1275,7 @@ __global__ __launch_bounds__(NT) void flash_bwd_kv_mma_k(
 
     const int tid = threadIdx.x;
     const int lane = tid % WARPSIZE, warp = tid / WARPSIZE;
+    const int kt = warp % KT, qh = warp / KT;  // this warp's key tile, query share
     const int g = lane >> 2, tq = lane & 3;
 
     const int bh = blockIdx.y, b = bh / NH, h = bh % NH;
@@ -1328,11 +1346,12 @@ __global__ __launch_bounds__(NT) void flash_bwd_kv_mma_k(
         }
         __syncthreads();
 
-        // S^T = K @ (Q/sqrt(hs))^T and dP^T = V @ dO^T.
-        float acc_s[NR][4] = {}, acc_p[NR][4] = {};
+        // S^T = K @ (Q/sqrt(hs))^T and dP^T = V @ dO^T, for this warp's share
+        // of the query tile: n-tiles qh*NRW .. qh*NRW+NRW-1.
+        float acc_s[NRW][4] = {}, acc_p[NRW][4] = {};
 #pragma unroll
         for (int kk = 0; kk < NK; ++kk) {
-            const int au = kk * (BC / MMA_M) + warp;
+            const int au = kk * KT + kt;
             const float4 kv4 = CVEC4(Ks[au * UNIT + (lane ^ a_swz<BC>(au)) * 4]);
             const float4 vv4 = CVEC4(Vs[au * UNIT + (lane ^ a_swz<BC>(au)) * 4]);
             const unsigned ak[4] = {to_tf32(kv4.x), to_tf32(kv4.y),
@@ -1340,8 +1359,8 @@ __global__ __launch_bounds__(NT) void flash_bwd_kv_mma_k(
             const unsigned av[4] = {to_tf32(vv4.x), to_tf32(vv4.y),
                                     to_tf32(vv4.z), to_tf32(vv4.w)};
 #pragma unroll
-            for (int jj = 0; jj < NR; jj += 2) {
-                const int bu = kk * (BR / 16) + jj / 2;
+            for (int jj = 0; jj < NRW; jj += 2) {
+                const int bu = kk * (BR / 16) + (qh * NRW + jj) / 2;
                 const float4 qv4 = CVEC4(Qb[bu * UNIT + (lane ^ b_swz<BR>(bu)) * 4]);
                 const float4 ov4 = CVEC4(dOb[bu * UNIT + (lane ^ b_swz<BR>(bu)) * 4]);
                 const unsigned bq[4] = {to_tf32(qv4.x), to_tf32(qv4.y),
@@ -1360,11 +1379,11 @@ __global__ __launch_bounds__(NT) void flash_bwd_kv_mma_k(
         // buys and costs: one LDS each instead of a register already in hand.
         // acc_s becomes P^T, acc_p becomes dS^T.
 #pragma unroll
-        for (int jj = 0; jj < NR; ++jj)
+        for (int jj = 0; jj < NRW; ++jj)
 #pragma unroll
             for (int i = 0; i < 4; ++i) {
-                const int rq = jj * MMA_N + 2 * tq + (i & 1);  // query in tile
-                const int kg = j0 + warp * MMA_M + g + 8 * (i >> 1);
+                const int rq = (qh * NRW + jj) * MMA_N + 2 * tq + (i & 1);  // query in tile
+                const int kg = j0 + kt * MMA_M + g + 8 * (i >> 1);
                 const int qg = i0 + rq;
                 const bool live = (qg < T) && (kg < T) && (kg <= qg);
                 const float p = live ? __expf(acc_s[jj][i] - lses[rq]) : 0.0f;
@@ -1375,13 +1394,13 @@ __global__ __launch_bounds__(NT) void flash_bwd_kv_mma_k(
         // dV += P^T @ dO and dK += dS^T @ Q, both with the A operand handed
         // over in registers.
 #pragma unroll
-        for (int jj = 0; jj < NR; ++jj) {
+        for (int jj = 0; jj < NRW; ++jj) {
             unsigned ap[4], ad[4];
             acc_to_a(acc_s[jj], ap, lane);
             acc_to_a(acc_p[jj], ad, lane);
 #pragma unroll
             for (int nn = 0; nn < NO; nn += 2) {
-                const int bu = jj * (HS / 16) + nn / 2;
+                const int bu = (qh * NRW + jj) * (HS / 16) + nn / 2;
                 const float4 ov4 = CVEC4(dOv[bu * UNIT + (lane ^ b_swz<HS>(bu)) * 4]);
                 const float4 qv4 = CVEC4(Qv[bu * UNIT + (lane ^ b_swz<HS>(bu)) * 4]);
                 const unsigned bo[4] = {to_tf32(ov4.x), to_tf32(ov4.y),
@@ -1396,10 +1415,43 @@ __global__ __launch_bounds__(NT) void flash_bwd_kv_mma_k(
         }
     }
 
+    // With the query tile split across warps, each key tile's dK/dV are spread
+    // over QSPLIT partial sums. Fold them into the qh == 0 warp through the
+    // Q/dO region, which the loop is done with: every lane writes the four
+    // values it holds per n-tile, and the same lane of the qh == 0 warp reads
+    // them back -- same fragment mapping, so no transposition anywhere.
+    if constexpr (QSPLIT > 1) {
+        float *scratch = Qb;
+        __syncthreads();
+        if (qh > 0) {
+            float *mine = scratch + ((qh - 1) * KT + kt) * (2 * NO * 4 * WARPSIZE);
+#pragma unroll
+            for (int nn = 0; nn < NO; ++nn) {
+                float4 a = make_float4(acc_dk[nn][0], acc_dk[nn][1], acc_dk[nn][2], acc_dk[nn][3]);
+                float4 c = make_float4(acc_dv[nn][0], acc_dv[nn][1], acc_dv[nn][2], acc_dv[nn][3]);
+                VEC4(mine[(2 * nn + 0) * 4 * WARPSIZE + lane * 4]) = a;
+                VEC4(mine[(2 * nn + 1) * 4 * WARPSIZE + lane * 4]) = c;
+            }
+        }
+        __syncthreads();
+        if (qh > 0) return;
+#pragma unroll
+        for (int s = 1; s < QSPLIT; ++s) {
+            const float *theirs = scratch + ((s - 1) * KT + kt) * (2 * NO * 4 * WARPSIZE);
+#pragma unroll
+            for (int nn = 0; nn < NO; ++nn) {
+                const float4 a = CVEC4(theirs[(2 * nn + 0) * 4 * WARPSIZE + lane * 4]);
+                const float4 c = CVEC4(theirs[(2 * nn + 1) * 4 * WARPSIZE + lane * 4]);
+                acc_dk[nn][0] += a.x; acc_dk[nn][1] += a.y; acc_dk[nn][2] += a.z; acc_dk[nn][3] += a.w;
+                acc_dv[nn][0] += c.x; acc_dv[nn][1] += c.y; acc_dv[nn][2] += c.z; acc_dv[nn][3] += c.w;
+            }
+        }
+    }
+
     // Q carried the scale, so dK needs no further multiply.
 #pragma unroll
     for (int u = 0; u < 2; ++u) {
-        const int kg = j0 + warp * MMA_M + g + 8 * u;
+        const int kg = j0 + kt * MMA_M + g + 8 * u;
         if (kg >= T) continue;
         float *dk = dqkv + ((size_t)b * T + kg) * 3 * C + C + h * HS;
         float *dv = dk + C;
@@ -1628,10 +1680,13 @@ bool launch_bwd(float *dqkv, float *dsum, const float *dout, const float *qkv,
                                                     rows);
     if constexpr (MMAKV) {
 #if BMB_TF32
-        // One 16-key tile per warp, so this kernel sets its own block size for
-        // the same reason the dQ one does.
-        constexpr int NTKV = BC * 2;
-        auto kv = flash_bwd_kv_mma_k<BR, BC, HS, NTKV>;
+        // The config's NT decides how many warps share a 16-key tile: BC*2
+        // threads is one warp per tile (the original), BC*4 is two, each
+        // taking half the queries. The block size follows from that.
+        static_assert(NT % (BC * 2) == 0, "NT must be a multiple of one warp per key tile");
+        constexpr int QSPLIT = NT / (BC * 2);
+        constexpr int NTKV = BC * 2 * QSPLIT;
+        auto kv = flash_bwd_kv_mma_k<BR, BC, HS, NTKV, QSPLIT>;
         static thread_local bool kv_conf = false;
         if (!kv_conf) {
             if (cudaFuncSetAttribute(kv, cudaFuncAttributeMaxDynamicSharedMemorySize,
@@ -1749,8 +1804,10 @@ static int g_bwd_override = -1;
     X(15, 32, 64, 128, 4, 4, 8, 4, 4, 4, 8, 1, 0, "br32 bc64 t128 c8 mma-q")       \
     X(16, 32, 32, 128, 4, 2, 4, 4, 4, 4, 0, 1, 0, "br32 bc32 t128 mma-q")         \
     X(17, 32, 32, 128, 4, 2, 4, 4, 4, 4, 16, 1, 0, "br32 bc32 t128 c16 mma-q")    \
-    X(18, 32, 32, 128, 4, 2, 4, 4, 4, 4, 0, 1, 1, "br32 bc32 mma-q mma-kv")     \
-    X(19, 32, 32, 128, 4, 2, 4, 4, 4, 4, 0, 0, 1, "br32 bc32 mma-kv only")
+    X(18, 32, 32, 128, 4, 2, 4, 4, 4, 4, 0, 1, 1, "br32 bc32 mma-q mma-kv w2")  \
+    X(19, 32, 32, 128, 4, 2, 4, 4, 4, 4, 0, 0, 1, "br32 bc32 mma-kv only w2")   \
+    X(20, 32, 32, 64, 4, 2, 4, 4, 4, 4, 0, 1, 1, "br32 bc32 mma-q mma-kv w1")   \
+    X(21, 32, 32, 64, 4, 4, 4, 4, 4, 4, 0, 0, 1, "br32 bc32 mma-kv only w1")
 
 // KVC == 0 in the table means "no chunking"; it becomes HS here so that the
 // unchunked configs keep taking the stage-once path bit for bit.
