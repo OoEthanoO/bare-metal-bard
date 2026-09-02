@@ -90,9 +90,13 @@ log "correctness gate: attention, gradients, and the two-rank config that produc
 ./bench/test_flash 2>&1 | tail -3
 ./bench/test_grad 2>&1 | tail -2
 ./scripts/get_data.sh >/dev/null 2>&1 || true
-for i in 1 2 3; do
-  echo "--- 2 ranks, B=16, attempt $i (step 1 must read loss ~4.28, |g| ~15) ---"
-  ./bench/train_gpt -n 10 --gpus 2 --eval 10000 --sample 10000 --len 0 2>&1 | grep -E "^step +(1|10)/|^links"
+# Twelve short attempts, because the residual anomaly (one run in nine read
+# step-1 loss 4.2701 / |g| 32.75 instead of 4.2783 / 15.023) needs a rate,
+# a rank, and a phase. --ddp-trace prints each rank's own loss and checksums
+# the gradient across ranks after the all-reduce.
+for i in $(seq 1 12); do
+  echo "--- 2 ranks, B=16, attempt $i (step 1 must read loss 4.2783, |g| 15.023) ---"
+  ./bench/train_gpt -n 3 --gpus 2 --ddp-trace --eval 10000 --sample 10000 --len 0 2>&1     | grep -E "^step +1/|rank losses|post-allreduce" | head -3
 done
 
 log "single-GPU sanity: the matmul still is what it was"

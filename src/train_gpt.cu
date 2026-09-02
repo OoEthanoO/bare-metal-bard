@@ -542,6 +542,15 @@ int main(int argc, char **argv) {
         }
         double loss_sum = 0.0;
         for (int r = 0; r < nranks; ++r) loss_sum += rank_loss[r];
+        // One two-device run in nine read a different step-1 loss with the
+        // same seed and data, which means one rank's forward differed before
+        // any communication. Naming the rank is the first step to naming the
+        // cause, so the per-rank losses are printed alongside the trace.
+        if (ddp_trace && nranks > 1 && (step % 10 == 0 || step == 1)) {
+            printf("  rank losses");
+            for (int r = 0; r < nranks; ++r) printf("  %d:%.4f", r, rank_loss[r]);
+            printf("\n");
+        }
         const float loss = (float)(loss_sum / nranks);
         // Without this the compute/communication split is a lie: the backward
         // pass is still running on each device's default stream, and because
@@ -559,6 +568,22 @@ int main(int argc, char **argv) {
         for (int r = 0; r < nranks; ++r) gbufs[r] = reps[r].grads_mem;
         ddp_allreduce(ddp, gbufs.data(), g.num_params);
         const auto t_comm = std::chrono::steady_clock::now();
+        // After a correct all-reduce every rank holds the same bytes. Under
+        // --ddp-trace, say so or say which rank disagrees: a cheap checksum
+        // per rank, read back and compared on the host.
+        if (ddp_trace && nranks > 1 && (step % 10 == 0 || step == 1)) {
+            std::vector<double> sums(nranks);
+            for (int r = 0; r < nranks; ++r) {
+                cudaSetDevice(devs[r]);
+                sums[r] = grad_global_norm(reps[r].grads_mem, (int)reps[r].num_params);
+            }
+            cudaSetDevice(devs[0]);
+            bool same = true;
+            for (int r = 1; r < nranks; ++r) same = same && (sums[r] == sums[0]);
+            printf("  post-allreduce |g| per rank");
+            for (int r = 0; r < nranks; ++r) printf("  %d:%.6f", r, sums[r]);
+            printf("  %s\n", same ? "(identical)" : "(MISMATCH)");
+        }
 
         // Global-norm clipping: rescale the whole gradient vector so its L2
         // norm is at most grad_clip. Rescaling globally rather than per-tensor

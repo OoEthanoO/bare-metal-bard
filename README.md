@@ -2452,6 +2452,106 @@ four scalar stores.
 
    **The missing time has now been found, and it was hiding in a place no GPU
    profile could see.** The per-step worker threads were created fresh every
+   step — and every per-device cache in this codebase (`reduce_mean`'s pinned
+   scalar, the split-K workspace, the bias-backward partials) is
+   `thread_local` precisely so each rank gets its own buffer on its own
+   device. A thread that lives for one step defeats every one of those caches
+   at once: the new thread sees `nullptr` and pays `cudaMalloc` and
+   `cudaMallocHost` again — the latter pins pages under a process-wide lock,
+   so the ranks serialize on the host — and the dying thread leaks the old
+   allocations. The single-rank path never paid this because it runs on the
+   main thread, whose `thread_local`s persist. The fix is one persistent
+   worker per rank, woken twice a step (`RankPool` in
+   [`train_gpt.cu`](src/train_gpt.cu)). On the one-GPU rehearsal it took host
+   overhead from ~3 ms/step to ~0.4, and the prediction put on record before
+   renting anything was that 2×A40 would land near 41 ms + comm for the B=32
+   batch that had measured 149.
+
+   **It took two rentals and one more bug to get there.** The first run came
+   back at **91.3 ms** — right direction, wrong magnitude — and one two-rank
+   run in three produced a garbage forward on rank 1 *before any
+   communication*. Same species of bug, two more instances: `grad_global_norm`
+   cached its scratch in a plain `static`, so the rank that lost the
+   allocation race read device 0's memory from device 1; and every flash
+   launcher guarded its `cudaFuncSetAttribute` with a process-wide flag, but
+   kernel attributes are **per device**, so whichever rank configured first
+   won and the other's launches exceeded the default 48 KB and failed. Both
+   are `thread_local` now, like everything else. The peer-to-peer probe also
+   got caught trusting four bytes: three runs on one host gave three different
+   verdicts, and the run where one direction "passed" ran a mixed ring at
+   105 ms of comm. It now moves a megabyte of pattern three times and stages
+   the whole ring if any pair fails.
+
+   Then, [`bench/logs/multigpu_a40_run3.txt`](bench/logs/multigpu_a40_run3.txt),
+   2×A40, every transfer staged through host memory:
+
+   | | before | after |
+   |---|---:|---:|
+   | 1 rank, B=32 | 77.5 ms | 59.9 ms |
+   | 2 ranks, B=32, threads per step | **149.1 ms** | — |
+   | 2 ranks, B=32, persistent workers | — | 91.3 ms |
+   | 2 ranks, B=32, + per-device caches | — | **40.2 ms** (comm 7.5) |
+
+   **Two GPUs are 1.49× faster than one, at 203,800 tok/s**, and the
+   prediction — 41 ms plus comm — came in at 40.2 *including* comm. Loss and
+   gradient norm match the single-rank B=32 run to every printed digit. The
+   host-thread trace (`--ddp-trace`) accounts for the whole step: forward 7.8,
+   backward 23.9, optimizer 0.6, communication 7.5. And with the host loop
+   gone, **communication is the largest non-compute line at 18.7%** — 6.2 GB/s
+   through host memory on a box whose PCIe P2P is advertised and broken. So
+   "communication becomes the bottleneck" is true after all, but only after
+   sixty milliseconds of something that was not communication had been
+   removed from in front of it — which is exactly why the measurement, not
+   the lesson, had to come first.
+
+   One anomaly is open and recorded rather than hidden: in one of nine
+   two-device runs, step 1 read loss 4.2701 and |g| 32.75 instead of 4.2783
+   and 15.023 — a forward that differed on one rank before any communication,
+   with a different signature from the bug above. The next run prints each
+   rank's loss and checksums the gradient across ranks after the all-reduce,
+   so it can be localized rather than argued about.
+
+3. ~~**Fuse attention** (FlashAttention-style)~~ â€” [done](#fused-attention-the-score-matrix-never-exists).
+   Forward is 3.40x and activation memory is down 30%. The backward is only
+   1.19x, `ncu` says shared-memoryâ†’register traffic, and the indicated cure â€”
+   a bigger register tile â€” is **already in the config table and loses**:
+
+   | config | shared loads/FMA | blocks/SM | time |
+   |---|---:|---:|---:|
+   | 5 (default) | 0.75 | 2 | **1.61 ms** |
+   | 6 | 0.50 | 1 | 2.01 ms |
+
+   A third less shared-memory work per unit of arithmetic, 25% slower, because
+   the wider key tile costs the second resident block. Every arrangement that
+   improves the ratio spends shared memory to get it, so on this kernel the
+   block count is worth more â€” the opposite of what the identical counter
+   reading meant for kernel 7. A profile says which resource is saturated, not
+   which change is affordable. Getting both would need the head dimension
+   chunked so the tile and the block count stop competing â€” [now
+   measured](#chunking-the-head-dimension-and-the-bug-that-made-it-look-four-times-better):
+   the chunking works and the block comes back, and it buys 0.4â€“3.5% rather than
+   the 8â€“10% the first, miscontrolled sweep claimed. See item 3.
+4. **Multi-GPU** â€” started, and the first measurements are in
+   [`bench/logs/multigpu_a40.txt`](bench/logs/multigpu_a40.txt). A ring
+   all-reduce written from scratch (no NCCL), data-parallel training behind
+   `--gpus N`, run on 2x A40. Two findings, neither the expected one:
+
+   **Peer-to-peer was advertised and did not work.** Every `cudaMemcpyPeerAsync`
+   returned success, every sync returned success, and the bytes never arrived â€”
+   PCIe ACS/IOMMU misconfiguration on a virtualised host. Silent: the collective
+   produced wrong gradients at full speed. `ddp_init` now sends four bytes across
+   each enabled pair and checks they land before trusting it.
+
+   **Communication is 6% of a step, and two GPUs are still 1.9x slower than
+   one.** The wire is fine; the host loop is not. One process driving both
+   devices, with blocking calls inside the step, keeps them from overlapping.
+   Giving each rank its own thread helped (159 -> 149 ms) and is not enough.
+   "Communication becomes the bottleneck" is the lesson everyone quotes, and it
+   is not what the measurement says â€” which is exactly why it was worth
+   measuring.
+
+   **The missing time has now been found, and it was hiding in a place no GPU
+   profile could see.** The per-step worker threads were created fresh every
    step â€” and every per-device cache in this codebase (`reduce_mean`'s pinned
    scalar, the split-K workspace, the bias-backward partials) is
    `thread_local` precisely so each rank gets its own buffer on its own

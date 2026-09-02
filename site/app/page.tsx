@@ -1719,16 +1719,23 @@ run1 2.7130  run2 2.7135  DIFFERS`}</pre>
           repo. Anything further here is a redesign, not a parameter.
         </li>
         <li>
-          <strong><s>Multi-GPU</s></strong> — started, above, and the missing time has now been
-          found in a place no GPU profile could see: the per-step worker threads were created
-          fresh each step, and every per-device cache in the codebase is{' '}
-          <code>thread_local</code> — deliberately, so each rank gets its own buffer on its own
-          device. A thread that lives for one step defeats every one of those caches at once,
-          paying <code>cudaMallocHost</code> under a process-wide lock each step and leaking the
-          old allocations as the thread dies. One persistent worker per rank fixes it; on the
-          one-GPU rehearsal the host overhead went from ~3 ms/step to ~0.4 and the books now
-          balance exactly. The prediction on record for the next rented session: 2×A40 lands near
-          41 ms + comm for the global batch that measured 149 before.
+          <strong><s>Multi-GPU</s></strong> — done, in the sense that matters: the missing time was
+          found in places no GPU profile could see, and it took three bugs of one species. The
+          per-step worker threads were created fresh each step, and every per-device cache in the
+          codebase is <code>thread_local</code> — deliberately — so a one-step thread paid{' '}
+          <code>cudaMallocHost</code> under a process-wide lock every step and leaked as it died.
+          Persistent workers took 2×A40 from 149 to 91 ms. Then two more: a gradient-norm scratch
+          in a plain <code>static</code> that one rank read from the wrong device, and flash
+          kernels whose shared-memory opt-in was guarded per process when kernel attributes are
+          per <em>device</em>. With those fixed, the B=32 step is <strong>40.2 ms</strong> against
+          59.9 on one GPU — 1.49× on two, loss and gradient norm identical to every digit, and the
+          prediction on record (41 ms plus comm) came in at 40.2 including it. Communication is
+          now the largest non-compute line at 18.7%, staged through host memory because this
+          host&rsquo;s PCIe peer-to-peer is advertised and broken. &ldquo;Communication becomes the
+          bottleneck&rdquo; turned out to be true — after sixty milliseconds of something that was
+          not communication had been removed from in front of it. One anomaly stays open: one run
+          in nine reads a different step-1 loss on one rank, and the next run is instrumented to
+          name the rank.
         </li>
       </ol>
 

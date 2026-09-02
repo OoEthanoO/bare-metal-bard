@@ -1,0 +1,252 @@
+
+=== prerequisites ===
+ok
+
+=== machine ===
+Wed Sep  2 13:27:12 UTC 2026
+index, name, compute_cap, memory.total [MiB], pcie.link.gen.max, pcie.link.width.max
+0, NVIDIA A40, 8.6, 46068 MiB, 4, 16
+1, NVIDIA A40, 8.6, 46068 MiB, 4, 16
+GPUs: 2
+
+=== interconnect topology ===
+	[4mGPU0	GPU1	NIC0	NIC1	CPU Affinity	NUMA Affinity	GPU NUMA ID[0m
+GPU0	 X 	PXB	SYS	SYS	0-23,48-71	0		N/A
+GPU1	PXB	 X 	SYS	SYS	0-23,48-71	0		N/A
+NIC0	SYS	SYS	 X 	PIX				
+NIC1	SYS	SYS	PIX	 X 				
+
+Legend:
+
+  X    = Self
+  SYS  = Connection traversing PCIe as well as the SMP interconnect between NUMA nodes (e.g., QPI/UPI)
+  NODE = Connection traversing PCIe as well as the interconnect between PCIe Host Bridges within a NUMA node
+  PHB  = Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)
+  PXB  = Connection traversing multiple PCIe bridges (without traversing the PCIe Host Bridge)
+  PIX  = Connection traversing at most a single PCIe bridge
+  NV#  = Connection traversing a bonded set of # NVLinks
+
+NIC Legend:
+
+  NIC0: rocep177s0f0
+  NIC1: rocep177s0f1
+
+
+=== peer access -- read this before anything else ===
+GeForce cards (4090/3090) have peer-to-peer DISABLED in the driver, so
+every transfer is staged through host memory. Datacenter cards (A40,
+L40S, A100) allow direct PCIe P2P. Which one this is changes what the
+numbers below mean, so it is measured rather than assumed.
+  0 -> 1: OK
+  1 -> 0: OK
+
+=== build ===
+Cuda compilation tools, release 12.8, V12.8.93
+Build cuda_12.8.r12.8/compiler.35583870_0
+compiling with -j96; nvcc is slow, give it ~2 minutes
+nvcc  -arch=sm_86 -DBMB_TF32=1 -O3 -lineinfo -std=c++17 -Xcompiler -pthread -Xcompiler -Wall -Xcompiler -Wno-unused-function tools/test_ddp.cu src/ddp.cu -o bench/test_ddp
+nvcc  -arch=sm_86 -DBMB_TF32=1 -O3 -lineinfo -std=c++17 -Xcompiler -pthread -Xcompiler -Wall -Xcompiler -Wno-unused-function src/train_gpt.cu src/gpt.cu src/gemm.cu src/bgemm.cu src/nn.cu src/attention.cu src/flash.cu src/ddp.cu -o bench/train_gpt
+nvcc  -arch=sm_86 -DBMB_TF32=1 -O3 -lineinfo -std=c++17 -Xcompiler -pthread -Xcompiler -Wall -Xcompiler -Wno-unused-function src/bench.cu src/registry.cu src/kernels/k01_naive.cu src/kernels/k02_coalesced.cu src/kernels/k03_smem.cu src/kernels/k04_tile1d.cu src/kernels/k05_tile2d.cu src/kernels/k06_vectorized.cu src/kernels/k07_warptile.cu src/kernels/k08_doublebuffer.cu src/kernels/k09_tensorcore.cu src/kernels/k10_mma.cu src/kernels/k11_cpasync.cu -o bench/sgemm -lcublas
+nvcc  -arch=sm_86 -DBMB_TF32=1 -O3 -lineinfo -std=c++17 -Xcompiler -pthread -Xcompiler -Wall -Xcompiler -Wno-unused-function tools/test_flash.cu src/flash.cu src/attention.cu src/bgemm.cu src/gemm.cu -o bench/test_flash
+nvcc  -arch=sm_86 -DBMB_TF32=1 -O3 -lineinfo -std=c++17 -Xcompiler -pthread -Xcompiler -Wall -Xcompiler -Wno-unused-function tools/test_grad.cu src/gpt.cu src/gemm.cu src/bgemm.cu src/nn.cu src/attention.cu src/flash.cu src/ddp.cu -o bench/test_grad
+src/gemm.cu(288): warning #177-D: variable "<unnamed>::TC_M" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+src/gemm.cu(288): warning #177-D: variable "<unnamed>::TC_N" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                           ^
+
+src/gemm.cu(288): warning #177-D: variable "<unnamed>::TC_K" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                                      ^
+
+src/gemm.cu(961): warning #177-D: variable "<unnamed>::NARROW_TILE_AI" was declared but never referenced
+  constexpr double NARROW_TILE_AI = (double)SBM * SBN / (2.0 * (SBM + SBN));
+                   ^
+
+src/gemm.cu(1002): warning #177-D: function "<unnamed>::epilogue_only_k" was declared but never referenced
+  __attribute__((global)) void epilogue_only_k(float *C, GemmEpilogue ep, int N, size_t total) {
+                               ^
+
+src/gemm.cu(288): warning #177-D: variable "<unnamed>::TC_M" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+src/gemm.cu(288): warning #177-D: variable "<unnamed>::TC_N" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                           ^
+
+src/gemm.cu(288): warning #177-D: variable "<unnamed>::TC_K" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                                      ^
+
+src/gemm.cu(961): warning #177-D: variable "<unnamed>::NARROW_TILE_AI" was declared but never referenced
+  constexpr double NARROW_TILE_AI = (double)SBM * SBN / (2.0 * (SBM + SBN));
+                   ^
+
+src/gemm.cu(1002): warning #177-D: function "<unnamed>::epilogue_only_k" was declared but never referenced
+  __attribute__((global)) void epilogue_only_k(float *C, GemmEpilogue ep, int N, size_t total) {
+                               ^
+
+src/gemm.cu(288): warning #177-D: variable "<unnamed>::TC_M" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+src/gemm.cu(288): warning #177-D: variable "<unnamed>::TC_N" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                           ^
+
+src/gemm.cu(288): warning #177-D: variable "<unnamed>::TC_K" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                                      ^
+
+src/gemm.cu(961): warning #177-D: variable "<unnamed>::NARROW_TILE_AI" was declared but never referenced
+  constexpr double NARROW_TILE_AI = (double)SBM * SBN / (2.0 * (SBM + SBN));
+                   ^
+
+src/gemm.cu(1002): warning #177-D: function "<unnamed>::epilogue_only_k" was declared but never referenced
+  __attribute__((global)) void epilogue_only_k(float *C, GemmEpilogue ep, int N, size_t total) {
+                               ^
+
+
+=== correctness gate: attention, gradients, and the two-rank config that produced NaN ===
+  B=5   T=200   C=128  NH=4  (hs=32)   out 1.49e-07   dqkv 3.12e-07  ok
+
+fastest config: mma br128 bc32 t256 (0.080 ms)
+
+gradient check passed (16 checked, 0 failures)
+--- 2 ranks, B=16, attempt 1 (step 1 must read loss ~4.28, |g| ~15) ---
+links     NO peer access -- every transfer staged through host memory
+step     1/10  loss 4.2783  lr 1.00e-05  |g| 15.023    82.9 ms    49391 tok/s   3549 GFLOP/s  comm  17.1 ms (20.6%)
+step    10/10  loss 3.0931  lr 1.00e-04  |g| 4.977    27.2 ms   150531 tok/s  10815 GFLOP/s  comm   7.6 ms (28.0%)
+--- 2 ranks, B=16, attempt 2 (step 1 must read loss ~4.28, |g| ~15) ---
+links     NO peer access -- every transfer staged through host memory
+step     1/10  loss 4.2783  lr 1.00e-05  |g| 15.023    82.8 ms    49439 tok/s   3552 GFLOP/s  comm  17.1 ms (20.7%)
+step    10/10  loss 3.0931  lr 1.00e-04  |g| 4.977    27.3 ms   150059 tok/s  10781 GFLOP/s  comm   7.6 ms (27.8%)
+--- 2 ranks, B=16, attempt 3 (step 1 must read loss ~4.28, |g| ~15) ---
+links     NO peer access -- every transfer staged through host memory
+step     1/10  loss 4.2783  lr 1.00e-05  |g| 15.023   223.8 ms    18302 tok/s   1315 GFLOP/s  comm  53.9 ms (24.1%)
+step    10/10  loss 3.0931  lr 1.00e-04  |g| 4.977    27.1 ms   151259 tok/s  10868 GFLOP/s  comm   7.4 ms (27.4%)
+
+=== single-GPU sanity: the matmul still is what it was ===
+could not pin clock (fine; ratios still hold, absolutes are noisier)
+----------------------------------------------------------------------------------------------------
+8    dbuffer                        4096     20207.2     19111.2     22588.1    89.5%  6.2e-08   ok
+9    tensorcore                     4096     33928.7     31573.2     22591.4   150.2%  2.4e-04   ok
+
+=== ring all-reduce: correctness, then the wire ===
+2 CUDA device(s) present
+
+ring all-reduce correctness:
+  n=1  count=1          worst rel err 0.00e+00  ok
+  n=1  count=3          worst rel err 0.00e+00  ok
+  n=1  count=17         worst rel err 0.00e+00  ok
+  n=1  count=1000       worst rel err 0.00e+00  ok
+  n=1  count=65537      worst rel err 0.00e+00  ok
+  n=1  count=1048576    worst rel err 0.00e+00  ok
+  n=2  count=1          worst rel err 0.00e+00  ok
+  n=2  count=3          worst rel err 5.89e-08  ok
+  n=2  count=17         worst rel err 5.89e-08  ok
+  n=2  count=1000       worst rel err 5.95e-08  ok
+  n=2  count=65537      worst rel err 5.95e-08  ok
+  n=2  count=1048576    worst rel err 5.95e-08  ok
+  n=3  count=1          worst rel err 0.00e+00  ok
+  n=3  count=3          worst rel err 7.46e-08  ok
+  n=3  count=17         worst rel err 6.27e-08  ok
+  n=3  count=1000       worst rel err 1.09e-07  ok
+  n=3  count=65537      worst rel err 1.12e-07  ok
+  n=3  count=1048576    worst rel err 1.12e-07  ok
+  n=4  count=1          worst rel err 0.00e+00  ok
+  n=4  count=3          worst rel err 4.44e-08  ok
+  n=4  count=17         worst rel err 6.38e-08  ok
+  n=4  count=1000       worst rel err 9.44e-08  ok
+  n=4  count=65537      worst rel err 1.33e-07  ok
+  n=4  count=1048576    worst rel err 1.33e-07  ok
+  n=8  count=1          worst rel err 1.59e-08  ok
+  n=8  count=3          worst rel err 1.59e-08  ok
+  n=8  count=17         worst rel err 1.17e-07  ok
+  n=8  count=1000       worst rel err 1.67e-07  ok
+  n=8  count=65537      worst rel err 1.72e-07  ok
+  n=8  count=1048576    worst rel err 1.72e-07  ok
+
+ddp       2 rank(s) on device(s) 0 1
+links     NO peer access -- every transfer staged through host memory
+
+all-reduce of 43.2 MB across 2 ranks
+  best               6.942 ms
+  reduce-scatter     3.689 ms
+  all-gather         3.561 ms
+  moved/device        43.2 MB
+  effective link       6.2 GB/s
+
+A training step here is ~86 ms. This collective is 8.1% of that.
+
+all correctness checks passed
+
+=== data-parallel training, 1 rank ===
+total     0.81 GB resident (params+grads+adam+activations+scratch)
+step     1/40  loss 4.2783  lr 1.00e-05  |g| 15.023    71.1 ms    57606 tok/s   4139 GFLOP/s
+step    10/40  loss 3.0931  lr 1.00e-04  |g| 4.977    32.4 ms   126515 tok/s   9090 GFLOP/s
+step    20/40  loss 2.7512  lr 2.00e-04  |g| 1.732    32.4 ms   126403 tok/s   9082 GFLOP/s
+step    30/40  loss 2.6080  lr 3.00e-04  |g| 1.184    32.3 ms   126716 tok/s   9104 GFLOP/s
+step    40/40  loss 2.5970  lr 4.00e-04  |g| 1.809    32.4 ms   126580 tok/s   9094 GFLOP/s
+
+final  train loss 2.5756   val loss 2.6016   (20 batches each)
+
+=== data-parallel training, 2 ranks ===
+total     0.49 GB resident (params+grads+adam+activations+scratch)
+ddp       2 rank(s) on device(s) 0 1
+links     NO peer access -- every transfer staged through host memory
+step     1/40  loss 4.2701  lr 1.00e-05  |g| 32.750    82.5 ms    49621 tok/s   3565 GFLOP/s  comm  16.9 ms (20.5%)
+step    10/40  loss 3.1531  lr 1.00e-04  |g| 10.424    27.1 ms   151052 tok/s  10853 GFLOP/s  comm   7.5 ms (27.7%)
+step    20/40  loss 2.8906  lr 2.00e-04  |g| 9.638    27.1 ms   151104 tok/s  10856 GFLOP/s  comm   7.4 ms (27.4%)
+step    30/40  loss 2.7178  lr 3.00e-04  |g| 7.629    27.2 ms   150504 tok/s  10813 GFLOP/s  comm   7.4 ms (27.3%)
+step    40/40  loss 2.6376  lr 4.00e-04  |g| 2.401    27.1 ms   150869 tok/s  10840 GFLOP/s  comm   7.5 ms (27.6%)
+
+final  train loss 2.6157   val loss 2.6360   (20 batches each)
+
+=== the prediction check: the configuration that measured 149 ms on 2x A40 ===
+--- 1 rank(s), global batch 16 ---
+step    30/30  loss 2.6080  lr 3.00e-04  |g| 1.184    32.4 ms   126599 tok/s   9096 GFLOP/s
+--- 1 rank(s), global batch 32 ---
+step    30/30  loss 2.5882  lr 3.00e-04  |g| 1.353    59.9 ms   136701 tok/s   9822 GFLOP/s
+--- 2 rank(s), global batch 32 ---
+links     NO peer access -- every transfer staged through host memory
+step    30/30  loss 2.5882  lr 3.00e-04  |g| 1.353    40.2 ms   203792 tok/s  14642 GFLOP/s  comm   7.5 ms (18.7%)
+
+=== where the two-rank step goes: host-side phase trace, three transports ===
+--- (a) 2 ranks on ONE device, B=32 ---
+step    30/30  loss 2.5882  lr 3.00e-04  |g| 1.353    65.7 ms   124693 tok/s   8959 GFLOP/s  comm   0.7 ms ( 1.0%)
+  trace  compute   63.7  comm   0.7  opt+sync    1.3  (ms, wall)
+  rank 0  fwd(issue+loss wait)   21.2  bwd issue    0.7  bwd wait   38.7  opt    1.2
+  rank 1  fwd(issue+loss wait)   15.7  bwd issue    6.2  bwd wait   41.7  opt    0.6
+--- (b) 2 ranks on two devices, host staging forced, B=32 ---
+step    30/30  loss 2.5882  lr 3.00e-04  |g| 1.353    40.1 ms   204230 tok/s  14674 GFLOP/s  comm   7.5 ms (18.8%)
+  trace  compute   31.8  comm   7.5  opt+sync    0.8  (ms, wall)
+  rank 0  fwd(issue+loss wait)    7.8  bwd issue    0.3  bwd wait   23.6  opt    0.6
+  rank 1  fwd(issue+loss wait)    7.8  bwd issue    0.3  bwd wait   23.6  opt    0.7
+--- (c) 2 ranks on two devices, probe decides, B=32 ---
+  rank 0  fwd(issue+loss wait)    7.8  bwd issue    0.3  bwd wait   23.6  opt    0.6
+  rank 1  fwd(issue+loss wait)    7.8  bwd issue    0.3  bwd wait   23.6  opt    0.6
+step    30/30  loss 2.5882  lr 3.00e-04  |g| 1.353    40.8 ms   200756 tok/s  14424 GFLOP/s  comm   8.0 ms (19.6%)
+  trace  compute   31.9  comm   8.0  opt+sync    0.9  (ms, wall)
+  rank 0  fwd(issue+loss wait)    7.8  bwd issue    0.3  bwd wait   23.6  opt    0.7
+  rank 1  fwd(issue+loss wait)    7.9  bwd issue    0.3  bwd wait   23.6  opt    0.7
+
+=== weak scaling: keep the per-GPU batch fixed, grow the global batch ===
+--- 1 rank(s), global batch 16 (16/GPU) ---
+step    30/30  loss 2.6080  lr 3.00e-04  |g| 1.184    32.3 ms   126783 tok/s   9109 GFLOP/s
+--- 2 rank(s), global batch 32 (16/GPU) ---
+ddp       2 rank(s) on device(s) 0 1
+links     NO peer access -- every transfer staged through host memory
+step    30/30  loss 2.5882  lr 3.00e-04  |g| 1.353    40.3 ms   203379 tok/s  14612 GFLOP/s  comm   7.5 ms (18.7%)
+
+=== done ===
+send back this log
