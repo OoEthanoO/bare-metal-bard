@@ -19,6 +19,10 @@ SUDO=""
 [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null && SUDO="sudo"
 
 log "prerequisites"
+# A non-interactive ssh session does not source the image's profile, so the
+# toolkit that IS installed at /usr/local/cuda is not on PATH. That cost one
+# rented pod: the check below said "no nvcc" on a *-devel image.
+export PATH="/usr/local/cuda/bin:$PATH"
 missing=""
 for t in git make curl nvcc; do
   command -v "$t" >/dev/null || missing="$missing $t"
