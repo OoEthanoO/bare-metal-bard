@@ -2452,23 +2452,23 @@ four scalar stores.
 
    **The missing time has now been found, and it was hiding in a place no GPU
    profile could see.** The per-step worker threads were created fresh every
-   step — and every per-device cache in this codebase (`reduce_mean`'s pinned
+   step â€” and every per-device cache in this codebase (`reduce_mean`'s pinned
    scalar, the split-K workspace, the bias-backward partials) is
    `thread_local` precisely so each rank gets its own buffer on its own
    device. A thread that lives for one step defeats every one of those caches
    at once: the new thread sees `nullptr` and pays `cudaMalloc` and
-   `cudaMallocHost` again — the latter pins pages under a process-wide lock,
-   so the ranks serialize on the host — and the dying thread leaks the old
+   `cudaMallocHost` again â€” the latter pins pages under a process-wide lock,
+   so the ranks serialize on the host â€” and the dying thread leaks the old
    allocations. The single-rank path never paid this because it runs on the
    main thread, whose `thread_local`s persist. The fix is one persistent
    worker per rank, woken twice a step (`RankPool` in
    [`train_gpt.cu`](src/train_gpt.cu)). On the one-GPU rehearsal it took host
    overhead from ~3 ms/step to ~0.4, and the prediction put on record before
-   renting anything was that 2×A40 would land near 41 ms + comm for the B=32
+   renting anything was that 2â€”A40 would land near 41 ms + comm for the B=32
    batch that had measured 149.
 
    **It took two rentals and one more bug to get there.** The first run came
-   back at **91.3 ms** — right direction, wrong magnitude — and one two-rank
+   back at **91.3 ms** â€” right direction, wrong magnitude â€” and one two-rank
    run in three produced a garbage forward on rank 1 *before any
    communication*. Same species of bug, two more instances: `grad_global_norm`
    cached its scratch in a plain `static`, so the rank that lost the
@@ -2483,33 +2483,49 @@ four scalar stores.
    the whole ring if any pair fails.
 
    Then, [`bench/logs/multigpu_a40_run3.txt`](bench/logs/multigpu_a40_run3.txt),
-   2×A40, every transfer staged through host memory:
+   2â€”A40, every transfer staged through host memory:
 
    | | before | after |
    |---|---:|---:|
    | 1 rank, B=32 | 77.5 ms | 59.9 ms |
-   | 2 ranks, B=32, threads per step | **149.1 ms** | — |
-   | 2 ranks, B=32, persistent workers | — | 91.3 ms |
-   | 2 ranks, B=32, + per-device caches | — | **40.2 ms** (comm 7.5) |
+   | 2 ranks, B=32, threads per step | **149.1 ms** | â€” |
+   | 2 ranks, B=32, persistent workers | â€” | 91.3 ms |
+   | 2 ranks, B=32, + per-device caches | â€” | **40.2 ms** (comm 7.5) |
 
-   **Two GPUs are 1.49× faster than one, at 203,800 tok/s**, and the
-   prediction — 41 ms plus comm — came in at 40.2 *including* comm. Loss and
+   **Two GPUs are 1.49â€” faster than one, at 203,800 tok/s**, and the
+   prediction â€” 41 ms plus comm â€” came in at 40.2 *including* comm. Loss and
    gradient norm match the single-rank B=32 run to every printed digit. The
    host-thread trace (`--ddp-trace`) accounts for the whole step: forward 7.8,
    backward 23.9, optimizer 0.6, communication 7.5. And with the host loop
-   gone, **communication is the largest non-compute line at 18.7%** — 6.2 GB/s
+   gone, **communication is the largest non-compute line at 18.7%** â€” 6.2 GB/s
    through host memory on a box whose PCIe P2P is advertised and broken. So
    "communication becomes the bottleneck" is true after all, but only after
    sixty milliseconds of something that was not communication had been
-   removed from in front of it — which is exactly why the measurement, not
+   removed from in front of it â€” which is exactly why the measurement, not
    the lesson, had to come first.
 
    One anomaly is open and recorded rather than hidden: in one of nine
    two-device runs, step 1 read loss 4.2701 and |g| 32.75 instead of 4.2783
-   and 15.023 — a forward that differed on one rank before any communication,
-   with a different signature from the bug above. The next run prints each
-   rank's loss and checksums the gradient across ranks after the all-reduce,
-   so it can be localized rather than argued about.
+   and 15.023 â€” a forward that differed on one rank before any communication,
+   with a different signature from the bug above. A fourth rental ran the
+   same configuration twelve more times under `--ddp-trace`, which prints
+   each rank's own loss and a cross-rank checksum of the gradient after the
+   all-reduce ([run 4](bench/logs/multigpu_a40_run4_anomaly_hunt.txt)):
+   twelve of twelve read rank losses 4.2873 / 4.2693 and bit-identical
+   gradients on both ranks. So the rate is at most one in twenty-one, it did
+   not show itself to the instruments built for it, and it stays on this
+   list as unexplained rather than as fixed.
+
+   That fourth run also corrected an attribution above. Its traced runs read
+   90 ms while the untraced one read 41, and the difference was the checksum
+   itself: the first version computed `grad_global_norm` for both devices
+   from the main thread, whose `thread_local` scratch lives on device 0 â€”
+   the same wrong-device-scratch bug, reintroduced by the instrument built to
+   hunt its cousin. A kernel writing another device's memory over this host's
+   broken peer link costs about fifty milliseconds, which is exactly what run
+   1's 91 ms was: not the flash attribute, but `grad_global_norm`'s scratch on
+   the wrong device, every step. The checksum now runs on each rank's own
+   worker.
 
 3. ~~**Fuse attention** (FlashAttention-style)~~ â€” [done](#fused-attention-the-score-matrix-never-exists).
    Forward is 3.40x and activation memory is down 30%. The backward is only

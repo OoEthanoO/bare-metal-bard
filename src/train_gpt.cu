@@ -569,15 +569,21 @@ int main(int argc, char **argv) {
         ddp_allreduce(ddp, gbufs.data(), g.num_params);
         const auto t_comm = std::chrono::steady_clock::now();
         // After a correct all-reduce every rank holds the same bytes. Under
-        // --ddp-trace, say so or say which rank disagrees: a cheap checksum
-        // per rank, read back and compared on the host.
+        // --ddp-trace, say so or say which rank disagrees: a checksum per rank,
+        // compared on the host. Computed ON EACH RANK'S WORKER, because the
+        // first version called grad_global_norm for both devices from the main
+        // thread -- whose thread_local scratch lives on device 0 -- and that is
+        // the same wrong-device-scratch bug this repo had just fixed, brought
+        // back by the instrument built to hunt its cousin. It showed up as the
+        // traced step reading 90 ms while the untraced one read 41, which is
+        // also what run 1's 91 ms was: a kernel writing another device's memory
+        // over a broken peer link costs ~50 ms.
         if (ddp_trace && nranks > 1 && (step % 10 == 0 || step == 1)) {
             std::vector<double> sums(nranks);
-            for (int r = 0; r < nranks; ++r) {
+            pool.run([&](int r) {
                 cudaSetDevice(devs[r]);
                 sums[r] = grad_global_norm(reps[r].grads_mem, (int)reps[r].num_params);
-            }
-            cudaSetDevice(devs[0]);
+            });
             bool same = true;
             for (int r = 1; r < nranks; ++r) same = same && (sums[r] == sums[0]);
             printf("  post-allreduce |g| per rank");
