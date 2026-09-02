@@ -2617,28 +2617,26 @@ four scalar stores.
    removed from in front of it — which is exactly why the measurement, not
    the lesson, had to come first.
 
-   One anomaly is open and recorded rather than hidden. In the full cloud
-   script, the two-rank 40-step run that follows the one-rank 40-step run
-   read step-1 loss 4.2701 and |g| 32.750 instead of 4.2783 and 15.023 —
-   the same digits in three separate sessions
-   ([run 3](bench/logs/multigpu_a40_run3.txt),
-   [run 4](bench/logs/multigpu_a40_run4_anomaly_hunt.txt),
-   [run 5](bench/logs/multigpu_a40_run5_hunt100.txt)), all on A40 hosts in
-   one datacenter — and then trained visibly worse, so the gradient is wrong
-   on every step there, not once. It is deterministic, not a race: one
-   hundred short two-rank runs under `--ddp-trace` read clean every time, and
-   `steps` is used nowhere before the first forward. Two bisections then
-   changed one thing at a time — the trace flag, `CUDA_LAUNCH_BLOCKING`,
-   forced staging, a short subject, no predecessor — on an
-   [A6000 host](bench/logs/multigpu_a6000_run7_bisect.txt) and on an
-   [A40 host in a different datacenter](bench/logs/multigpu_a40_run8_bisect.txt):
-   seventeen cases, seventeen clean, including the exact control sequence
-   three times over. So it is host-correlated as well as deterministic, and
-   the deciding experiment — the full script on the clean host against the
-   isolated sequence on the reproducing one — has not been run. Until it
-   has, this stays on the list as unexplained rather than as fixed, and every
-   multi-rank run now prints each rank's own step-1 loss so the next
-   reproduction names the rank.
+   One anomaly is open and recorded rather than hidden, and it now has a
+   reproducer. A two-rank run that follows `sgemm`, or `test_ddp`, or
+   `test_ddp` and then a one-rank run, reads step-1 losses of 4.2748 and
+   4.2655 on the two ranks —  *both* wrong, against 4.2873 and 4.2693 — with
+   |g| 32.750 in place of 15.023, and then trains visibly worse; run it again
+   immediately and it is clean. The same wrong digits every time, on two
+   different A40 hosts, so it is neither a race nor a datacenter. The trace
+   does not hide it, and the post-all-reduce gradients are identical across
+   ranks, so the fault is in the forward, before any communication, and
+   depends on what the previous process left in device memory: a read of
+   memory that was never written. ([run 9](bench/logs/multigpu_a40_run9_decider.txt),
+   [run 10](bench/logs/multigpu_a40_run10_decider2.txt); the earlier
+   "host-correlated" reading, from bisections that lacked the predecessor,
+   was wrong.) `tools/gpu_scrub.cu` fills every free byte on every device
+   between two processes, and `scripts/cloud_anomaly_decider.sh` runs it with
+   zeros (which should make the run clean) and with NaN (which should make
+   the stale rows scream), then `compute-sanitizer --tool initcheck`, which
+   names the kernel and the address. That run is waiting on A40 stock. Until
+   it has run, every multi-rank run prints each rank's own step-1 loss, and
+   this stays on the list as reproducible and unexplained rather than fixed.
 
    That fourth run also corrected an attribution above. Its traced runs read
    90 ms while the untraced one read 41, and the difference was the checksum
