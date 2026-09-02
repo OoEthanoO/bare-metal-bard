@@ -125,7 +125,7 @@ void ddp_init(DDP &d, int n, const int *devices) {
     if (getenv("DDP_NO_P2P")) {
         for (int i = 0; i < n; ++i)
             for (int j = 0; j < n; ++j) d.peer[i][j] = false;
-        printf("ddp       DDP_NO_P2P set: staging every transfer through host\n");
+        printf("ddp       DDP_NO_P2P set: staging every transfer through host\n");
     }
     bool any_bad = false;
     {
