@@ -90,14 +90,27 @@ log "correctness gate: attention, gradients, and the two-rank config that produc
 ./bench/test_flash 2>&1 | tail -3
 ./bench/test_grad 2>&1 | tail -2
 ./scripts/get_data.sh >/dev/null 2>&1 || true
-# Twelve short attempts, because the residual anomaly (one run in nine read
-# step-1 loss 4.2701 / |g| 32.75 instead of 4.2783 / 15.023) needs a rate,
-# a rank, and a phase. --ddp-trace prints each rank's own loss and checksums
-# the gradient across ranks after the all-reduce.
-for i in $(seq 1 12); do
-  echo "--- 2 ranks, B=16, attempt $i (step 1 must read loss 4.2783, |g| 15.023) ---"
-  ./bench/train_gpt -n 3 --gpus 2 --ddp-trace --eval 10000 --sample 10000 --len 0 2>&1     | grep -E "^step +1/|rank losses|post-allreduce" | head -3
+# One hundred short attempts, because the residual anomaly (one run in
+# twenty-one read step-1 loss 4.2701 / |g| 32.75 instead of 4.2783 / 15.023)
+# needs a rate, a rank, and a phase. --ddp-trace prints each rank's own loss
+# and checksums the gradient across ranks after the all-reduce. Counted
+# automatically; only the deviant attempts are printed in full.
+ATTEMPTS=${ATTEMPTS:-100}
+bad=0
+for i in $(seq 1 "$ATTEMPTS"); do
+  out=$(./bench/train_gpt -n 2 --gpus 2 --ddp-trace --eval 10000 --sample 10000 --len 0 2>&1         | grep -E "^step +1/|rank losses|post-allreduce" | head -3)
+  if echo "$out" | grep -q "loss 4.2783 " && echo "$out" | grep -q "(identical)"; then
+    printf '.'
+  else
+    bad=$((bad+1)); printf '
+--- attempt %d DEVIATES ---
+%s
+' "$i" "$out"
+  fi
 done
+printf '
+anomaly hunt: %d of %d attempts deviated from loss 4.2783 / identical checksums
+' "$bad" "$ATTEMPTS"
 
 log "single-GPU sanity: the matmul still is what it was"
 # Clock pinning needs root and is not always permitted on rented boxes; if it
@@ -128,8 +141,9 @@ log "the prediction check: the configuration that measured 149 ms on 2x A40"
 # land near one B=16 shard's step time plus comm (~41 ms + comm on A40-class
 # cards), not 149. Whatever this prints, it goes in the log next to that
 # prediction.
-for cfg in "1 16" "1 32" "2 32"; do
+for cfg in "1 16" "1 32" "2 32" "4 32" "4 64"; do
   set -- $cfg
+  [ "$1" -gt "$NGPU" ] && continue
   echo "--- $1 rank(s), global batch $2 ---"
   ./bench/train_gpt -n 30 -b "$2" --gpus "$1" --eval 10000 --sample 10000 --len 0 2>&1 \
     | grep -E "^step +30|^links"
