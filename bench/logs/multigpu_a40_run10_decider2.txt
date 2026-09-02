@@ -1,0 +1,29 @@
+092653bef0dd
+0, NVIDIA A40, 00000000:57:00.0
+1, NVIDIA A40, 00000000:D1:00.0
+=== 1. reproduce: sgemm, test_ddp, 1-rank, then 2-rank (expect 4.2748 / 4.2655) ===
+  rank losses  0:4.2748  1:4.2655
+step     1/2  loss 4.2701  lr 1.00e-05  |g| 32.750    86.5 ms    47363 tok/s   3403 GFLOP/s  comm  19.3 ms (22.3%)
+=== 2. compute-sanitizer initcheck on one two-rank step after the same prefix ===
+sanitizer: /usr/local/cuda/bin/compute-sanitizer
+=== 3. predecessor bisection (2-rank directly after each) ===
+--- after sgemm only ---
+  rank losses  0:4.2748  1:4.2655
+step     1/2  loss 4.2701  lr 1.00e-05  |g| 32.750    85.1 ms    48120 tok/s   3457 GFLOP/s  comm  16.9 ms (19.8%)
+--- after test_ddp only ---
+  rank losses  0:4.2748  1:4.2655
+step     1/2  loss 4.2701  lr 1.00e-05  |g| 32.750    91.6 ms    44706 tok/s   3212 GFLOP/s  comm  23.1 ms (25.2%)
+--- after test_ddp then 1-rank ---
+  rank losses  0:4.2748  1:4.2655
+step     1/2  loss 4.2701  lr 1.00e-05  |g| 32.750   331.2 ms    12367 tok/s    889 GFLOP/s  comm  83.6 ms (25.3%)
+--- after sgemm then 1-rank ---
+  rank losses  0:4.2873  1:4.2693
+step     1/2  loss 4.2783  lr 1.00e-05  |g| 15.023   252.1 ms    16248 tok/s   1167 GFLOP/s  comm 100.9 ms (40.0%)
+--- after 2-rank (self) ---
+  rank losses  0:4.2873  1:4.2693
+step     1/2  loss 4.2783  lr 1.00e-05  |g| 15.023   167.4 ms    24468 tok/s   1758 GFLOP/s  comm  37.5 ms (22.4%)
+=== 4. and the same prefix with the two-rank run traced (does the trace hide it?) ===
+  rank losses  0:4.2748  1:4.2655
+  post-allreduce |g| per rank  0:65.500732  1:65.500732  (identical)
+step     1/2  loss 4.2701  lr 1.00e-05  |g| 32.750    88.3 ms    46381 tok/s   3332 GFLOP/s  comm  17.9 ms (20.2%)
+=== done ===
