@@ -65,6 +65,17 @@ void adamw_update(float *params, float *grads, float *m, float *v, int n,
 // L2 norm over the whole gradient vector, for global-norm clipping.
 float grad_global_norm(const float *grads, int n);
 
+// Global-norm clipping and the AdamW update in one call, with no host round
+// trip: the norm's partials are summed on the device in a fixed order, the
+// clip scale is written there, and the update reads it. The norm itself is
+// copied asynchronously into pinned memory; the returned pointer is valid
+// once the caller has synchronised the device, which the step does anyway.
+// scale = min(1, clip / (norm * inv_ranks)) * inv_ranks, exactly as before.
+const float *adamw_clipped_update(float *params, float *grads, float *m,
+                                  float *v, int n, float lr, float beta1,
+                                  float beta2, float eps, float weight_decay,
+                                  int step, float clip, float inv_ranks);
+
 // ---- utility ----
 void zero_buffer(float *p, size_t n);
 float reduce_mean(const float *d_values, int n);

@@ -1,0 +1,49 @@
+b52dd37d7d49
+0, NVIDIA A40
+1, NVIDIA A40
+nvcc warning : Support for offline compilation for architectures prior to '<compute/sm/lto>_75' will be removed in a future release (Use -Wno-deprecated-gpu-targets to suppress warning).
+=== 1. reproduce: sgemm then 2-rank (expect 4.2748 / 4.2655) ===
+  rank losses  0:4.2873  1:4.2693
+step     1/2  loss 4.2783  lr 1.00e-05  |g| 15.023    84.4 ms    48537 tok/s   3487 GFLOP/s  comm  17.6 ms (20.9%)
+=== 2. sgemm, scrub with ZEROS, then 2-rank (clean would confirm a stale read) ===
+device 0: filled 45230 MB with 0x00000000
+device 1: filled 45230 MB with 0x00000000
+  rank losses  0:4.2873  1:4.2693
+step     1/2  loss 4.2783  lr 1.00e-05  |g| 15.023    83.4 ms    49106 tok/s   3528 GFLOP/s  comm  18.1 ms (21.7%)
+=== 3. sgemm, scrub with NaN, then 2-rank (NaN would name the read as unconditional) ===
+device 0: filled 45230 MB with 0x7fc00000
+device 1: filled 45230 MB with 0x7fc00000
+  rank losses  0:4.2873  1:4.2693
+step     1/2  loss 4.2783  lr 1.00e-05  |g| 15.023    85.1 ms    48149 tok/s   3459 GFLOP/s  comm  19.1 ms (22.5%)
+=== 4. fresh: 2-rank after itself, then after NaN scrub ===
+  rank losses  0:4.2873  1:4.2693
+step     1/2  loss 4.2783  lr 1.00e-05  |g| 15.023    83.9 ms    48836 tok/s   3509 GFLOP/s  comm  17.8 ms (21.2%)
+device 0: filled 45230 MB with 0x7fc00000
+device 1: filled 45230 MB with 0x7fc00000
+  rank losses  0:4.2873  1:4.2693
+step     1/2  loss 4.2783  lr 1.00e-05  |g| 15.023    84.1 ms    48703 tok/s   3499 GFLOP/s  comm  18.0 ms (21.4%)
+=== 5. 1-rank after NaN scrub (does the single-rank path read stale memory too?) ===
+device 0: filled 45230 MB with 0x7fc00000
+device 1: filled 45230 MB with 0x7fc00000
+step     1/2  loss 4.2783  lr 1.00e-05  |g| 15.023    71.3 ms    57465 tok/s   4129 GFLOP/s
+=== 6. compute-sanitizer initcheck, one two-rank step after sgemm, output kept whole ===
+exit 0; 19 lines
+========= COMPUTE-SANITIZER
+data      1003855 train / 111539 val tokens, vocab 65 (padded 128)
+model     6 layers, 6 heads, 384 embd, ctx 256, fused attention
+matmul    fp32
+fwd tile  config 1 (br64 bc32 t128 4x4)
+bwd tile  config 5 (br32 bc32 t128 kv4x4 q4x4)
+params    10.80M (41.2 MB; +41.2 MB grads, +82.4 MB adam state)
+memory    296.5 MB forward activations, 37.0 MB backward scratch
+total     0.49 GB resident (params+grads+adam+activations+scratch)
+ddp       2 rank(s) on device(s) 0 1
+links     NO peer access -- every transfer staged through host memory
+  rank losses  0:4.2322  1:4.2242
+step     1/1  loss 4.2282  lr 1.00e-05  |g| 15.023   758.5 ms     5400 tok/s    388 GFLOP/s  comm  45.3 ms ( 6.0%)
+
+final  train loss 4.0444   val loss 4.0477   (20 batches each)
+========= ERROR SUMMARY: 0 errors
+...
+      1 ========= ERROR SUMMARY: 0 errors
+=== done ===

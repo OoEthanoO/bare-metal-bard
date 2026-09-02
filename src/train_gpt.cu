@@ -606,16 +606,15 @@ int main(int argc, char **argv) {
             cudaSetDevice(devs[r]);
             const auto o0 = std::chrono::steady_clock::now();
             PROF_BEGIN("optimizer");
-            const float gn =
-                grad_global_norm(reps[r].grads_mem, (int)reps[r].num_params) /
-                nranks;
-            if (r == 0) gnorm = gn;
-            const float gs = ((gn > grad_clip) ? grad_clip / gn : 1.0f) / nranks;
-            adamw_update(reps[r].params_mem, reps[r].grads_mem, reps[r].m_mem,
-                         reps[r].v_mem, (int)reps[r].num_params, lr_now, 0.9f,
-                         0.999f, 1e-8f, weight_decay, step, gs);
+            // The norm, the clip scale and the update stay on the device; the
+            // norm arrives in pinned memory by the time the sync below returns.
+            const float *pn = adamw_clipped_update(
+                reps[r].params_mem, reps[r].grads_mem, reps[r].m_mem,
+                reps[r].v_mem, (int)reps[r].num_params, lr_now, 0.9f, 0.999f,
+                1e-8f, weight_decay, step, grad_clip, 1.0f / nranks);
             PROF_END();
             cudaDeviceSynchronize();
+            if (r == 0) gnorm = *pn;
             tr_opt[r] = std::chrono::duration<double, std::milli>(
                             std::chrono::steady_clock::now() - o0).count();
         };

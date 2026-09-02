@@ -675,6 +675,93 @@ void crossentropy_softmax_backward(float *dlogits, const float *probs,
     xent_softmax_bwd_k<<<N, 128>>>(dlogits, probs, targets, V, Vp, dloss_scale);
 }
 
+// The optimizer's three kernels, vectorised. The scalar versions above read
+// and wrote one float per thread -- seven memory operations per element for
+// AdamW -- and the norm used 256 blocks, so each of its threads walked 165
+// elements serially and the kernel was latency-bound rather than bandwidth-
+// bound. Then the norm crossed to the host through a blocking copy before
+// AdamW could be launched. Here: float4 throughout, four times the blocks on
+// the norm, the partials summed on the device in a fixed order (so the
+// gradient scale is as deterministic as it was), and the norm read back
+// asynchronously for the log line. The math is unchanged.
+__global__ void sumsq4_k(const float *g, float *partial, int n) {
+    float acc = 0.0f;
+    const int n4 = n / 4;
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n4;
+         i += gridDim.x * blockDim.x) {
+        const float4 v = CVEC4(g[4 * i]);
+        acc += v.x * v.x + v.y * v.y + v.z * v.z + v.w * v.w;
+    }
+    if (blockIdx.x == 0)  // the tail, if n is not a multiple of four
+        for (int i = n4 * 4 + threadIdx.x; i < n; i += blockDim.x) acc += g[i] * g[i];
+    acc = block_reduce<false>(acc);
+    if (threadIdx.x == 0) partial[blockIdx.x] = acc;
+}
+
+// One block: fold the partials in a fixed order, write the norm and the
+// clip scale where the update kernel will read it.
+__global__ void clip_scale_k(const float *partial, int nblk, float *out_norm,
+                             float *out_scale, float clip, float inv_ranks) {
+    float acc = 0.0f;
+    for (int i = threadIdx.x; i < nblk; i += blockDim.x) acc += partial[i];
+    acc = block_reduce<false>(acc);
+    if (threadIdx.x == 0) {
+        const float norm = sqrtf(acc) * inv_ranks;
+        *out_norm = norm;
+        *out_scale = ((norm > clip) ? clip / norm : 1.0f) * inv_ranks;
+    }
+}
+
+__global__ void adamw4_k(float *params, const float *grads, float *m, float *v,
+                         int n, float lr, float beta1, float beta2, float eps,
+                         float wd, float bc1, float bc2, const float *gscale_p) {
+    const float gscale = *gscale_p;
+    const int n4 = n / 4;
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    auto one = [&](float &p, float g0, float &mm, float &vv) {
+        const float g = g0 * gscale;
+        const float mi = beta1 * mm + (1.0f - beta1) * g;
+        const float vi = beta2 * vv + (1.0f - beta2) * g * g;
+        mm = mi; vv = vi;
+        const float mhat = mi / bc1, vhat = vi / bc2;
+        p -= lr * (mhat / (sqrtf(vhat) + eps) + wd * p);
+    };
+    if (i < n4) {
+        float4 p = CVEC4(params[4 * i]), mm = CVEC4(m[4 * i]), vv = CVEC4(v[4 * i]);
+        const float4 g = CVEC4(grads[4 * i]);
+        one(p.x, g.x, mm.x, vv.x); one(p.y, g.y, mm.y, vv.y);
+        one(p.z, g.z, mm.z, vv.z); one(p.w, g.w, mm.w, vv.w);
+        VEC4(params[4 * i]) = p; VEC4(m[4 * i]) = mm; VEC4(v[4 * i]) = vv;
+    } else if (i == n4) {
+        for (int k = n4 * 4; k < n; ++k) one(params[k], grads[k], m[k], v[k]);
+    }
+}
+
+const float *adamw_clipped_update(float *params, float *grads, float *m,
+                                  float *v, int n, float lr, float beta1,
+                                  float beta2, float eps, float weight_decay,
+                                  int step, float clip, float inv_ranks) {
+    constexpr int NBLK = 1024;
+    // thread_local: one host thread per GPU, one set of scratch per device.
+    static thread_local float *d_partial = nullptr, *d_scalars = nullptr;
+    static thread_local float *h_norm = nullptr;
+    if (!d_partial) {
+        cudaMalloc(&d_partial, NBLK * sizeof(float));
+        cudaMalloc(&d_scalars, 2 * sizeof(float));  // [norm, scale]
+        cudaMallocHost(&h_norm, sizeof(float));
+    }
+    const float bc1 = 1.0f - powf(beta1, (float)step);
+    const float bc2 = 1.0f - powf(beta2, (float)step);
+    sumsq4_k<<<NBLK, 256>>>(grads, d_partial, n);
+    clip_scale_k<<<1, 1024>>>(d_partial, NBLK, d_scalars, d_scalars + 1, clip,
+                              inv_ranks);
+    cudaMemcpyAsync(h_norm, d_scalars, sizeof(float), cudaMemcpyDeviceToHost);
+    adamw4_k<<<ceil_div(n / 4 + 1, 256), 256>>>(params, grads, m, v, n, lr, beta1,
+                                                 beta2, eps, weight_decay, bc1,
+                                                 bc2, d_scalars + 1);
+    return h_norm;
+}
+
 void adamw_update(float *params, float *grads, float *m, float *v, int n,
                   float lr, float beta1, float beta2, float eps,
                   float weight_decay, int step, float grad_scale) {
