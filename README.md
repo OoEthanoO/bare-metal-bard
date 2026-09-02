@@ -904,16 +904,17 @@ made me believe a 2.9× speedup carries the caveat that explains it.
 
 ### The attention backward was starved of warps, not bandwidth
 
-*Measured on the 5070 Ti, sm_120, CUDA 13.3. The fused-kernel ratio is from
-`test_flash`, the region figure from `--profile`; both at an unpinned clock,
-so the numbers are ratios within one run and not step times. The pinned
-step-time A/B is the next measurement, not this one.*
+*Measured on the 5070 Ti, sm_120, CUDA 13.3, SM clock pinned to 1200 MHz
+(busy samples 1170—1192). Kernel ratios from `test_flash`; step and region
+figures are medians of four alternated `--profile` runs per binary, which
+average 27 steps each and were far steadier this session than single
+last-step readings.*
 
 The fused attention backward was 14% of a step at about 60% of the forward's
 efficiency, and every tile sweep in this repo had assumed the reason was the
 usual one for this kernel: shared-memory traffic. The profile
 ([`flash_ncu_tf32.txt`](bench/logs/flash_ncu_tf32.txt)) says otherwise. Both
-tensor-core backward kernels run at **8.3% theoretical occupancy** — 64-thread
+tensor-core backward kernels ran at **8.3% theoretical occupancy** — 64-thread
 blocks, shared memory capping them at two per SM, four warps per SM in total
 — with compute at 28%, shared at 39%, DRAM at 16%, and a third of the stall
 cycles waiting on shared-memory loads that four warps cannot hide. The
@@ -921,24 +922,38 @@ forward, at 25% occupancy, reaches twice the utilisation. The register limit
 would allow six blocks. Nothing is saturated; the kernel is simply alone.
 
 The cheapest way to double the warps without touching the footprint is to
-split each 16-key tile's *queries* across two warps: warp (kt, qh) computes
-S^T for its keys against its half of the query tile, accumulates dK and dV
-over that half, and the two halves are summed once per block through the
-Q/dO region after the loop is done with it — same lane mapping on both sides,
-so the reduction is a straight copy and add. `QSPLIT` is a template
-parameter, the config's thread count selects it, and the original two-warp
-kernel stays in the table as config 20 so the comparison is the same binary:
+split the work of each 16-row tile across two warps along the *other* axis:
+in the dK/dV kernel warp (kt, qh) takes its 16 keys against half the query
+tile, in the dQ kernel warp (qt, kh) takes its 16 queries against half the
+key tile. Each warp accumulates its share, and the two shares are summed once
+per block through operand memory the loop is done with — same lane mapping
+on both sides, so the fold is a copy and an add. `QSPLIT` is a template
+parameter the config's thread count selects, and the one-warp originals stay
+in the table as config 20 so the comparison is inside one binary:
 
 | fused backward, `test_flash`, T=256 | ms | TFLOP/s | |
 |---|---:|---:|---:|
-| config 20: one warp per key tile (was the default) | 0.451 | 6270 | |
-| config 18: two warps per key tile | **0.361** | **7835** | **1.25×** |
+| config 20: one warp per tile, both kernels (the old default) | 0.451 | 6270 | |
+| dK/dV split only | 0.361 | 7835 | 1.25× |
+| config 18: both kernels split | **0.304** | **9309** | **1.40×** |
 
 Error figures identical to the last digit, ragged shapes pass, and the TF32
-training trajectory matches the recorded one to every printed digit through
-step 30 — the two partial sums are added in a fixed order. In the step's
-region profile `attention bwd` went 3.129 → 2.646 ms (−15%). The dQ kernel
-sits at the same 8.3% for the same reason and is the next half of this.
+training trajectory matches the recorded one to four decimals, moving in the
+last digit at steps 20 and 30 — the changed summation order of the dQ
+partials, and nothing else. In the step:
+
+| region | before | after | |
+|---|---:|---:|---:|
+| attention bwd | 5.65 ms | **4.00 ms** | **—29%** |
+| attention fwd (control) | 0.95 | 0.94 | — |
+| measured total | 38.07 | **36.15** | **—5.0%** |
+
+**Five percent of a training step**, from a profile that took thirty seconds
+once someone was there to click the prompt, and that contradicted a
+paragraph of reasoning this README had carried for months. The backward now
+runs at 9.3 TFLOP/s against the forward's ~11, with 2.5× the flops; what is
+left between them is the recomputation of S and dP in both kernels, which is
+structural to the two-kernel split and not a parameter.
 
 ### The bias gradient was riding along the whole time
 
