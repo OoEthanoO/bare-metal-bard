@@ -549,6 +549,28 @@ int main(int argc, char **argv) {
         // Always at step 1 with several ranks, not only under --ddp-trace: the
         // deterministic anomaly on the A40 hosts hides whenever the trace flag
         // is on, so the one line that names the rank must cost nothing else.
+        // Every signature of the open two-rank anomaly -- losses in the ln(65)
+        // band, a doubled gradient norm, both ranks, no stale memory, no race
+        // -- is what wrong tokens or targets on the device would look like. So
+        // at step 1 with several ranks, read them back and say whether they
+        // are the ones that were sent.
+        if (nranks > 1 && step == 1) {
+            for (int r = 0; r < nranks; ++r) {
+                cudaSetDevice(devs[r]);
+                const size_t n = (size_t)Bshard * T, off = (size_t)r * n;
+                std::vector<int> tk(n), tg(n);
+                cudaMemcpy(tk.data(), reps[r].d_tokens, n * sizeof(int), cudaMemcpyDeviceToHost);
+                cudaMemcpy(tg.data(), reps[r].d_targets, n * sizeof(int), cudaMemcpyDeviceToHost);
+                size_t bad_t = 0, bad_y = 0;
+                for (size_t i = 0; i < n; ++i) {
+                    bad_t += (tk[i] != x[off + i]);
+                    bad_y += (tg[i] != y[off + i]);
+                }
+                printf("  rank %d inputs on device: %zu of %zu tokens and %zu targets differ from what was sent%s\n",
+                       r, bad_t, n, bad_y, (bad_t || bad_y) ? "  <-- WRONG INPUTS" : "");
+            }
+            cudaSetDevice(devs[0]);
+        }
         if (nranks > 1 && (step == 1 || (ddp_trace && step % 10 == 0))) {
             printf("  rank losses");
             for (int r = 0; r < nranks; ++r) printf("  %d:%.4f", r, rank_loss[r]);

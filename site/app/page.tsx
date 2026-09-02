@@ -1794,8 +1794,13 @@ run1 2.7130  run2 2.7135  DIFFERS`}</pre>
           shut — the staging overlaps are blocked by shared memory on one side and the register
           file on the other, and the split counts now sit on their measured curve. The attention
           backward, which this list used to call &ldquo;a redesign, not a parameter,&rdquo; turned out
-          to be a parameter after all — see above — and what remains there is the S/dP
-          recomputation that is structural to the two-kernel split.
+          to be a parameter after all — see above. After it, the layernorm passes were the largest
+          non-matmul lines at 3.6× their bandwidth floor, for the same kind of reason (one block per
+          row, barrier reductions, one row in flight); one warp per row with shuffle reductions
+          took the backward from 1.60 to 1.11 ms and the forward from 0.56 to 0.30, about two
+          percent of a step. What remains between the layernorm backward and its floor is not
+          the warp count — 23 and 46 blocks read the same — and the next suspect is the launch
+          overhead of two kernels per call, twelve calls a step.
         </li>
         <li>
           <strong><s>Multi-GPU</s></strong> — done, in the sense that matters: the missing time was
@@ -1812,9 +1817,13 @@ run1 2.7130  run2 2.7135  DIFFERS`}</pre>
           now the largest non-compute line at 18.7%, staged through host memory because this
           host&rsquo;s PCIe peer-to-peer is advertised and broken. &ldquo;Communication becomes the
           bottleneck&rdquo; turned out to be true — after sixty milliseconds of something that was
-          not communication had been removed from in front of it. One anomaly stays open: one run
-          in nine reads a different step-1 loss on one rank, and the next run is instrumented to
-          name the rank.
+          not communication had been removed from in front of it. One anomaly stays open, and it has a reproducer now: a two-rank run that follows certain
+          predecessor processes reads the same wrong step-1 losses on both ranks every time, with a
+          doubled gradient norm, and is clean when run again immediately. Scrubbing device memory
+          between the processes changes nothing, the sanitizer finds no uninitialized reads, no
+          shared-memory race and no out-of-bounds access — and yet under the sanitizer the same step
+          reads a third pair of losses. Every signature fits wrong tokens or targets reaching a
+          device, so the trainer now checks exactly that at step one
         </li>
       </ol>
 
