@@ -521,7 +521,13 @@ void adamw_update(float *params, float *grads, float *m, float *v, int n,
 
 float grad_global_norm(const float *grads, int n) {
     constexpr int NBLK = 256;
-    static float *d_partial = nullptr;
+    // THREAD_LOCAL, for the same reason reduce_mean's scalar is. This was a
+    // plain static, which on one device is merely a cache and on two devices
+    // is a pointer into the wrong GPU's memory for whichever rank lost the
+    // race to allocate it -- and with persistent rank workers both ranks hit
+    // the null check in the same microsecond. It surfaced on the 2x A40 box
+    // as NaN gradients from step 1 in one run out of three.
+    static thread_local float *d_partial = nullptr;
     if (!d_partial) cudaMalloc(&d_partial, NBLK * sizeof(float));
     sumsq_k<<<NBLK, 256>>>(grads, d_partial, n);
     float h[NBLK];

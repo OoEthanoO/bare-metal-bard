@@ -327,6 +327,7 @@ int main(int argc, char **argv) {
     bool alloc_only = false;
     int nranks = 1;  // --gpus N: data-parallel replicas
     bool tf32 = false;  // --tf32: route the matmuls through the tensor cores
+    bool ddp_trace = false;  // --ddp-trace: per-rank host-side phase timing
 
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "-d") && i + 1 < argc) data_path = argv[++i];
@@ -348,6 +349,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--alloc-only")) alloc_only = true;
         else if (!strcmp(argv[i], "--gpus") && i + 1 < argc) nranks = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--tf32")) tf32 = true;
+        else if (!strcmp(argv[i], "--ddp-trace")) ddp_trace = true;
         else if (!strcmp(argv[i], "--unfused")) use_flash = false;
         // Pin the fused-backward tile config, for A/B without a rebuild.
         else if (!strcmp(argv[i], "--bwd-cfg") && i + 1 < argc) bwd_cfg = atoi(argv[++i]);
@@ -475,6 +477,18 @@ int main(int argc, char **argv) {
     RankPool pool;
     if (nranks > 1) pool.start(nranks);
 
+    // --ddp-trace: where does each rank's HOST thread spend the step? The
+    // 2x A40 box runs one B=16 shard in 32 ms and two of them, one per GPU,
+    // in 91 -- with 9 ms of communication. Fifty milliseconds are going
+    // somewhere no device profile can see, so the host thread is timed
+    // instead: how long issuing the forward takes until its loss readback
+    // returns (which waits for the whole forward), how long issuing the
+    // backward takes, and how long the final sync waits for the device.
+    // Kernel work shows up in the waits; host serialization shows up in the
+    // issue times.
+    std::vector<double> tr_fwd(nranks), tr_bwd_issue(nranks), tr_bwd_wait(nranks),
+        tr_opt(nranks);
+
     for (int step = 1; step <= steps; ++step) {
         get_batch(ds.train, B, T, rng, x, y);
 
@@ -510,10 +524,20 @@ int main(int argc, char **argv) {
             pool.run([&](int r) {
                 cudaSetDevice(devs[r]);
                 const size_t off = (size_t)r * Bshard * T;
+                const auto a = std::chrono::steady_clock::now();
                 rank_loss[r] =
                     gpt_forward(reps[r], x.data() + off, y.data() + off);
+                const auto b = std::chrono::steady_clock::now();
                 gpt_backward(reps[r]);
+                const auto c = std::chrono::steady_clock::now();
                 cudaDeviceSynchronize();
+                const auto d = std::chrono::steady_clock::now();
+                auto ms = [](auto p, auto q) {
+                    return std::chrono::duration<double, std::milli>(q - p).count();
+                };
+                tr_fwd[r] = ms(a, b);
+                tr_bwd_issue[r] = ms(b, c);
+                tr_bwd_wait[r] = ms(c, d);
             });
         }
         double loss_sum = 0.0;
@@ -546,6 +570,7 @@ int main(int argc, char **argv) {
         float gnorm = 0.0f;
         auto opt_step = [&](int r) {
             cudaSetDevice(devs[r]);
+            const auto o0 = std::chrono::steady_clock::now();
             PROF_BEGIN("optimizer");
             const float gn =
                 grad_global_norm(reps[r].grads_mem, (int)reps[r].num_params) /
@@ -557,6 +582,8 @@ int main(int argc, char **argv) {
                          0.999f, 1e-8f, weight_decay, step, gs);
             PROF_END();
             cudaDeviceSynchronize();
+            tr_opt[r] = std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - o0).count();
         };
         if (nranks == 1) {
             opt_step(0);
@@ -592,6 +619,14 @@ int main(int argc, char **argv) {
             if (nranks > 1)
                 printf("  comm %5.1f ms (%4.1f%%)", comm_ms, 100.0 * comm_ms / ms);
             printf("\n");
+            if (ddp_trace && nranks > 1) {
+                printf("  trace  compute %6.1f  comm %5.1f  opt+sync %6.1f  (ms, wall)\n",
+                       msec(t_begin, t_compute), comm_ms, msec(t_comm, t_end));
+                for (int r = 0; r < nranks; ++r)
+                    printf("  rank %d  fwd(issue+loss wait) %6.1f  bwd issue %6.1f  "
+                           "bwd wait %6.1f  opt %6.1f\n",
+                           r, tr_fwd[r], tr_bwd_issue[r], tr_bwd_wait[r], tr_opt[r]);
+            }
             fflush(stdout);
         }
 

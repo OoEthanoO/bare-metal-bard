@@ -85,12 +85,25 @@ REM --- architecture -------------------------------------------------------
 REM Detected, not assumed. 8.9 is the Ada laptop this project was written on,
 REM 12.0 the Blackwell laptop it moved to; an A40 is 8.6, an A100 8.0, a T4 7.5.
 set "ARCH="
-for /f "tokens=1,2 delims=." %%a in ('nvidia-smi --query-gpu^=compute_cap --format^=csv^,noheader 2^>nul') do (
+REM BMB_ARCH=sm_NN bypasses detection. Needed when nvidia-smi refuses to
+REM answer -- it did, mid-session, with "insufficient permissions" -- and the
+REM detection below then produced the architecture "sm_NVIDIA-SMI".
+if defined BMB_ARCH (
+  set "ARCH=%BMB_ARCH%"
+  set /a ARCH_MAJOR=%BMB_ARCH:~3,-1%
+)
+if not defined ARCH for /f "tokens=1,2 delims=." %%a in ('nvidia-smi --query-gpu^=compute_cap --format^=csv^,noheader 2^>nul') do (
   if not defined ARCH set "ARCH=sm_%%a%%b"
   if not defined ARCH_MAJOR set /a ARCH_MAJOR=%%a
 )
 if not defined ARCH (
   echo [env] nvidia-smi did not report a compute capability -- is a GPU present?
+  echo [env] ^(set BMB_ARCH=sm_NN to build without asking it^)
+  exit /b 1
+)
+if not "%ARCH:~0,3%"=="sm_" (
+  echo [env] arch detection returned "%ARCH%" -- nvidia-smi printed a message, not a number
+  echo [env] set BMB_ARCH=sm_NN to build without asking it
   exit /b 1
 )
 REM TF32 tensor cores are Ampere and newer. A clone still builds on a T4 or a

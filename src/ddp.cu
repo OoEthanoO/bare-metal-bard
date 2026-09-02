@@ -1,5 +1,6 @@
 // Ring all-reduce, written out rather than linked in.
 #include "ddp.h"
+#include <vector>
 #include <cstdio>
 #include <cstdlib>
 
@@ -112,39 +113,69 @@ void ddp_init(DDP &d, int n, const int *devices) {
     // arrive. A collective that trusts the flag then computes wrong gradients
     // at full speed and says nothing, which is the worst of all outcomes.
     //
-    // So: actually move four bytes and check they landed.
+    // So: actually move bytes and check they landed. The first version moved
+    // FOUR bytes, once, and on the 2x A40 box that gave three different
+    // verdicts in three runs of the same binary -- both directions bad, both
+    // bad again, then one direction "good", which produced a ring with one
+    // peer link and one staged link, 105 ms of communication and a gradient
+    // norm nobody believed. A flaky link is a broken link. So the probe now
+    // moves a megabyte of pattern, three times, checks every element, and if
+    // ANY pair fails the whole ring stages through the host: a ring is only as
+    // trustworthy as its least trustworthy link, and it should not be mixed.
     if (getenv("DDP_NO_P2P")) {
         for (int i = 0; i < n; ++i)
             for (int j = 0; j < n; ++j) d.peer[i][j] = false;
-        printf("ddp       DDP_NO_P2P set: staging every transfer through host\n");
+        printf("ddp       DDP_NO_P2P set: staging every transfer through host\n");
     }
-    for (int i = 0; i < n; ++i) {
-        for (int j = 0; j < n; ++j) {
-            if (!d.peer[i][j] || d.dev[i] == d.dev[j]) continue;
-            float *a = nullptr, *b = nullptr;
-            const float probe = 1.0f + 100.0f * i + j;
-            float back = -1.0f;
-            CUDA_CHECK(cudaSetDevice(d.dev[i]));
-            CUDA_CHECK(cudaMalloc(&a, sizeof(float)));
-            CUDA_CHECK(cudaMemcpy(a, &probe, sizeof(float), cudaMemcpyHostToDevice));
-            CUDA_CHECK(cudaSetDevice(d.dev[j]));
-            CUDA_CHECK(cudaMalloc(&b, sizeof(float)));
-            CUDA_CHECK(cudaMemset(b, 0, sizeof(float)));
-            CUDA_CHECK(cudaSetDevice(d.dev[i]));
-            CUDA_CHECK(cudaMemcpyPeer(b, d.dev[j], a, d.dev[i], sizeof(float)));
-            CUDA_CHECK(cudaSetDevice(d.dev[j]));
-            CUDA_CHECK(cudaMemcpy(&back, b, sizeof(float), cudaMemcpyDeviceToHost));
-            if (back != probe) {
-                printf("ddp       WARNING: peer %d->%d is enabled but moves the "
-                       "wrong bytes (sent %.1f, got %.1f). Falling back to host "
-                       "staging for that pair.\n", d.dev[i], d.dev[j], probe, back);
-                d.peer[i][j] = false;
+    bool any_bad = false;
+    {
+        constexpr size_t PROBE = 1u << 18;  // floats: 1 MB
+        std::vector<float> pattern(PROBE), back(PROBE);
+        for (int i = 0; i < n; ++i) {
+            for (int j = 0; j < n; ++j) {
+                if (!d.peer[i][j] || d.dev[i] == d.dev[j]) continue;
+                float *a = nullptr, *b = nullptr;
+                CUDA_CHECK(cudaSetDevice(d.dev[i]));
+                CUDA_CHECK(cudaMalloc(&a, PROBE * sizeof(float)));
+                CUDA_CHECK(cudaSetDevice(d.dev[j]));
+                CUDA_CHECK(cudaMalloc(&b, PROBE * sizeof(float)));
+                size_t bad = 0;
+                for (int rep = 0; rep < 3 && bad == 0; ++rep) {
+                    for (size_t k = 0; k < PROBE; ++k)
+                        pattern[k] = (float)(1 + rep) * 1000.0f + 100.0f * i + j +
+                                     (float)(k % 977) * 0.001f;
+                    CUDA_CHECK(cudaSetDevice(d.dev[i]));
+                    CUDA_CHECK(cudaMemcpy(a, pattern.data(), PROBE * sizeof(float),
+                                          cudaMemcpyHostToDevice));
+                    CUDA_CHECK(cudaSetDevice(d.dev[j]));
+                    CUDA_CHECK(cudaMemset(b, 0, PROBE * sizeof(float)));
+                    CUDA_CHECK(cudaSetDevice(d.dev[i]));
+                    CUDA_CHECK(cudaMemcpyPeer(b, d.dev[j], a, d.dev[i],
+                                              PROBE * sizeof(float)));
+                    CUDA_CHECK(cudaSetDevice(d.dev[j]));
+                    CUDA_CHECK(cudaMemcpy(back.data(), b, PROBE * sizeof(float),
+                                          cudaMemcpyDeviceToHost));
+                    for (size_t k = 0; k < PROBE; ++k)
+                        if (back[k] != pattern[k]) ++bad;
+                }
+                if (bad) {
+                    printf("ddp       WARNING: peer %d->%d is enabled but moves the "
+                           "wrong bytes (%zu of %zu floats wrong). Not trusted.\n",
+                           d.dev[i], d.dev[j], bad, PROBE);
+                    any_bad = true;
+                }
+                CUDA_CHECK(cudaSetDevice(d.dev[i]));
+                CUDA_CHECK(cudaFree(a));
+                CUDA_CHECK(cudaSetDevice(d.dev[j]));
+                CUDA_CHECK(cudaFree(b));
             }
-            CUDA_CHECK(cudaSetDevice(d.dev[i]));
-            CUDA_CHECK(cudaFree(a));
-            CUDA_CHECK(cudaSetDevice(d.dev[j]));
-            CUDA_CHECK(cudaFree(b));
         }
+    }
+    if (any_bad) {
+        printf("ddp       at least one peer link failed the probe: staging EVERY "
+               "transfer through host memory rather than running a mixed ring\n");
+        for (int i = 0; i < n; ++i)
+            for (int j = 0; j < n; ++j) d.peer[i][j] = false;
     }
     d.any_peer = false;
     for (int i = 0; i < n; ++i)

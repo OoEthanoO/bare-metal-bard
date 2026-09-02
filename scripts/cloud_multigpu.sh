@@ -78,7 +78,22 @@ make clean >/dev/null 2>&1
 # Shown, not piped to tail: nvcc takes a couple of minutes on nine kernels and
 # a silent terminal looks like a hang. -j because the box has cores going spare.
 echo "compiling with -j$(nproc); nvcc is slow, give it ~2 minutes"
-make -j"$(nproc)" bench/test_ddp bench/train_gpt bench/sgemm || { echo BUILD FAILED; exit 1; }
+make -j"$(nproc)" bench/test_ddp bench/train_gpt bench/sgemm bench/test_flash bench/test_grad || { echo BUILD FAILED; exit 1; }
+
+log "correctness gate: attention, gradients, and the two-rank config that produced NaN"
+# The laptop's GPU was unavailable when the cross-device fixes were made, so
+# this box is where they are verified. test_flash and test_grad are the
+# single-device gate; the 2-rank B=16 run is the exact configuration whose
+# forward returned garbage on rank 1 (loss 9.24 at step 1, |g| 2402, then NaN)
+# when the flash kernels' shared-memory opt-in was guarded per process
+# instead of per device, and grad_global_norm cached its scratch on device 0.
+./bench/test_flash 2>&1 | tail -3
+./bench/test_grad 2>&1 | tail -2
+./scripts/get_data.sh >/dev/null 2>&1 || true
+for i in 1 2 3; do
+  echo "--- 2 ranks, B=16, attempt $i (step 1 must read loss ~4.28, |g| ~15) ---"
+  ./bench/train_gpt -n 10 --gpus 2 --eval 10000 --sample 10000 --len 0 2>&1 | grep -E "^step +(1|10)/|^links"
+done
 
 log "single-GPU sanity: the matmul still is what it was"
 # Clock pinning needs root and is not always permitted on rented boxes; if it
@@ -115,6 +130,21 @@ for cfg in "1 16" "1 32" "2 32"; do
   ./bench/train_gpt -n 30 -b "$2" --gpus "$1" --eval 10000 --sample 10000 --len 0 2>&1 \
     | grep -E "^step +30|^links"
 done
+
+log "where the two-rank step goes: host-side phase trace, three transports"
+# The same 2-rank B=32 configuration three ways. (a) both ranks on ONE device
+# (CUDA_VISIBLE_DEVICES=0): the rehearsal, which on the laptop shows ~0.4 ms
+# of host overhead -- if this box agrees, the remaining gap is specific to
+# driving two devices. (b) two devices, host staging forced. (c) two devices,
+# whatever the probe allows. --ddp-trace prints per-rank wall time for issuing
+# the forward (until the loss readback returns), issuing the backward, waiting
+# for it, and the optimizer, so a host stall shows up as issue time.
+echo "--- (a) 2 ranks on ONE device, B=32 ---"
+CUDA_VISIBLE_DEVICES=0 ./bench/train_gpt -n 30 -b 32 --gpus 2 --ddp-trace --eval 10000 --sample 10000 --len 0 2>&1   | grep -E "^step +30|^links|trace|rank [01]" | tail -4
+echo "--- (b) 2 ranks on two devices, host staging forced, B=32 ---"
+DDP_NO_P2P=1 ./bench/train_gpt -n 30 -b 32 --gpus 2 --ddp-trace --eval 10000 --sample 10000 --len 0 2>&1   | grep -E "^step +30|^links|trace|rank [01]" | tail -4
+echo "--- (c) 2 ranks on two devices, probe decides, B=32 ---"
+./bench/train_gpt -n 30 -b 32 --gpus 2 --ddp-trace --eval 10000 --sample 10000 --len 0 2>&1   | grep -E "^step +30|^links|^ddp  |trace|rank [01]" | tail -6
 
 log "weak scaling: keep the per-GPU batch fixed, grow the global batch"
 # Strong scaling (fixed global batch) shrinks each GPU's work until launch

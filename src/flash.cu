@@ -324,7 +324,14 @@ bool launch_fwd(float *out, float *lse, const float *qkv, int B, int T, int NH,
     constexpr size_t smem = (size_t)(HS * QW + KSZ + BC * HS) * sizeof(float);
 
     auto kern = flash_fwd_k<BR, BC, HS, NT, RT, CT>;
-    static bool configured = false;
+    // The opt-in is PER DEVICE: each GPU holds its own copy of the kernel and
+    // its own attribute table, so a process-wide "done" flag configures only
+    // the device whichever rank reached it first, and the other rank's
+    // launches then exceed the default 48 KB and fail -- a garbage forward on
+    // rank 1 before a single byte of communication. thread_local matches the
+    // one-host-thread-per-GPU rule the rest of the repo runs on (every guard
+    // in this file is the same).
+    static thread_local bool configured = false;
     if (!configured) {
         if (cudaFuncSetAttribute(kern, cudaFuncAttributeMaxDynamicSharedMemorySize,
                                  (int)smem) != cudaSuccess)
@@ -569,7 +576,7 @@ bool launch_fwd_mma(float *out, float *lse, const float *qkv, int B, int T,
     constexpr size_t smem = (size_t)(BR * HS + HS * BC + BC * HS) * sizeof(float);
     if (smem > SMEM_CAP) return false;
     auto kern = flash_fwd_mma_k<BR, BC, HS, NT>;
-    static bool configured = false;
+    static thread_local bool configured = false;
     if (!configured) {
         if (cudaFuncSetAttribute(kern, cudaFuncAttributeMaxDynamicSharedMemorySize,
                                  (int)smem) != cudaSuccess)
@@ -1625,7 +1632,7 @@ bool launch_bwd(float *dqkv, float *dsum, const float *dout, const float *qkv,
         // the same reason the dQ one does.
         constexpr int NTKV = BC * 2;
         auto kv = flash_bwd_kv_mma_k<BR, BC, HS, NTKV>;
-        static bool kv_conf = false;
+        static thread_local bool kv_conf = false;
         if (!kv_conf) {
             if (cudaFuncSetAttribute(kv, cudaFuncAttributeMaxDynamicSharedMemorySize,
                                      (int)kvm_smem) != cudaSuccess) return false;
@@ -1638,7 +1645,7 @@ bool launch_bwd(float *dqkv, float *dsum, const float *dout, const float *qkv,
 #endif
     } else {
         auto kv = flash_bwd_kv_k<BR, BC, HS, NT, RT, CT, AT, BT, KVC>;
-        static bool kv_conf = false;
+        static thread_local bool kv_conf = false;
         if (!kv_conf) {
             if (cudaFuncSetAttribute(kv, cudaFuncAttributeMaxDynamicSharedMemorySize,
                                      (int)kv_smem) != cudaSuccess) return false;
@@ -1656,7 +1663,7 @@ bool launch_bwd(float *dqkv, float *dsum, const float *dout, const float *qkv,
         // with the tensor-core dQ at all.
         constexpr int NTQ = BR * 2;
         auto qk = flash_bwd_q_mma_k<BR, BC, HS, NTQ>;
-        static bool q_conf = false;
+        static thread_local bool q_conf = false;
         if (!q_conf) {
             if (cudaFuncSetAttribute(qk, cudaFuncAttributeMaxDynamicSharedMemorySize,
                                      (int)q_smem) != cudaSuccess) return false;
@@ -1669,7 +1676,7 @@ bool launch_bwd(float *dqkv, float *dsum, const float *dout, const float *qkv,
 #endif
     } else {
         auto qk = flash_bwd_q_k<BR, BC, HS, NT, RT, CT, QAT, QBT>;
-        static bool q_conf = false;
+        static thread_local bool q_conf = false;
         if (!q_conf) {
             if (cudaFuncSetAttribute(qk, cudaFuncAttributeMaxDynamicSharedMemorySize,
                                      (int)q_smem) != cudaSuccess) return false;
