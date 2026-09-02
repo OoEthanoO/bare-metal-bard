@@ -902,6 +902,50 @@ reproducibility claim is now accurate instead of flattering; and the tool that
 made me believe a 2.9× speedup carries the caveat that explains it.
 
 
+### Layernorm: one warp per row
+
+*Measured on the 5070 Ti, sm_120, clock pinned, region times from `--profile`
+at the model's shape. This machine now runs its display through the GPU, and
+step totals swung by up to 5× between consecutive runs in the last hour of this
+session; the numbers below are from the earlier, stable part of it, and no
+step-level claim is made.*
+
+With attention fixed, the largest lines outside the matmuls were the two
+layernorm passes — 1.60 ms for the backward, 0.56 for the forward, together
+6% of a step — and the backward was 3.6× off its DRAM floor. `bench_nn` said
+the same thing in the L2-resident regime where it flatters everything: 33%
+of peak bandwidth, next to elementwise kernels at 60%. The kernels ran one
+128-thread block per row, three scalars per thread, two barrier-synchronised
+block reductions per row, one row in flight per block. None of that is about
+bytes.
+
+A warp per row is the standard shape for this: each lane owns twelve columns
+as three `float4`s, so a warp's load is 512 contiguous bytes; the two row
+sums come from shuffles, with no barrier anywhere in the row loop; the
+per-column dweight and dbias partials live in twenty-four registers across
+every row a warp visits; and sixteen rows are in flight per block. The
+warps' partials fold once per block through shared memory in a fixed order,
+so the existing reduction kernel still sums one partial per block and the
+gradient stays deterministic. Swept in situ:
+
+| `--ln-blocks` | 23 | 46 | 92 | 184 | 368 | 736 |
+|---|---:|---:|---:|---:|---:|---:|
+| layernorm bwd, ms/step | **1.11** | 1.15 | 1.26 | 1.24 | 1.44 | 1.75 |
+
+against 1.60 for the block-per-row kernel at its own tuned count. Fewer
+blocks win and the curve is flat at the bottom — the block count decides how
+many partials the reduction sums, and half a block per SM is enough rows in
+flight — so that is the default. The forward went 0.56 → 0.30 ms. Together
+about **2% of a step**, gradient check unchanged (the layernorm tensors sit
+at 1e-4 to 1e-6 as before), fp32 trajectory identical to every digit, TF32
+with the last-digit shuffle of a changed summation order.
+
+What is left is 2.5× between the backward and its floor, and the sweep says
+it is not the warp count: 23 and 46 blocks read the same. Twelve launches of
+two kernels each is 24 launches for 1.1 ms of work, which puts the launch
+overhead itself near a fifth of the line. Fusing the reduction into the
+kernel's tail would take that, and it is the next thing to try here.
+
 ### The attention backward was starved of warps, not bandwidth
 
 *Measured on the 5070 Ti, sm_120, CUDA 13.3, SM clock pinned to 1200 MHz

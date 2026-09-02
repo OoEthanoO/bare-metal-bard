@@ -172,6 +172,144 @@ __global__ void layernorm_bwd_reduce_k(float *dweight, float *dbias,
     dbias[c] += sb;
 }
 
+// ONE WARP PER ROW, for both directions. The block-per-row kernels above were
+// at a third of the card's bandwidth even in the L2-resident micro-bench and
+// 3.6x off their DRAM floor in the step -- 128 threads reading three scalars
+// each, two barrier-synchronised block reductions per row, and one block's
+// worth of rows in flight per SM. None of that is about bytes. A warp that
+// owns a whole row reads it as three float4 per lane (512 contiguous bytes
+// per warp per load, the ideal pattern), reduces its two row sums with
+// shuffles alone, keeps its per-column dweight/dbias partials in twenty-four
+// registers across every row it visits, and has eight rows in flight per
+// block instead of one. C must be 32*CPL; anything else takes the old path.
+//
+// The per-block fold of the eight warps' partials goes through shared memory
+// in a fixed order, so the reduction kernel above still sees one partial per
+// block and stays deterministic -- which is a spec here, not a nicety.
+constexpr int LN_WARPS = 16;
+
+template <int CPL>  // columns per lane; C == 32 * CPL
+__global__ void layernorm_fwd_warp_k(float *out, float *mean, float *rstd,
+                                     const float *inp, const float *weight,
+                                     const float *bias, int N) {
+    constexpr int C = 32 * CPL;
+    constexpr int F4 = CPL / 4;
+    const int lane = threadIdx.x % 32, warp = threadIdx.x / 32;
+    for (int row = blockIdx.x * LN_WARPS + warp; row < N; row += gridDim.x * LN_WARPS) {
+        const float *x = inp + (size_t)row * C;
+        float v[CPL];
+        float sum = 0.0f;
+#pragma unroll
+        for (int k = 0; k < F4; ++k) {
+            const float4 t = CVEC4(x[(k * 32 + lane) * 4]);
+            v[4 * k + 0] = t.x; v[4 * k + 1] = t.y; v[4 * k + 2] = t.z; v[4 * k + 3] = t.w;
+            sum += t.x + t.y + t.z + t.w;
+        }
+#pragma unroll
+        for (int o = 16; o > 0; o >>= 1) sum += __shfl_xor_sync(0xffffffffu, sum, o);
+        const float mu = sum / C;
+        float sq = 0.0f;
+#pragma unroll
+        for (int i = 0; i < CPL; ++i) { const float d = v[i] - mu; sq += d * d; }
+#pragma unroll
+        for (int o = 16; o > 0; o >>= 1) sq += __shfl_xor_sync(0xffffffffu, sq, o);
+        const float rs = rsqrtf(sq / C + 1e-5f);
+        if (lane == 0) { mean[row] = mu; rstd[row] = rs; }
+        float *y = out + (size_t)row * C;
+#pragma unroll
+        for (int k = 0; k < F4; ++k) {
+            const int c0 = (k * 32 + lane) * 4;
+            const float4 w = CVEC4(weight[c0]), b = CVEC4(bias[c0]);
+            float4 r;
+            r.x = (v[4 * k + 0] - mu) * rs * w.x + b.x;
+            r.y = (v[4 * k + 1] - mu) * rs * w.y + b.y;
+            r.z = (v[4 * k + 2] - mu) * rs * w.z + b.z;
+            r.w = (v[4 * k + 3] - mu) * rs * w.w + b.w;
+            VEC4(y[c0]) = r;
+        }
+    }
+}
+
+template <int CPL>
+__global__ void layernorm_bwd_warp_k(float *dinp, float *part_dw, float *part_db,
+                                     const float *dout, const float *inp,
+                                     const float *weight, const float *mean,
+                                     const float *rstd, int N) {
+    constexpr int C = 32 * CPL;
+    constexpr int F4 = CPL / 4;
+    const int lane = threadIdx.x % 32, warp = threadIdx.x / 32;
+    float acc_dw[CPL] = {}, acc_db[CPL] = {};
+    float w[CPL];
+#pragma unroll
+    for (int k = 0; k < F4; ++k) {
+        const float4 t = CVEC4(weight[(k * 32 + lane) * 4]);
+        w[4 * k + 0] = t.x; w[4 * k + 1] = t.y; w[4 * k + 2] = t.z; w[4 * k + 3] = t.w;
+    }
+    for (int row = blockIdx.x * LN_WARPS + warp; row < N; row += gridDim.x * LN_WARPS) {
+        const float *x = inp + (size_t)row * C;
+        const float *dy = dout + (size_t)row * C;
+        const float mu = mean[row], rs = rstd[row];
+        float xh[CPL], g[CPL], dxo[CPL];
+        float s1 = 0.0f, s2 = 0.0f;
+        float *dx = dinp + (size_t)row * C;
+#pragma unroll
+        for (int k = 0; k < F4; ++k) {
+            const int c0 = (k * 32 + lane) * 4;
+            // dx is read here, before the reductions it does not depend on,
+            // so its round trip overlaps them instead of following them.
+            const float4 dv = CVEC4(dx[c0]);
+            dxo[4 * k + 0] = dv.x; dxo[4 * k + 1] = dv.y; dxo[4 * k + 2] = dv.z; dxo[4 * k + 3] = dv.w;
+            const float4 xv = CVEC4(x[c0]), gv = CVEC4(dy[c0]);
+            xh[4 * k + 0] = (xv.x - mu) * rs; xh[4 * k + 1] = (xv.y - mu) * rs;
+            xh[4 * k + 2] = (xv.z - mu) * rs; xh[4 * k + 3] = (xv.w - mu) * rs;
+            g[4 * k + 0] = gv.x; g[4 * k + 1] = gv.y; g[4 * k + 2] = gv.z; g[4 * k + 3] = gv.w;
+        }
+#pragma unroll
+        for (int i = 0; i < CPL; ++i) {
+            const float dxhat = g[i] * w[i];
+            s1 += dxhat;
+            s2 += dxhat * xh[i];
+            acc_dw[i] += g[i] * xh[i];
+            acc_db[i] += g[i];
+        }
+#pragma unroll
+        for (int o = 16; o > 0; o >>= 1) {
+            s1 += __shfl_xor_sync(0xffffffffu, s1, o);
+            s2 += __shfl_xor_sync(0xffffffffu, s2, o);
+        }
+        const float m1 = s1 / C, m2 = s2 / C;
+#pragma unroll
+        for (int k = 0; k < F4; ++k) {
+            const int c0 = (k * 32 + lane) * 4;
+            float4 d = make_float4(dxo[4 * k], dxo[4 * k + 1], dxo[4 * k + 2], dxo[4 * k + 3]);
+            d.x += rs * (g[4 * k + 0] * w[4 * k + 0] - m1 - xh[4 * k + 0] * m2);
+            d.y += rs * (g[4 * k + 1] * w[4 * k + 1] - m1 - xh[4 * k + 1] * m2);
+            d.z += rs * (g[4 * k + 2] * w[4 * k + 2] - m1 - xh[4 * k + 2] * m2);
+            d.w += rs * (g[4 * k + 3] * w[4 * k + 3] - m1 - xh[4 * k + 3] * m2);
+            VEC4(dx[c0]) = d;
+        }
+    }
+    // Fold the warps' column partials, fixed order, one partial per block.
+    extern __shared__ float fold[];  // [LN_WARPS][2][C]
+#pragma unroll
+    for (int k = 0; k < F4; ++k) {
+        const int c0 = (k * 32 + lane) * 4;
+        VEC4(fold[(warp * 2 + 0) * C + c0]) = make_float4(acc_dw[4 * k], acc_dw[4 * k + 1], acc_dw[4 * k + 2], acc_dw[4 * k + 3]);
+        VEC4(fold[(warp * 2 + 1) * C + c0]) = make_float4(acc_db[4 * k], acc_db[4 * k + 1], acc_db[4 * k + 2], acc_db[4 * k + 3]);
+    }
+    __syncthreads();
+    for (int c = threadIdx.x; c < C; c += blockDim.x) {
+        float sw = 0.0f, sb = 0.0f;
+#pragma unroll
+        for (int wv = 0; wv < LN_WARPS; ++wv) {
+            sw += fold[(wv * 2 + 0) * C + c];
+            sb += fold[(wv * 2 + 1) * C + c];
+        }
+        part_dw[(size_t)blockIdx.x * C + c] = sw;
+        part_db[(size_t)blockIdx.x * C + c] = sb;
+    }
+}
+
 // --------------------------------------------------------------------- gelu
 // GPT-2's tanh approximation, kept exactly because the model is compared
 // against reference implementations that use it.
@@ -408,6 +546,14 @@ void encoder_backward(float *dwte, float *dwpe, const float *dout,
 
 void layernorm_forward(float *out, float *mean, float *rstd, const float *inp,
                        const float *weight, const float *bias, int N, int C) {
+    // The warp-per-row kernel, for the width the model uses; the block-per-row
+    // one remains the general path.
+    if (C == 384) {
+        const int blocks = ceil_div(N, LN_WARPS);
+        layernorm_fwd_warp_k<12><<<blocks, 32 * LN_WARPS>>>(out, mean, rstd, inp,
+                                                          weight, bias, N);
+        return;
+    }
     layernorm_fwd_k<<<N, 128>>>(out, mean, rstd, inp, weight, bias, C);
 }
 
@@ -449,9 +595,28 @@ void layernorm_backward(float *dinp, float *dweight, float *dbias,
         cudaMalloc(&part, need * sizeof(float));
         cap = need;
     }
-    const size_t smem = (size_t)C * 2 * sizeof(float);
-    layernorm_bwd_k<<<blocks, 128, smem>>>(dinp, part, part + (size_t)blocks * C,
-                                           dout, inp, weight, mean, rstd, N, C);
+    if (C == 384) {
+        // Warp per row: sixteen rows in flight per block, so a block's share of
+        // the rows is sixteen times what it was, and the block count still
+        // decides how many partials the reduction sums. Swept in situ with
+        // --ln-blocks (ms/step for the region, this card, 16 warps per block):
+        //
+        //   blocks      23     46     92    184    368    736
+        //   ms/step   1.11   1.15   1.26   1.24   1.44   1.75
+        //
+        // against 1.60 for the block-per-row kernel at its own best count.
+        // Fewer blocks win and the curve is flat at the bottom, so half a
+        // block per SM is the default rather than eight.
+        if (g_ln_blocks_force <= 0) blocks = target_blocks() / 8;
+        if (blocks < 1) blocks = 1;
+        const size_t fold = (size_t)LN_WARPS * 2 * C * sizeof(float);
+        layernorm_bwd_warp_k<12><<<blocks, 32 * LN_WARPS, fold>>>(
+            dinp, part, part + (size_t)blocks * C, dout, inp, weight, mean, rstd, N);
+    } else {
+        const size_t smem = (size_t)C * 2 * sizeof(float);
+        layernorm_bwd_k<<<blocks, 128, smem>>>(dinp, part, part + (size_t)blocks * C,
+                                               dout, inp, weight, mean, rstd, N, C);
+    }
     layernorm_bwd_reduce_k<<<ceil_div(C, 256), 256>>>(
         dweight, dbias, part, part + (size_t)blocks * C, C, blocks);
 }
