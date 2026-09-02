@@ -20,10 +20,16 @@ if not defined NCU (
   exit /b 1
 )
 
-echo [ncu] %NCU%
+REM Arguments pass through to train_gpt, and --tf32 matters: the tensor-core
+REM backward kernels (flash_bwd_kv_mma_k, flash_bwd_q_mma_k) run only on that
+REM path, and profiling the fp32 ones says nothing about them.
+REM   scripts\profile_flash.bat --tf32
+set "TAG=fp32"
+if /i "%~1"=="--tf32" set "TAG=tf32"
+echo [ncu] %NCU% (%TAG%)
 "%NCU%" --kernel-name regex:flash_ --launch-count 24 ^
   --section SpeedOfLight --section Occupancy --section MemoryWorkloadAnalysis ^
-  --section LaunchStats ^
-  bench\train_gpt.exe -n 2 --eval 10000 --sample 10000 > bench\logs\flash_ncu.txt 2>&1
+  --section LaunchStats --section WarpStateStats ^
+  bench\train_gpt.exe -n 2 --eval 10000 --sample 10000 --len 0 %* > bench\logs\flash_ncu_%TAG%.txt 2>&1
 
-echo wrote bench\logs\flash_ncu.txt
+echo wrote bench\logs\flash_ncu_%TAG%.txt
