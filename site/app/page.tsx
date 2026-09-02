@@ -1679,6 +1679,84 @@ run1 2.7130  run2 2.7135  DIFFERS`}</pre>
         worth almost as much as the trick.
       </p>
 
+      <h2>The attention backward was starved of warps, not bandwidth</h2>
+      <p>
+        With the matmuls near their ceiling the largest single-kernel line left was the fused
+        attention backward: 14% of a step, at about 60% of the forward&rsquo;s efficiency with
+        2.5× its flops. Every tile sweep this repo had run on that kernel assumed the reason was
+        the usual one — shared-memory traffic — and had found that every arrangement which
+        improved the shared-loads-per-FMA ratio spent shared memory to get it and lost a resident
+        block. The profile, once someone was at the machine to approve the prompt it needs, said
+        something different.
+      </p>
+      <div className="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>kernel</th>
+              <th className="n">theoretical occupancy</th>
+              <th>limiter</th>
+              <th className="n">compute</th>
+              <th className="n">shared (L1/TEX)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>forward (tensor cores)</td><td className="n">25%</td><td>—</td><td className="n">46%</td><td className="n">49%</td></tr>
+            <tr className="hi"><td>backward dK/dV</td><td className="n">8.3%</td><td>shared memory, 2 blocks/SM</td><td className="n">28%</td><td className="n">39%</td></tr>
+            <tr className="hi"><td>backward dQ</td><td className="n">8.3%</td><td>shared memory, 2 blocks/SM</td><td className="n">23%</td><td className="n">34%</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        Both backward kernels ran in 64-thread blocks, two per SM: <strong>four warps per SM</strong>,
+        nothing saturated, a third of the stall cycles waiting on shared loads that four warps
+        cannot hide, and a register budget that would have allowed six blocks. The forward, at
+        three times the occupancy, reaches twice the utilisation. The kernel was not bound. It was
+        alone.
+      </p>
+      <p>
+        The cheapest way to double the warps without touching the footprint is to split each
+        16-row tile&rsquo;s work across two warps along the <em>other</em> axis — in dK/dV, a warp
+        takes its 16 keys against half the query tile; in dQ, its 16 queries against half the key
+        tile — and fold the two halves once per block through operand memory the loop has
+        finished with. Same lane mapping on both sides, so the fold is a copy and an add. The
+        one-warp originals stay in the config table, so the comparison is inside one binary:
+      </p>
+      <div className="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>fused backward, T=256</th>
+              <th className="n">ms</th>
+              <th className="n">TFLOP/s</th>
+              <th className="n"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>one warp per tile, both kernels (the old default)</td><td className="n">0.451</td><td className="n">6270</td><td className="n"></td></tr>
+            <tr><td>dK/dV split only</td><td className="n">0.361</td><td className="n">7835</td><td className="n">1.25×</td></tr>
+            <tr className="hi"><td>both kernels split</td><td className="n"><strong>0.304</strong></td><td className="n"><strong>9309</strong></td><td className="n"><strong>1.40×</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        Errors identical to the last digit, ragged shapes pass, the TF32 trajectory matches the
+        recorded one to four decimals with last-digit drift where the dQ partials are now summed
+        in a different order. In the step, pinned, medians of four alternated profiled runs:
+        attention backward <strong>5.65 → 4.00 ms</strong>, the attention forward unchanged as a
+        control, and the step <strong>38.07 → 36.15 ms — five percent</strong>. The backward now
+        runs at 9.3 TFLOP/s against the forward&rsquo;s ~11; what separates them is the
+        recomputation of S and dP in both kernels, which is structural to the two-kernel split.
+      </p>
+      <div className="note">
+        <p style={{ margin: 0 }}>
+          A paragraph of reasoning this writeup had carried for months — that the backward was
+          bound on shared-memory traffic and every fix cost a resident block — was true of the
+          fp32 kernel it was written about and false of the tensor-core kernel that replaced it.
+          The counter that mattered was occupancy, and it took thirty seconds to read.
+        </p>
+      </div>
+
       <h2>What I&rsquo;d do next</h2>
       <ol>
         <li>
@@ -1714,9 +1792,10 @@ run1 2.7130  run2 2.7135  DIFFERS`}</pre>
           <strong>What the profile says now:</strong> the backward matmuls, <code>dW</code> and{' '}
           <code>dX</code>, are ~25% of a step each, and the cheap routes into both are measured
           shut — the staging overlaps are blocked by shared memory on one side and the register
-          file on the other, and the split counts now sit on their measured curve. Attention&rsquo;s
-          backward is 14% at 2.2 TFLOP/s and remains the least tensor-core-shaped kernel in the
-          repo. Anything further here is a redesign, not a parameter.
+          file on the other, and the split counts now sit on their measured curve. The attention
+          backward, which this list used to call &ldquo;a redesign, not a parameter,&rdquo; turned out
+          to be a parameter after all — see above — and what remains there is the S/dP
+          recomputation that is structural to the two-kernel split.
         </li>
         <li>
           <strong><s>Multi-GPU</s></strong> — done, in the sense that matters: the missing time was
