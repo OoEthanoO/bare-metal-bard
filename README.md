@@ -2151,7 +2151,23 @@ interleaved against a drifting machine:
 
 ```bash
 ./bench/train_gpt -n 12 -b 2 -t 2048 --tf32 --eval 0 --len 0 --bwd-cfg 8
+```
+
+Data-parallel training, the region profiler and the host-thread trace:
+
+```bash
+./bench/train_gpt -n 40 --gpus 2                 # one replica per GPU; on one GPU, a rehearsal
+./bench/train_gpt -n 40 --gpus 2 --ddp-trace     # per-rank host phase times, rank losses, gradient checksum
+./bench/train_gpt -n 30 --tf32 --profile         # cudaEvent regions, one sync per step
+DDP_NO_P2P=1 ./bench/train_gpt --gpus 2          # stage every transfer through host memory
 ```
+
+Rented multi-GPU boxes run one script each: `scripts/cloud_multigpu.sh` is
+the whole experiment (topology, peer probe, build, correctness gate, scaling),
+`scripts/cloud_bisect_anomaly.sh` and `scripts/cloud_anomaly_decider.sh` are
+the one-variable-at-a-time hunts described in the multi-GPU item below. On
+Windows, `set BMB_ARCH=sm_120` lets `scriptsuild.bat` proceed when
+`nvidia-smi` will not answer.
 
 Regenerate the charts:
 
