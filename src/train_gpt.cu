@@ -546,7 +546,10 @@ int main(int argc, char **argv) {
         // same seed and data, which means one rank's forward differed before
         // any communication. Naming the rank is the first step to naming the
         // cause, so the per-rank losses are printed alongside the trace.
-        if (ddp_trace && nranks > 1 && (step % 10 == 0 || step == 1)) {
+        // Always at step 1 with several ranks, not only under --ddp-trace: the
+        // deterministic anomaly on the A40 hosts hides whenever the trace flag
+        // is on, so the one line that names the rank must cost nothing else.
+        if (nranks > 1 && (step == 1 || (ddp_trace && step % 10 == 0))) {
             printf("  rank losses");
             for (int r = 0; r < nranks; ++r) printf("  %d:%.4f", r, rank_loss[r]);
             printf("\n");
