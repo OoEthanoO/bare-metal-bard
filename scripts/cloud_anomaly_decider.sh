@@ -1,30 +1,42 @@
 #!/usr/bin/env bash
-# The deciding experiment for the host-correlated anomaly, on ONE pod in the
-# datacenter that reproduced it (README, multi-GPU item): first the isolated
-# sequence and its one-variable variants, then the exact prefix of
-# cloud_multigpu.sh that read 4.2701 / 32.750 three sessions running. If the
-# isolated sequence reproduces here, it is the host class and not the script;
-# if only the prefix does, it is something the prefix leaves behind.
+# The two-rank anomaly, second decider. Run 9 (bench/logs/multigpu_a40_run9_decider.txt)
+# settled the first question: the isolated sequence is clean everywhere, and
+# what reproduces it -- 4.2748 / 4.2655 on the two ranks against 4.2873 /
+# 4.2693, both ranks wrong, on the same host class the "clean" bisection ran
+# on -- is the PREFIX: sgemm, then test_ddp, then a 1-rank run, then the
+# 2-rank run. Run the 2-rank run again immediately and it is clean. So
+# something in the two-rank process reads device memory before writing it,
+# and what it finds there depends on which process ran before. test_ddp is
+# the predecessor that touches both devices.
+#
+# compute-sanitizer's initcheck exists for exactly this: it names the kernel
+# and the address of every read of uninitialized device memory. It is slow,
+# so it runs one step. Then the predecessor is bisected.
 set -uo pipefail
 export PATH="/usr/local/cuda/bin:$PATH"
 hostname; nvidia-smi --query-gpu=index,name,pci.bus_id --format=csv,noheader
 make -j"$(nproc)" bench/train_gpt bench/test_ddp bench/sgemm >/dev/null 2>&1 || { echo BUILD FAILED; exit 1; }
 ./scripts/get_data.sh >/dev/null 2>&1 || true
-pre()  { ./bench/train_gpt -n 40 --eval 10000 --sample 10000 --len 0 >/dev/null 2>&1; }
-subj() { ./bench/train_gpt "$@" --eval 10000 --sample 10000 --len 0 2>&1 | grep -E "^step +(1|10)/|rank losses|post-allreduce|^links" | head -5; }
+T2()  { ./bench/train_gpt -n 2 --gpus 2 --eval 10000 --sample 10000 --len 0 2>&1 | grep -E "^step +1/|rank losses" | head -2; }
+T1()  { ./bench/train_gpt -n 40 --eval 10000 --sample 10000 --len 0 >/dev/null 2>&1; }
+SG()  { ./bench/sgemm -k 8,9 -s 4096 >/dev/null 2>&1; }
+DDP() { ./bench/test_ddp >/dev/null 2>&1; }
 
-echo "=== part 1: isolated sequence (clean 9/9 on another datacenter's A40) ==="
-for i in 1 2 3; do pre; echo "--- A$i control ---"; subj -n 40 --gpus 2; done
-pre; echo "--- B CUDA_LAUNCH_BLOCKING=1 ---"; CUDA_LAUNCH_BLOCKING=1 subj -n 40 --gpus 2
-pre; echo "--- C traced ---"; subj -n 40 --gpus 2 --ddp-trace
-
-echo "=== part 2: the exact prefix of cloud_multigpu.sh that reproduced it ==="
-./bench/sgemm -k 8,9 -s 4096 >/dev/null 2>&1
-./bench/test_ddp 2>&1 | grep -E "passed|FAIL|effective"
-echo "--- 1 rank, n40 (as in the script) ---"
-./bench/train_gpt -n 40 --eval 10000 --sample 10000 --len 0 2>&1 | tail -8 | grep -E "^step +(1|40)/"
-echo "--- 2 ranks, n40 (the reproducing section) ---"
-./bench/train_gpt -n 40 --gpus 2 --eval 10000 --sample 10000 --len 0 2>&1 | grep -E "^step +(1|10)/|rank losses|^links" | head -5
-echo "--- 2 ranks, n40, again, immediately ---"
-./bench/train_gpt -n 40 --gpus 2 --eval 10000 --sample 10000 --len 0 2>&1 | grep -E "^step +(1|10)/|rank losses|^links" | head -5
+echo "=== 1. reproduce: sgemm, test_ddp, 1-rank, then 2-rank (expect 4.2748 / 4.2655) ==="
+SG; DDP; T1; T2
+echo "=== 2. compute-sanitizer initcheck on one two-rank step after the same prefix ==="
+SG; DDP; T1
+SAN=$(command -v compute-sanitizer || ls /usr/local/cuda/bin/compute-sanitizer 2>/dev/null | head -1)
+echo "sanitizer: $SAN"
+"$SAN" --tool initcheck --track-unused-memory no ./bench/train_gpt -n 1 --gpus 2 --eval 10000 --sample 10000 --len 0 2>&1 \
+  | grep -vE "WARNING: peer|at least one peer" | grep -E "Uninitialized|initcheck|at 0x|by thread|in .*_k|Saved host|Host Frame:./bench|^=+ .*[Ee]rror|^step +1/|rank losses|ERROR SUMMARY" | head -60
+echo "=== 3. predecessor bisection (2-rank directly after each) ==="
+echo "--- after sgemm only ---";     SG; T2
+echo "--- after test_ddp only ---";  DDP; T2
+echo "--- after test_ddp then 1-rank ---"; DDP; T1; T2
+echo "--- after sgemm then 1-rank ---";    SG; T1; T2
+echo "--- after 2-rank (self) ---";  T2
+echo "=== 4. and the same prefix with the two-rank run traced (does the trace hide it?) ==="
+SG; DDP; T1
+./bench/train_gpt -n 2 --gpus 2 --ddp-trace --eval 10000 --sample 10000 --len 0 2>&1 | grep -E "^step +1/|rank losses|post-allreduce" | head -3
 echo "=== done ==="

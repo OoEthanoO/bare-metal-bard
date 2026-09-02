@@ -1,0 +1,47 @@
+6831f821abbe
+0, NVIDIA A40, 00000000:57:00.0
+1, NVIDIA A40, 00000000:D1:00.0
+=== part 1: isolated sequence (clean 9/9 on another datacenter's A40) ===
+--- A1 control ---
+links     NO peer access -- every transfer staged through host memory
+  rank losses  0:4.2873  1:4.2693
+step     1/40  loss 4.2783  lr 1.00e-05  |g| 15.023    86.7 ms    47265 tok/s   3396 GFLOP/s  comm  16.7 ms (19.3%)
+step    10/40  loss 3.0928  lr 1.00e-04  |g| 4.856    27.8 ms   147194 tok/s  10576 GFLOP/s  comm   8.1 ms (29.2%)
+--- A2 control ---
+links     NO peer access -- every transfer staged through host memory
+  rank losses  0:4.2873  1:4.2693
+step     1/40  loss 4.2783  lr 1.00e-05  |g| 15.023    94.1 ms    43550 tok/s   3129 GFLOP/s  comm  16.8 ms (17.9%)
+step    10/40  loss 3.0931  lr 1.00e-04  |g| 4.977    27.9 ms   146997 tok/s  10561 GFLOP/s  comm   8.2 ms (29.6%)
+--- A3 control ---
+links     NO peer access -- every transfer staged through host memory
+  rank losses  0:4.2873  1:4.2693
+step     1/40  loss 4.2783  lr 1.00e-05  |g| 15.023    86.3 ms    47445 tok/s   3409 GFLOP/s  comm  17.9 ms (20.7%)
+step    10/40  loss 3.0931  lr 1.00e-04  |g| 4.977    28.0 ms   146092 tok/s  10496 GFLOP/s  comm   8.3 ms (29.6%)
+--- B CUDA_LAUNCH_BLOCKING=1 ---
+links     NO peer access -- every transfer staged through host memory
+  rank losses  0:4.2873  1:4.2693
+step     1/40  loss 4.2783  lr 1.00e-05  |g| 15.023   102.3 ms    40041 tok/s   2877 GFLOP/s  comm  17.8 ms (17.4%)
+step    10/40  loss 3.0931  lr 1.00e-04  |g| 4.977    29.4 ms   139172 tok/s   9999 GFLOP/s  comm   8.4 ms (28.4%)
+--- C traced ---
+links     NO peer access -- every transfer staged through host memory
+  rank losses  0:4.2873  1:4.2693
+  post-allreduce |g| per rank  0:30.045328  1:30.045328  (identical)
+step     1/40  loss 4.2783  lr 1.00e-05  |g| 15.023    86.0 ms    47641 tok/s   3423 GFLOP/s  comm  17.7 ms (20.6%)
+  rank losses  0:3.1213  1:3.0650
+=== part 2: the exact prefix of cloud_multigpu.sh that reproduced it ===
+  effective link       5.6 GB/s
+all correctness checks passed
+--- 1 rank, n40 (as in the script) ---
+step     1/40  loss 4.2783  lr 1.00e-05  |g| 15.023    73.8 ms    55494 tok/s   3987 GFLOP/s
+step    40/40  loss 2.5970  lr 4.00e-04  |g| 1.809    32.4 ms   126360 tok/s   9079 GFLOP/s
+--- 2 ranks, n40 (the reproducing section) ---
+links     NO peer access -- every transfer staged through host memory
+  rank losses  0:4.2748  1:4.2655
+step     1/40  loss 4.2701  lr 1.00e-05  |g| 32.750    84.1 ms    48690 tok/s   3498 GFLOP/s  comm  17.3 ms (20.6%)
+step    10/40  loss 3.1533  lr 1.00e-04  |g| 10.139    28.1 ms   145685 tok/s  10467 GFLOP/s  comm   8.2 ms (29.3%)
+--- 2 ranks, n40, again, immediately ---
+links     NO peer access -- every transfer staged through host memory
+  rank losses  0:4.2873  1:4.2693
+step     1/40  loss 4.2783  lr 1.00e-05  |g| 15.023    85.7 ms    47792 tok/s   3434 GFLOP/s  comm  18.6 ms (21.7%)
+step    10/40  loss 3.0931  lr 1.00e-04  |g| 4.977    27.9 ms   146721 tok/s  10542 GFLOP/s  comm   8.3 ms (29.8%)
+=== done ===
