@@ -2504,17 +2504,28 @@ four scalar stores.
    removed from in front of it — which is exactly why the measurement, not
    the lesson, had to come first.
 
-   One anomaly is open and recorded rather than hidden: in one of nine
-   two-device runs, step 1 read loss 4.2701 and |g| 32.75 instead of 4.2783
-   and 15.023 — a forward that differed on one rank before any communication,
-   with a different signature from the bug above. A fourth rental ran the
-   same configuration twelve more times under `--ddp-trace`, which prints
-   each rank's own loss and a cross-rank checksum of the gradient after the
-   all-reduce ([run 4](bench/logs/multigpu_a40_run4_anomaly_hunt.txt)):
-   twelve of twelve read rank losses 4.2873 / 4.2693 and bit-identical
-   gradients on both ranks. So the rate is at most one in twenty-one, it did
-   not show itself to the instruments built for it, and it stays on this
-   list as unexplained rather than as fixed.
+   One anomaly is open and recorded rather than hidden. In the full cloud
+   script, the two-rank 40-step run that follows the one-rank 40-step run
+   read step-1 loss 4.2701 and |g| 32.750 instead of 4.2783 and 15.023 —
+   the same digits in three separate sessions
+   ([run 3](bench/logs/multigpu_a40_run3.txt),
+   [run 4](bench/logs/multigpu_a40_run4_anomaly_hunt.txt),
+   [run 5](bench/logs/multigpu_a40_run5_hunt100.txt)), all on A40 hosts in
+   one datacenter — and then trained visibly worse, so the gradient is wrong
+   on every step there, not once. It is deterministic, not a race: one
+   hundred short two-rank runs under `--ddp-trace` read clean every time, and
+   `steps` is used nowhere before the first forward. Two bisections then
+   changed one thing at a time — the trace flag, `CUDA_LAUNCH_BLOCKING`,
+   forced staging, a short subject, no predecessor — on an
+   [A6000 host](bench/logs/multigpu_a6000_run7_bisect.txt) and on an
+   [A40 host in a different datacenter](bench/logs/multigpu_a40_run8_bisect.txt):
+   seventeen cases, seventeen clean, including the exact control sequence
+   three times over. So it is host-correlated as well as deterministic, and
+   the deciding experiment — the full script on the clean host against the
+   isolated sequence on the reproducing one — has not been run. Until it
+   has, this stays on the list as unexplained rather than as fixed, and every
+   multi-rank run now prints each rank's own step-1 loss so the next
+   reproduction names the rank.
 
    That fourth run also corrected an attribution above. Its traced runs read
    90 ms while the untraced one read 41, and the difference was the checksum

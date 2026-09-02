@@ -1,0 +1,26 @@
+GPUs: 2
+--- A control: 1-rank n40, then 2-rank n40 (expect 4.2701 / 32.750) ---
+step     1/40  loss 4.2783  lr 1.00e-05  |g| 15.023    75.2 ms    54469 tok/s   3914 GFLOP/s  comm   4.5 ms ( 5.9%)
+--- B same, subject traced (rank losses + checksum) ---
+  rank losses  0:4.2873  1:4.2693
+  post-allreduce |g| per rank  0:30.045328  1:30.045328  (identical)
+step     1/40  loss 4.2783  lr 1.00e-05  |g| 15.023    68.0 ms    60226 tok/s   4327 GFLOP/s  comm   3.4 ms ( 5.1%)
+--- C same predecessor, subject is SHORT (n2) ---
+step     1/2  loss 4.2783  lr 1.00e-05  |g| 15.023    73.0 ms    56097 tok/s   4030 GFLOP/s  comm   3.4 ms ( 4.7%)
+--- D predecessor is a 2-rank n2, subject n40 ---
+step     1/40  loss 4.2783  lr 1.00e-05  |g| 15.023    73.3 ms    55871 tok/s   4014 GFLOP/s  comm   3.3 ms ( 4.6%)
+--- E predecessor 1-rank n2 (untrained), subject n40 ---
+step     1/40  loss 4.2783  lr 1.00e-05  |g| 15.023    70.6 ms    58056 tok/s   4171 GFLOP/s  comm   3.5 ms ( 4.9%)
+--- F predecessor 1-rank n40, subject 2-rank n40 with both ranks on ONE device ---
+  rank losses  0:4.2873  1:4.2693
+  post-allreduce |g| per rank  0:30.045328  1:30.045328  (identical)
+step     1/40  loss 4.2783  lr 1.00e-05  |g| 15.023    85.9 ms    47679 tok/s   3426 GFLOP/s  comm   1.5 ms ( 1.7%)
+--- G no predecessor at all (sleep 5), subject n40 ---
+  rank losses  0:4.2873  1:4.2693
+  post-allreduce |g| per rank  0:30.045328  1:30.045328  (identical)
+step     1/40  loss 4.2783  lr 1.00e-05  |g| 15.023    73.8 ms    55531 tok/s   3990 GFLOP/s  comm   3.2 ms ( 4.4%)
+--- H predecessor 1-rank n40 B=32, subject 2-rank n40 B=32 ---
+  rank losses  0:4.2783  1:4.2903
+  post-allreduce |g| per rank  0:30.080896  1:30.080896  (identical)
+step     1/40  loss 4.2843  lr 1.00e-05  |g| 15.040    89.1 ms    91930 tok/s   6605 GFLOP/s  comm   4.9 ms ( 5.5%)
+=== done ===

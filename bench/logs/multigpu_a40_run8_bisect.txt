@@ -1,0 +1,43 @@
+0, NVIDIA A40
+1, NVIDIA A40
+--- A1 control: 1-rank n40, then 2-rank n40 (A40 hosts read 4.2701 / 32.750) ---
+links     NO peer access -- every transfer staged through host memory
+  rank losses  0:4.2873  1:4.2693
+step     1/40  loss 4.2783  lr 1.00e-05  |g| 15.023   118.3 ms    34613 tok/s   2487 GFLOP/s  comm  18.0 ms (15.2%)
+step    10/40  loss 3.0931  lr 1.00e-04  |g| 4.977    27.7 ms   148007 tok/s  10634 GFLOP/s  comm   7.7 ms (28.0%)
+--- A2 control: 1-rank n40, then 2-rank n40 (A40 hosts read 4.2701 / 32.750) ---
+links     NO peer access -- every transfer staged through host memory
+  rank losses  0:4.2873  1:4.2693
+step     1/40  loss 4.2783  lr 1.00e-05  |g| 15.023   134.9 ms    30367 tok/s   2182 GFLOP/s  comm  18.1 ms (13.4%)
+step    10/40  loss 3.0931  lr 1.00e-04  |g| 4.977    28.9 ms   141968 tok/s  10200 GFLOP/s  comm   8.9 ms (30.7%)
+--- A3 control: 1-rank n40, then 2-rank n40 (A40 hosts read 4.2701 / 32.750) ---
+links     NO peer access -- every transfer staged through host memory
+  rank losses  0:4.2873  1:4.2693
+step     1/40  loss 4.2783  lr 1.00e-05  |g| 15.023    84.0 ms    48781 tok/s   3505 GFLOP/s  comm  17.9 ms (21.3%)
+step    10/40  loss 3.0931  lr 1.00e-04  |g| 4.977    29.4 ms   139409 tok/s  10016 GFLOP/s  comm   9.6 ms (32.6%)
+--- B control under CUDA_LAUNCH_BLOCKING=1 (no stream-ordering race can survive this) ---
+links     NO peer access -- every transfer staged through host memory
+  rank losses  0:4.2873  1:4.2693
+step     1/40  loss 4.2783  lr 1.00e-05  |g| 15.023   144.9 ms    28265 tok/s   2031 GFLOP/s  comm  18.2 ms (12.6%)
+step    10/40  loss 3.0931  lr 1.00e-04  |g| 4.977    29.3 ms   139889 tok/s  10051 GFLOP/s  comm   8.2 ms (28.0%)
+--- C control, traced ---
+links     NO peer access -- every transfer staged through host memory
+  rank losses  0:4.2873  1:4.2693
+  post-allreduce |g| per rank  0:30.045328  1:30.045328  (identical)
+step     1/40  loss 4.2783  lr 1.00e-05  |g| 15.023   247.0 ms    16584 tok/s   1192 GFLOP/s  comm  33.3 ms (13.5%)
+  rank losses  0:3.1213  1:3.0650
+--- D control with DDP_NO_P2P=1 (already staged on A40 hosts; on others forces it) ---
+links     NO peer access -- every transfer staged through host memory
+  rank losses  0:4.2873  1:4.2693
+step     1/40  loss 4.2783  lr 1.00e-05  |g| 15.023   185.7 ms    22053 tok/s   1584 GFLOP/s  comm  17.2 ms ( 9.3%)
+step    10/40  loss 3.0931  lr 1.00e-04  |g| 4.977    28.2 ms   145267 tok/s  10437 GFLOP/s  comm   8.2 ms (29.1%)
+--- E control, subject short (n2) ---
+links     NO peer access -- every transfer staged through host memory
+  rank losses  0:4.2873  1:4.2693
+step     1/2  loss 4.2783  lr 1.00e-05  |g| 15.023   127.1 ms    32238 tok/s   2316 GFLOP/s  comm  17.5 ms (13.8%)
+--- F no predecessor (fresh after 10 s idle), 2-rank n40 ---
+links     NO peer access -- every transfer staged through host memory
+  rank losses  0:4.2873  1:4.2693
+step     1/40  loss 4.2783  lr 1.00e-05  |g| 15.023   251.0 ms    16320 tok/s   1173 GFLOP/s  comm  48.3 ms (19.2%)
+step    10/40  loss 3.0931  lr 1.00e-04  |g| 4.977    27.5 ms   148729 tok/s  10686 GFLOP/s  comm   7.5 ms (27.3%)
+=== done ===
