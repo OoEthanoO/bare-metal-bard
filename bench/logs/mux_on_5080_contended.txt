@@ -1,0 +1,45 @@
+MUX ON -- the desktop shares the GPU with the benchmark.
+RTX 5080 Laptop (sm_120, 60 SMs, 896 GB/s), CUDA 13.3.1, MSVC 19.44,
+SM clock locked 1200 (reads 1185-1192 across busy samples).
+
+This file is the "before" half of a MUX on/off A/B on ONE card. With MUX on the
+dGPU drives the display directly and there is no iGPU to hand the desktop to,
+so the card is never idle:
+
+  idle utilization, 6 samples 700 ms apart:  23, 21, 22, 21, 21, 22 %
+  graphics clients: explorer, ShellExperienceHost, SearchHost,
+                    StartMenuExperienceHost, NVIDIA Overlay (x2),
+                    msedge, msedgewebview2
+
+Full ladder, N=4096, one sweep:
+
+id   kernel        size   best GF/s   med GF/s  cuBLAS GF/s  %cuBLAS
+1    naive         4096        94.6       93.5       9129.5     1.0%
+2    coalesced     4096       621.1      610.8       8500.9     7.3%
+3    smem          4096       948.0      932.5       9306.4    10.2%
+4    tile1d        4096      3031.4     2896.6       9105.8    33.3%
+5    tile2d        4096      6114.7     5750.4       9283.0    65.9%
+6    vectorized    4096      7491.2     6918.0       9284.1    80.7%
+7    warptile      4096      6874.9     6584.0       9124.9    75.3%
+8    dbuffer       4096      7563.5     6971.4       8468.1    89.3%
+9    tensorcore    4096      5640.8     5393.1       9311.9    60.6%
+10   mma           4096     10459.7     9916.4       9138.3   114.5%
+11   cpasync       4096     11069.4    10496.8       8650.2   128.0%
+
+Kernel 11 five times back to back, same binary, same clock:
+
+  best    11461.0  10973.5  12501.4  11097.8  11327.7   -> 14% spread
+  median  10553.1  10525.0  10416.0  10765.2  10745.0   -> 3.3% spread
+  cuBLAS   8933.4   9028.3   9391.1   9320.9   9181.4   -> 5% spread
+
+WHAT THIS SHOWS. On the 5070 Ti the same kernel read best 11100 / median 11085
+-- they agreed to 0.1%, because that machine was quiet. Here they split apart:
+`best` catches the iteration that happened to run while the desktop was idle,
+`median` carries the contention tax. A benchmark that reports only `best` would
+have hidden this entirely.
+
+The absolute level is depressed too, and by about the right amount. cuBLAS
+reads ~9100 here against the 5070 Ti's ~9490, despite this card having 60 SMs
+against 46 at the same clock. Correcting for the ~22% the desktop takes,
+9100/0.78 = 11700, which is 1.23x the 5070 Ti -- close to the 1.30x the SM
+counts predict. The deficit is the desktop, not the card.

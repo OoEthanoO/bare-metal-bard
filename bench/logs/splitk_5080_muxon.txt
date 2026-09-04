@@ -1,0 +1,28 @@
+Split-K sweep, TF32, TN, RTX 5080 Laptop (60 SMs), clock locked 1200.
+TAKEN WITH MUX ON -- the desktop was taking ~22% of the GPU, so these are
+provisional and are to be re-taken with MUX off. Kept because the sweep is a
+comparison WITHIN one run, which contention distorts far less than it does an
+absolute GF/s, and because it is the first read of the derived rule on a
+60-SM card. (The rule's own comment says to re-measure it on a new card.)
+
+shape                  blk     1     2     3     4     5     6     7     8     9    10    11    12    13    14    15    16  derived  best@
+gpt: attn proj         192 10679  9767  9535  9586  9664  9591  9576  9615  9637  9608  9564  9581  9637  9586  9504  9608    10688  10679@1   -0.1%
+gpt: mlp up            768 14606 10279  9131  9164  9154  9125  9136  9160  9153  9130  9166  9136  9160  9197  9166  9139    14616  14606@1   -0.1%
+gpt: mlp down          192 11746 12776 13212 13577 13342 12635 12309 11800 11335 11111 10769 10298 10251 10234 10254 10234    13485  13577@4   +0.7%
+gpt: qkv proj          576 14117 10685  9375  9324  9369  9280  9365  9337  9329  9342  9335  9323  9365  9339  9329  9331    14085  14117@1   +0.2%
+gpt: dW attnproj        18  2815  5385  7679  7620  9029 10331  9535  9722 10272 11319 10847 10408 11148 11228 10180 10999    11241  11319@10  +0.7%
+gpt: dW qkv             54  8402 11683 12113 12491 12434 12948 12959 12762 13296 13540 13569 13642 13247 13176 12956 12937    13564  13642@12  +0.6%
+gpt: dW fc              72  8296 11031 12639 13428 14155 13224 13462 13660 13989 13841 13478 13613 13522 13351 13242 12826    13813  14155@5   +2.5%
+gpt: dW fcproj          72  8355 10990 12604 13427 14064 13206 13476 13757 13909 13758 13473 13577 13452 13402 13216 12782    13894  14064@5   +1.2%
+gpt: padded vocab head  64  6489  6420  6861  6820  6661  6707  6765  6895  6805  6809  6910  6831  6899  6637  6876  6776     6476   6910@11  +6.7%
+
+FIRST READING. The derived rule lands within 1% of the swept optimum on seven
+of nine shapes, within 2.5% on eight. That is the rule surviving a change of
+card -- 36 -> 46 -> 60 SMs -- which is what it was rewritten to do when it was
+found aimed at a hard-coded 144 blocks.
+
+The exception is the padded vocab head at +6.7% (6476 derived against 6910 at
+eleven splits), and it is the shape the rule has always handled worst: 64
+blocks, K=384, only 12 chunks. MIN_CHUNKS_PER_SPLIT = 12 forces it to exactly
+one split, and the sweep says it wants eleven. Worth a look after the re-take,
+but it is also the smallest GEMM in the step, so the end-to-end value is small.
