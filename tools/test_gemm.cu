@@ -9,6 +9,7 @@
 #include <cmath>
 #include <vector>
 #include <algorithm>
+#include <chrono>
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 #include "../src/gemm.h"
@@ -45,6 +46,56 @@ static void fill(std::vector<float> &v, unsigned s) {
     }
 }
 
+
+// PULL THE CARD OUT OF DEEP IDLE BEFORE TIMING ANYTHING.
+//
+// A locked SM clock is a CEILING, not a floor. With the display moved to the
+// iGPU (MUX off) nothing else touches this GPU, so it sits in a deep idle
+// state -- nvidia-smi reads 907 MHz, and lower between samples -- and a short
+// workload finishes before the clock has climbed to the 1192 the lock allows.
+//
+// Measured, the first shape of the --splitk sweep:
+//
+//   cold                                    3105 GF/s
+//   after `bench\sgemm.exe -k 10` ran       10703 GF/s     3.4x
+//
+// time_gemm already does three warmup iterations and takes the MINIMUM of
+// twenty, and the error survived all twenty-three launches -- because the
+// whole first shape is only ~2.6 ms of GPU work, which is not long enough to
+// ramp anything.
+//
+// It is the clock and not the process, and the evidence is that the warm-up
+// which fixed it ran in a SEPARATE PROCESS. A different binary cannot have
+// warmed this one's CUDA context, module cache or allocator, so the only state
+// it can have left behind is on the device.
+//
+// This is the dangerous shape of error: it hits the first cell measured, it is
+// identical on every run, and so three runs agree with each other while all
+// three are wrong. Cross-run spread cannot see it, which is why it is fixed
+// here rather than watched for.
+//
+// Under MUX ON this did not happen -- the desktop kept the card awake -- so
+// removing the contention is what exposed it.
+static void warm_up_device() {
+    const int N = 2048;
+    float *A, *B, *C;
+    if (cudaMalloc(&A, (size_t)N * N * 4) != cudaSuccess) return;
+    if (cudaMalloc(&B, (size_t)N * N * 4) != cudaSuccess) { cudaFree(A); return; }
+    if (cudaMalloc(&C, (size_t)N * N * 4) != cudaSuccess) { cudaFree(A); cudaFree(B); return; }
+    cudaMemset(A, 0, (size_t)N * N * 4);
+    cudaMemset(B, 0, (size_t)N * N * 4);
+    // Long enough to reach the locked clock, not so long it costs the session.
+    // 300 ms of dense GEMM is ~30 iterations at this size; the ramp is done
+    // well inside that.
+    const auto t0 = std::chrono::steady_clock::now();
+    while (std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now() - t0).count() < 300) {
+        for (int i = 0; i < 10; ++i)
+            gemm(false, false, N, N, N, 1.0f, A, B, 0.0f, C);
+        cudaDeviceSynchronize();
+    }
+    cudaFree(A); cudaFree(B); cudaFree(C);
+}
 
 // Time one gemm configuration. Both paths are timed in the same process, back
 // to back, so they see the same thermal state -- the same reason the SGEMM
@@ -144,6 +195,7 @@ int main(int argc, char **argv) {
     // Timing the SAME entry point both ways, per shape and per transpose case,
     // is what tells you which of the four cases pays for it.
     if (bench) {
+        warm_up_device();
         printf("%-22s %6s %6s %6s  %-4s %9s %9s %9s %10s %8s\n", "shape", "M",
                "N", "K", "op", "mine f32", "mine tf32", "cuBLAS32",
                "cuBLASTF32", "% cuTF32");
@@ -195,6 +247,7 @@ int main(int argc, char **argv) {
     // forward pass is not an improvement.
     if (splitk) {
         gemm_set_tf32(true);
+        warm_up_device();
         const int MAXSP = 16;
         printf("K-split sweep, TF32, TN (what every dW runs). GF/s.%s%s", "\n", "\n");
         printf("%-20s %5s", "shape", "blk");

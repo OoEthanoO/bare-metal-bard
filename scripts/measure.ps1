@@ -25,10 +25,26 @@
 # in Start-Process, sampler in the loop -- swallows the output, which makes the
 # clock check useless in the only way that matters: nobody uses a wrapper that
 # hides the numbers it is vouching for.
-param(
-    [Parameter(Mandatory = $true, ValueFromRemainingArguments = $true)]
-    [string[]]$Command
-)
+# WHY THERE IS NO param() BLOCK. There was one -- $Command with
+# ValueFromRemainingArguments -- and it ate any flag whose name is a prefix of
+# a PowerShell common parameter before the script ever saw it:
+#
+#   scripts\measure.bat bench\sgemm.exe -s 4096 -k 10 -i 60
+#   -> "ambiguous. Possible matches include: -InformationAction -InformationVariable."
+#
+# PowerShell binds parameters before ValueFromRemainingArguments collects the
+# leftovers, so `-i` was resolved against the cmdlet common parameters and the
+# run died. Anything starting -i, -e, -o, -v, -d, -w has the same problem, and
+# -w is bench/sgemm's warmup flag.
+#
+# A script with no param() block does not bind anything: every argument lands
+# in $args verbatim, dashes and all. The cost is checking arity by hand, which
+# is two lines.
+$Command = $args
+if (-not $Command -or $Command.Count -eq 0) {
+    Write-Error "usage: measure.bat <command> [args ...]"
+    exit 2
+}
 
 $target = if ($env:BMB_CLOCK) { [int]$env:BMB_CLOCK } else { 1200 }
 # nvidia-smi reports the nearest achievable step, not the requested number:
