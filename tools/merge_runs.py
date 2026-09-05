@@ -42,10 +42,33 @@ for key in sorted(cells):
     cub = [float(r["cublas_gflops_best"]) for r in runs]
     pct = [float(r["pct_of_cublas"]) for r in runs]
 
-    # Spread of the per-run bests, relative to the median. This is the number
-    # that would have caught the bad runs.
+    # Two spreads, and the FLAG WATCHES THE MEDIANS, not the bests.
+    #
+    # This used to flag on the spread of the per-run `best`s, on the reasoning
+    # that it is the number that would have caught the bad runs. It would have
+    # -- and it also fires when nothing is wrong, because `best` is an
+    # extreme-value statistic and one lucky iteration moves it on its own.
+    # Measured, warptile N=2048 on a quiet 5080:
+    #
+    #   per-run best     7964.7  7277.0  7356.6   -> 9.3%   flagged
+    #   per-run median   7274.8  7228.4  7205.5   -> 1.0%   fine
+    #
+    # Six standalone repeats of that cell then read 7403-7500 best and
+    # 7347-7390 median, so there was nothing unstable about it. The 9.3% was
+    # one fast iteration inside run 1.
+    #
+    # The two failure modes separate cleanly on which statistic moves. A bad
+    # RUN -- the 12-15% low outliers this tool was written for -- is slow in
+    # every iteration, so it drags the median down with it. A lucky ITERATION
+    # moves only the best. So the median spread is what distinguishes "this
+    # cell is not a result yet" from "one iteration got a clean shot at the
+    # machine", and the best spread is kept in the output because it is the
+    # contention signature: on a machine sharing its GPU with a desktop the
+    # two diverge, and that gap is worth seeing rather than hiding.
     m = statistics.median(best)
-    spread = (max(best) - min(best)) / m * 100.0 if m else 0.0
+    spread_best = (max(best) - min(best)) / m * 100.0 if m else 0.0
+    mm = statistics.median(med)
+    spread = (max(med) - min(med)) / mm * 100.0 if mm else 0.0
     if spread > worst_spread:
         worst_spread, worst_cell = spread, (name, size)
 
@@ -57,7 +80,11 @@ for key in sorted(cells):
         "pct_of_cublas": f"{statistics.median(pct):.2f}",
     })
     flag = "  <-- unstable" if spread > 3.0 else ""
-    print(f"{name:<12}{size:>6}  median {statistics.median(best):9.1f} GF/s"
+    # A best spread much wider than the median spread is the contention
+    # signature rather than an unstable cell, so it is named as itself.
+    if spread_best > 3.0 and spread <= 3.0:
+        flag = "  (best spread %.1f%% -- one fast iteration)" % spread_best
+    print(f"{name:<12}{size:>6}  median {statistics.median(med):9.1f} GF/s"
           f"  spread {spread:5.1f}%{flag}")
 
 with open(out_path, "w", newline="") as f:
@@ -66,6 +93,6 @@ with open(out_path, "w", newline="") as f:
     w.writerows(rows_out)
 
 print(f"\nwrote {out_path} ({len(rows_out)} cells, median of {len(run_paths)} runs)")
-print(f"worst spread: {worst_spread:.1f}% at {worst_cell[0]} N={worst_cell[1]}")
+print(f"worst median spread: {worst_spread:.1f}% at {worst_cell[0]} N={worst_cell[1]}")
 if worst_spread > 3.0:
     print("WARNING: a cell varies more than 3% across runs; do not publish it yet")
