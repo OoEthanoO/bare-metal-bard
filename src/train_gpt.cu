@@ -489,6 +489,17 @@ int main(int argc, char **argv) {
     std::vector<double> tr_fwd(nranks), tr_bwd_issue(nranks), tr_bwd_wait(nranks),
         tr_opt(nranks);
 
+    // See the discard logic below: the profiler's warm-up is bounded by wall
+    // time, not by a step count, because the SM clock ramp it exists to
+    // exclude takes a fixed number of seconds.
+    const auto t_loop_start = std::chrono::steady_clock::now();
+    auto msec_since = [](auto a) {
+        return std::chrono::duration<double, std::milli>(
+                   std::chrono::steady_clock::now() - a).count();
+    };
+    bool prof_ready = false;
+    int prof_from_step = 0;
+
     for (int step = 1; step <= steps; ++step) {
         get_batch(ds.train, B, T, rng, x, y);
 
@@ -650,12 +661,38 @@ int main(int argc, char **argv) {
             CUDA_CHECK(cudaDeviceSynchronize());
         }
         CUDA_CHECK(cudaSetDevice(devs[0]));
-        // One synchronize per step reads back every region's events. The first
-        // few steps are discarded: the allocator, the caches and the lazily
-        // configured kernels make them unrepresentative, and the step timer
-        // above already shows how much (180 ms against 40).
+        // One synchronize per step reads back every region's events. The early
+        // steps are discarded for TWO reasons with two different timescales,
+        // and only the first used to be handled.
+        //
+        // The allocator, the caches and the lazily configured kernels make the
+        // first few steps unrepresentative, and the step timer above shows how
+        // much (87 ms against 26). Three steps covers that.
+        //
+        // The SM CLOCK RAMP does not. On a card that has been idle -- which,
+        // with the display on the iGPU, is any card between runs -- the clock
+        // starts far below the pin and climbs. Measured here at ctx 256:
+        // steps 1-100 ran 26.7 ms at 1162 MHz and the rest ran 26.1 at 1192.
+        // The step ratio is 1.023 and the clock ratio 1.026, so it is the
+        // clock and nothing else, and averaging over the whole run reports a
+        // step 2.3% slower than the machine actually runs.
+        //
+        // A step COUNT cannot express that, because the ramp is a fixed
+        // duration and how many steps fit inside it depends on the shape being
+        // trained. So the discard is by ELAPSED TIME, with the step floor kept
+        // for the allocator, and capped at half the run so a short measurement
+        // still reports something.
         prof::flush();
-        if (step == 3) prof::reset();
+        if (!prof_ready) {
+            const double since_start = msec_since(t_loop_start);
+            const bool ramped = since_start >= 3000.0;
+            const bool spent_half = step >= steps / 2;
+            if ((step >= 3 && ramped) || spent_half) {
+                prof::reset();
+                prof_ready = true;
+                prof_from_step = step;
+            }
+        }
         const auto t_end = std::chrono::steady_clock::now();
 
         auto msec = [](auto a, auto b) {
@@ -723,6 +760,11 @@ int main(int argc, char **argv) {
                final_train, final_val, eval_batches);
     }
 
+    if (prof_from_step > 0)
+        printf("\n(profile discards steps 1-%d: allocator warm-up and the SM\n"
+               " clock ramp, which is a fixed duration rather than a fixed\n"
+               " number of steps -- see the comment at prof::reset)\n",
+               prof_from_step);
     prof::report();
 
     // With --eval 0 no evaluation ever runs, so there is no best to report and

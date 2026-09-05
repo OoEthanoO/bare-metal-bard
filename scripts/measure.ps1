@@ -55,16 +55,32 @@ $tol = 0.02
 # clock says nothing about the clock the kernels ran at.
 $busyPct = 40
 
+# Power is sampled beside the clock because the two failure modes below are
+# told apart by it: a card sitting UNDER its own lock is power-capped, and
+# saying so needs the watts.
+#
+# Samples above the card's physical ceiling are dropped. nvidia-smi's
+# instantaneous clocks.sm is not trustworthy on an idle Blackwell laptop part
+# -- five consecutive idle samples on this machine read 0, 2002, 5587, 3630 and
+# 1290 MHz, and 5587 is impossible on a card whose maximum is 3090. Filtering
+# to busy samples already removes most of it; this removes the rest.
 $sampler = Start-Job -ScriptBlock {
     param($busyPct)
-    $out = @()
+    $out = @(); $pw = @()
+    $ceil = 0
+    $m = (nvidia-smi --query-gpu=clocks.max.sm --format=csv,noheader,nounits 2>$null)
+    if ($m -match '^\s*(\d+)') { $ceil = [int]$Matches[1] }
     while ($true) {
-        $line = (nvidia-smi --query-gpu=clocks.sm,utilization.gpu --format=csv,noheader,nounits 2>$null)
-        if ($line -match '^\s*(\d+)\s*,\s*(\d+)') {
-            if ([int]$Matches[2] -ge $busyPct) { $out += [int]$Matches[1] }
+        $line = (nvidia-smi --query-gpu=clocks.sm,utilization.gpu,power.draw --format=csv,noheader,nounits 2>$null)
+        if ($line -match '^\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)') {
+            $c = [int]$Matches[1]
+            if ([int]$Matches[2] -ge $busyPct -and ($ceil -eq 0 -or $c -le $ceil)) {
+                $out += $c; $pw += [double]$Matches[3]
+            }
         }
         Write-Output $out.Count  # keeps the job's output stream alive
         Set-Content -Path "$env:TEMP\bmb_clock_samples.txt" -Value ($out -join ',')
+        Set-Content -Path "$env:TEMP\bmb_power_samples.txt" -Value ($pw -join ',')
         Start-Sleep -Milliseconds 400
     }
 } -ArgumentList $busyPct
@@ -90,12 +106,42 @@ if ($samples.Count -eq 0) {
 
 $lo = ($samples | Measure-Object -Minimum).Minimum
 $hi = ($samples | Measure-Object -Maximum).Maximum
-$off = @($samples | Where-Object { [Math]::Abs($_ - $target) -gt $target * $tol })
-if ($off.Count -eq 0) {
-    Write-Host ("[clock] {0}-{1} MHz across {2} busy samples, target {3} -- timings above are comparable." -f $lo, $hi, $samples.Count, $target)
-} else {
-    Write-Host ("[clock] UNPINNED: {0} of {1} busy samples off target {2} (range {3}-{4} MHz)." -f $off.Count, $samples.Count, $target, $lo, $hi)
+$rawp = if (Test-Path "$env:TEMP\bmb_power_samples.txt") { Get-Content "$env:TEMP\bmb_power_samples.txt" } else { "" }
+$power = @($rawp -split ',' | Where-Object { $_ -match '^[\d.]+$' } | ForEach-Object { [double]$_ })
+$pmax = if ($power.Count) { ($power | Measure-Object -Maximum).Maximum } else { 0 }
+
+# THREE OUTCOMES, NOT TWO. The old test asked one question -- is every sample
+# within 2% of the target -- and answered "NOT a result" to everything else.
+# That is right for a lapsed lock and wrong for a card that is holding its lock
+# and simply cannot reach it.
+#
+# The two are far apart and easy to separate. `nvidia-smi -lgc` sets a CEILING:
+# if it lapses the card jumps to its boost bin, which on this part is 1.6x the
+# pin -- nowhere near it. If instead the card is power-capped it sits just
+# UNDER the pin, tightly. Measured here: the GEMM sweeps hold 1185-1192, and
+# the training step -- more memory traffic per unit of arithmetic, so more
+# watts per clock -- runs 1162-1192 with nvidia-smi reporting SW Power Cap
+# active. 1162 is 3.2% low, which the old 2% test called "NOT a result".
+#
+# What actually matters for a ratio is that the clock is the SAME across the
+# runs being compared, so a stable-but-low clock is usable as long as it is
+# reported, and a clock that MOVES during one run is not usable even if every
+# sample is in range.
+$spread = if ($lo -gt 0) { ($hi - $lo) / $lo } else { 1.0 }
+$lapsed = $hi -gt $target * 1.15
+
+if ($lapsed) {
+    Write-Host ("[clock] UNPINNED: {0}-{1} MHz across {2} busy samples, target {3}." -f $lo, $hi, $samples.Count, $target)
     Write-Host "[clock] The timings above are NOT a result -- re-pin and run again:"
     Write-Host ("[clock]   scripts\gpu_clocks.bat lock {0}" -f $target)
+} elseif ($spread -gt 0.03) {
+    Write-Host ("[clock] MOVED during the run: {0}-{1} MHz ({2:N1}% spread) across {3} busy samples." -f $lo, $hi, ($spread * 100), $samples.Count)
+    Write-Host "[clock] The timings above are not internally comparable -- the clock changed under them."
+} elseif ($lo -lt $target * (1 - $tol)) {
+    Write-Host ("[clock] HELD BELOW THE PIN: {0}-{1} MHz across {2} busy samples, target {3}{4}." -f $lo, $hi, $samples.Count, $target, $(if ($pmax) { ", peak $pmax W" } else { "" }))
+    Write-Host ("[clock] The lock is applied; the card cannot reach it under this load. Timings are")
+    Write-Host ("[clock] comparable ONLY to other runs at {0}-{1} MHz -- quote the clock with them." -f $lo, $hi)
+} else {
+    Write-Host ("[clock] {0}-{1} MHz across {2} busy samples, target {3} -- timings above are comparable." -f $lo, $hi, $samples.Count, $target)
 }
 exit $rc
