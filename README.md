@@ -1,19 +1,30 @@
 # A CUDA matmul, and a language model built on top of it
 
-A hand-written CUDA SGEMM taken from 1.2% of cuBLAS to **matching it in fp32**
-(95%) and **passing it with tensor cores** (130%), then used to train a GPT from
+A hand-written CUDA SGEMM taken from 1.1% of cuBLAS to **87% in fp32** and
+**passing it with tensor cores** (126%), then used to train a GPT from
 scratch — including a **fused FlashAttention-style kernel** that never
-materializes the score matrix, which doubled the context length this 8 GB card
+materializes the score matrix, which doubled the context length an 8 GB card
 can train. No PyTorch, no cuBLAS, no cuDNN in the training path —
 every matmul, layernorm, softmax, attention, GELU, cross-entropy and AdamW
 kernel here is written from scratch.
 
-**Hardware:** RTX 4070 Laptop (Ada, sm_89) — 36 SMs, 256 GB/s, 8 GB, 55 W.
-Everything below the [kernel 11 section](#kernel-11-cpasync-and-the-wrong-reason-for-a-right-answer)
-was measured there. The project has since moved to an RTX 5070 Ti Laptop
-(Blackwell, sm_120) — 46 SMs, 12 GB, 100 KiB shared/SM — and numbers taken on
-that card say so explicitly wherever they appear. The two are **not**
-comparable and no table here mixes them.
+**Hardware: three cards, and no table mixes them.** The project started on an
+RTX 4070 Laptop (Ada, sm_89) — 36 SMs, 256 GB/s, 8 GB, 55 W — and everything
+below the [kernel 11 section](#kernel-11-cpasync-and-the-wrong-reason-for-a-right-answer)
+was measured there. It then moved to an RTX 5070 Ti Laptop (Blackwell, sm_120)
+— 46 SMs, 672 GB/s, 12 GB — and now to an **RTX 5080 Laptop** (Blackwell,
+sm_120) — 60 SMs, 896 GB/s, 16 GB, 48 MB L2, 100 KiB shared/SM. Numbers say
+which card they came from wherever they appear.
+
+Three cards is more useful than it sounds, because this repo is full of
+constants that were *calibrated* rather than derived, and a move is the only
+thing that tests them. Two survived the jump to 60 SMs
+([split-K](#the-split-count-was-aimed-at-a-target-instead-of-measured-against-a-curve),
+within 0.6% of the swept optimum on seven shapes of nine), one is
+[re-measured every time](#the-tile-rule-was-stale-and-my-explanation-for-it-was-wrong-twice),
+and the architecture change surfaced a
+[1.8x collapse in the WMMA kernel](#the-same-instructions-got-more-expensive-wmma-on-blackwell)
+that Ada had been hiding.
 
 Builds and runs on anything from **sm_70 upward**. The tensor-core kernels
 are TF32, which is Ampere and newer, so below sm_80 they are not compiled in
@@ -29,36 +40,104 @@ free hardware for this project is a Colab or Kaggle T4, which is sm_75.
 
 ![SGEMM progression](docs/sgemm_bars.svg)
 
-At N=4096, fp32, SM clock pinned to 1200 MHz, CUDA 13.3. Every cell is the
-**median of three independent sweeps** — see *Methodology* for why that is not
-paranoia:
+**RTX 5080 Laptop**, N=4096, SM clock pinned to 1200 MHz (1192 verified across
+403 busy samples), CUDA 13.3.1. Every cell is the **median of three independent
+sweeps** — see *Methodology* for why that is not paranoia:
 
 | # | kernel | GFLOP/s | % of cuBLAS | what changed |
 |---|--------|--------:|------------:|--------------|
-| 1 | naive | 82.8 | 1.2% | one thread per output element |
-| 2 | coalesced | 647.7 | 9.2% | swapped which index maps to `threadIdx.x` |
-| 3 | smem | 814.5 | 11.5% | 32×32 shared-memory tile |
-| 4 | tile1d | 2596.7 | 36.7% | 8 outputs per thread |
-| 5 | tile2d | 5262.2 | 74.4% | 8×8 register tile (outer product) |
-| 6 | vectorized | 6249.9 | 88.3% | `float4` loads + transposed A tile |
-| 7 | warptile | 6405.1 | 90.6% | block → warp → thread blocking |
-| 8 | dbuffer | **6711.2** | **95.0%** | double-buffered SMEM, one barrier/chunk |
-| 9 | tensorcore | 8323.6 | 117.6% | WMMA m16n16k8 TF32 tensor cores |
-| 10 | mma | **9215.8** | **130.3%** | raw `mma.sync` PTX, lane-major SMEM, 64×64 warp tile |
+| 1 | naive | 138.2 | 1.1% | one thread per output element |
+| 2 | coalesced | 901.0 | 7.4% | swapped which index maps to `threadIdx.x` |
+| 3 | smem | 1376.6 | 11.3% | 32×32 shared-memory tile |
+| 4 | tile1d | 4280.1 | 35.2% | 8 outputs per thread |
+| 5 | tile2d | 8412.4 | 69.2% | 8×8 register tile (outer product) |
+| 6 | vectorized | 10217.7 | 84.1% | `float4` loads + transposed A tile |
+| 7 | warptile | 9640.4 | 79.3% | block → warp → thread blocking |
+| 8 | dbuffer | **10604.8** | **87.2%** | double-buffered SMEM, one barrier/chunk |
+| 9 | tensorcore | 7875.1 | 64.8% | WMMA m16n16k8 TF32 tensor cores |
+| 10 | mma | 14198.2 | 116.6% | raw `mma.sync` PTX, lane-major SMEM, 64×64 warp tile |
+| 11 | cpasync | **15351.9** | **126.3%** | `cp.async` staging pipeline |
 
-**111× from first kernel to last.** Kernel 8 reaches 99.5% of cuBLAS at N=1024,
-and both top kernels do better still at sizes that divide the 128×128 block tile
-evenly, where no thread block is left partly idle: kernel 8 exceeds cuBLAS at
-N=1536 (104.0%) and N=6144 (104.2%), and kernel 9 reaches ~121% at both.
+**111× from first kernel to last**, and cuBLAS at these settings is 12160 GF/s.
 
-These numbers were re-measured on the machine the GPU actually lives in. An
-earlier set, taken on a Linux box with CUDA 12.4, is in the git history, and all
-nine kernels reproduce across the two machines to within ~1%. Kernel 10 was
-written after that move and exists only on this one.
+**Two rows disagree with the Ada ladder, and both are the architecture rather
+than the code.** Kernel 7 is *slower* than kernel 6 here (79.3% against 84.1%)
+where on the 4070 it won, 90.6% against 88.3%. And kernel 9 collapses: 64.8%
+here against 117.6% on Ada, which puts the WMMA kernel *below* the plain fp32
+double-buffered one. Both reproduce on the 5070 Ti, so they are not this
+sample. Kernel 9's collapse has a mechanism, and it is
+[worth its own section](#the-same-instructions-got-more-expensive-wmma-on-blackwell).
+
+The ordering of the ladder is not a property of the algorithm. It is a property
+of the algorithm *on a machine*, and moving the machine reorders it.
+
+Earlier sets on the 4070 (CUDA 13.3, and before that a Linux box with CUDA
+12.4) are in the git history; all nine kernels reproduced across those two
+machines to within ~1%, which is what made the two Blackwell inversions above
+worth looking at rather than shrugging at.
+
+### The same instructions got more expensive: WMMA on Blackwell
+
+Kernel 9 reads 64.8% of cuBLAS on the 5080 and 117.6% on the 4070. Kernel 10
+does the same arithmetic by hand in PTX and reads 116.6%, so the tensor cores
+themselves are fine. Dividing out the SM count — the only fair way to compare
+three cards — and normalising each kernel to its own Ada number:
+
+| kernel | 4070 (Ada) | 5070 Ti | 5080 |
+|---|---:|---:|---:|
+| k8 `dbuffer` (fp32, no tensor cores) | 100% | 98% | 95% |
+| k10 `mma.sync` + explicit `LDS` | 100% | 94% | 92% |
+| **k9 WMMA** | 100% | **58%** | **57%** |
+
+Everything holds within a few percent except the WMMA kernel, which loses 43%
+of its per-SM throughput — and loses the *same* 43% on two independently
+purchased Blackwell cards, which is what rules out a bad sample.
+
+**The SASS says what differs, and it is not the tensor-core work.** Both
+kernels issue exactly **128 HMMA**. What differs is how the fragments arrive:
+
+| | HMMA | `LDS` (shared) | generic `LD` |
+|---|---:|---:|---:|
+| k10, hand-written `mma.sync` | 128 | 32 | 0 |
+| k9, WMMA | 128 | **0** | **128** |
+
+Kernel 9 reads its fragments out of `__shared__ As`/`Bs` and does not emit a
+single shared-memory load instruction. Every one of the 128 is a generic
+`LD.E` in the `desc[UR10][R.64]` form — `wmma::load_matrix_sync` takes an
+opaque `fragment` type, the address space is lost at the API boundary, and the
+compiler has to fall back on generic addressing. Kernel 10 stores the same data
+in a lane-major layout it controls and gets 32 `LDS` for the identical 128
+`HMMA`: four times fewer load instructions, on the specialised path.
+
+**My first guess was wrong, and that is the useful part.** I expected a
+Blackwell *codegen* regression — that nvcc had started emitting something worse
+for sm_120. Compiling `k09_tensorcore.cu` for both targets out of one source
+says otherwise:
+
+| target | instructions | HMMA | generic `LD` |
+|---|---:|---:|---:|
+| `sm_89` (Ada) | 960 | 128 | 128 |
+| `sm_120` (Blackwell) | 984 | 128 | 128 |
+
+The instruction *mix* is the same on both. Ada emitted those 128 generic loads
+too. What changed is not the code but its **price**: the identical structural
+weakness cost about 10% on Ada (231 against 256 GF/s per SM) and costs 43%
+here. Blackwell's gains went to paths this kernel does not use, and its generic
+load path did not keep up with its tensor cores.
+
+Which retroactively raises the value of kernel 10. When it was written on the
+4070, [hand-written PTX at the same tile shape was worth only 2.7%](#kernel-10-the-hypothesis-was-wrong-and-the-kernel-got-faster-anyway)
+and the honest conclusion was that most of its win came from a wider warp tile
+rather than from the PTX. On this card the same choice — owning the shared-memory
+layout so the loads can be `LDS` — is worth 1.8x. **An optimization whose value
+is small on the hardware you have can be the one that survives the hardware you
+get**, and the only way to know is to keep the losing branch around and re-run
+it.
 
 ### The tensor-core number, stated honestly
 
-The baseline above is cuBLAS in **true fp32**, which is what cuBLAS does by
+*Measured on the 4070; the 5080's own fp32-vs-TF32 comparison is the table
+above.* The baseline is cuBLAS in **true fp32**, which is what cuBLAS does by
 default — TF32 has been opt-in since CUDA 11. Kernel 9 uses tensor cores, so it
 is not computing the same thing. Both comparisons, at N=4096:
 
@@ -562,32 +641,51 @@ A 10.8M-parameter GPT (6 layers, 6 heads, 384 embd, 256 ctx, weight-tied head)
 trained on TinyShakespeare at character level, entirely on the kernels in this
 repo.
 
+*On the 5080, `--tf32`, clock pinned (1162-1192 MHz under this load — see
+Methodology).*
+
 ```
 params    10.80M (41.2 MB; +41.2 MB grads, +82.4 MB adam state)
-memory    665.0 MB forward activations, 98.1 MB backward scratch
+memory    593.0 MB forward activations, 74.1 MB backward scratch
 batch     16 x 256 = 4096 tokens/step
-speed     75.1 ms/step, 54,516 tokens/s, ~3917 GFLOP/s end to end
-          (67.6 ms and 60,568 tok/s with --tf32; see below)
-loss      4.174 (= ln 65, uniform guess) -> 1.5138 val at step 2400
+speed     25.4 ms/step, 161,134 tokens/s, ~11,577 GFLOP/s end to end
+loss      4.174 (= ln 65, uniform guess) -> 1.5073 val at step 2400
 ```
 
 ![training curve](docs/training_curve.svg)
 
-Validation bottoms at **1.5138** around step 2400 and then climbs -- 10.8M
+Validation bottoms at **1.5073** around step 2400 and then climbs -- 10.8M
 parameters on 1 MB of text overfits well before the LR schedule ends, so the
 best-validation checkpoint is the one kept, not the last. Full curve, config and
 sample: [`docs/training.md`](docs/training.md).
 
+The step has been down this road three times, and the cards are the smaller
+part of it:
+
+| | ms/step | tokens/s | best val |
+|---|---:|---:|---:|
+| 4070, fp32 | 75.1 | 54,516 | 1.5138 |
+| 4070, `--tf32` | 67.6 | 60,568 | 1.5178 |
+| 5070 Ti, `--tf32`, after the fusions | 40.2 | ~102,000 | 1.5139 |
+| **5080, `--tf32`** | **25.4** | **161,134** | **1.5073** |
+
+The four validation numbers land within 0.011 nats of each other, which is what
+the identical-computation claim should look like in practice: fp32 addition is
+not associative, so a different summation order gives a trajectory that differs
+in the last digits and then diverges chaotically over 5000 steps. The kernels
+got faster; the model did not change.
+
 Sampled from that checkpoint at temperature 0.8:
 
 ```
-Is carried an old for Sirrah Paris' in Edward's blood,
-When I, that remember'd up my soul,
-With manner which we say twelve pass into the king,
-Off his limbs and unto the wars' garden,
-To steal the first alone, in this word,
-Such a thought broughts dead, and thou like a doit
-To unsistake the tongue of the higher.
+PAULINA:
+'Tis not to renowned by yours, is seen cut soul.
+Unhappier now to the sea out of heaven,
+Makes thy secret with my some sword, and my father.
+
+LEONTES:
+It would be villain, make it by the male,
+Whipteen shall obey the most deed world entreat.
 ```
 
 This run uses the [fused attention](#fused-attention-the-score-matrix-never-exists)
@@ -736,35 +834,54 @@ measured is still the step that would have run — which is the whole difference
 between this and wrapping every kernel in a sync. It costs nothing when off and
 needs no permissions.
 
+On the 5080, `--tf32`, ctx 256, averaged over 289 steps after the warm-up
+discard:
+
 | region | ms/step | share |
 |---|---:|---:|
-| GEMM bwd dW | 10.649 | **26.2%** |
-| GEMM bwd dX | 8.899 | 21.9% |
-| attention bwd | 5.294 | 13.0% |
-| GEMM mlp down | 3.194 | 7.9% |
-| GEMM mlp up | 2.765 | 6.8% |
-| GEMM qkv proj | 2.037 | 5.0% |
-| layernorm bwd | 1.627 | 4.0% |
-| bias backward | 1.207 | 3.0% |
-| GELU backward | 1.193 | 2.9% |
-| optimizer | 0.997 | 2.5% |
-| GEMM attn proj | 0.943 | 2.3% |
-| attention fwd | 0.936 | 2.3% |
-| layernorm | 0.561 | 1.4% |
-| *(the remaining five)* | 0.372 | 0.9% |
-| **measured total** | **40.677** | |
+| GEMM bwd dW | 6.763 | **26.4%** |
+| GEMM bwd dX | 6.577 | 25.7% |
+| attention bwd | 2.945 | 11.5% |
+| GEMM mlp down | 2.179 | 8.5% |
+| GEMM mlp up | 2.041 | 8.0% |
+| GEMM qkv proj | 1.519 | 5.9% |
+| layernorm bwd | 0.838 | 3.3% |
+| attention fwd | 0.745 | 2.9% |
+| optimizer | 0.725 | 2.8% |
+| GEMM attn proj | 0.725 | 2.8% |
+| layernorm | 0.259 | 1.0% |
+| *(the remaining five)* | 0.286 | 1.1% |
+| **measured total** | **25.602** | |
 
-The total lands on the 40.2–40.4 ms the step timer reports, so the
+`bias backward` and `GELU backward` are absent because they no longer exist as
+kernels — both were [folded into a GEMM epilogue](#the-gelu-backward-did-not-need-to-exist-either),
+which is 6.3% of a step that this table simply does not have a row for any more.
+Matmuls are **78.1%**, attention is 14.4%, everything else is 7.5%.
+
+*(The 5070 Ti's version of this table, at 40.677 ms with the two now-fused
+reductions still in it, is in the git history.)*
+
+The total lands on the 25.4–26.1 ms the step timer reports, so the
 instrumentation is accounting for essentially all of it rather than a
-convenient subset. **Matmuls are 70.6%**, attention is down to **15.3%** from
-the 17.1% it was before the port — despite the step itself shrinking 14% — and
-everything else is 14.2%.
+convenient subset.
 
 One check worth doing on a new instrument: the same profile taken at an
 *unpinned* clock (the lock had lapsed, and a 21.6 ms step is what gave it away)
 returns shares within one point of these — 25.3% against 26.2% for the largest.
 Shares are clock-invariant and absolute times are not, which is exactly what a
 correct tool should show.
+
+**And a second check the instrument failed for a while.** `prof::reset()` fired
+at step 3, on the reasoning that the allocator and the lazily configured
+kernels make the first few steps unrepresentative. They do, and three steps
+covers them. It does not cover the SM clock, which on a card that has been idle
+starts far below the pin and takes about 2.7 seconds to climb to it: steps
+1–100 ran 26.7 ms at 1162 MHz and the rest ran 26.1 at 1192, a step ratio of
+1.023 against a clock ratio of 1.026. Averaging the whole run reported a step
+2.3% slower than the machine actually runs. The discard is now bounded by
+**elapsed time** rather than a step count, because the ramp is a fixed duration
+and how many steps fit inside it depends on the shape being trained — the run
+above discards steps 1–111 and says so in its output.
 
 **The next target is now named rather than guessed.** The weight-gradient
 matmuls are the single largest line at 26.2%, and they are the slowest GEMMs in
@@ -2248,8 +2365,8 @@ interleaved against a drifting machine:
 
 ```bash
 ./bench/train_gpt -n 12 -b 2 -t 2048 --tf32 --eval 0 --len 0 --bwd-cfg 8
-```
-
+```
+
 Data-parallel training, the region profiler and the host-thread trace:
 
 ```bash
@@ -2284,6 +2401,73 @@ across runs on thermal state alone — a 60% swing in the denominator of every
 Pinning to 1200 MHz (the highest clock that holds under sustained load; 1500
 does not) makes runs reproducible: best-vs-median now agrees to under 1%.
 
+**A benchmark on a laptop is sharing the GPU with the desktop, and that costs
+25%.** Moving to the 5080 meant, at first, running with MUX on: the discrete GPU
+drives the display directly and there is no iGPU to hand the desktop to. So the
+card was never idle. `nvidia-smi` read **21–23% utilization with nothing
+running** — explorer, the shell, two NVIDIA overlay processes, Edge. Switching
+the laptop to MUX off moves the display to the iGPU and leaves the dGPU doing
+nothing but compute, and it is the cleanest controlled experiment in this repo:
+same card, same clock, same toolkit, same binary, one variable.
+
+| | MUX on | MUX off |
+|---|---:|---:|
+| cuBLAS at N=4096 | 9100 (range 8468–9311) | **12220** (range 12208–12242) |
+| kernel 11, best / median | 11069 / 10497 | **15385 / 15374** |
+| gap between best and median | 5.5% | **0.07%** |
+
+The absolute cost is about 25%, and it explains a discrepancy that looked like
+hardware: with the desktop on it, this 60-SM card read *slower* than the 46-SM
+5070 Ti. Correcting for the tax, 9100/0.78 = 11700, put it back at 1.23× where
+the SM counts predict 1.30×.
+
+**But the signature is the more useful half.** On a quiet machine `best` and
+`median` agree to a tenth of a percent; under contention they separate, because
+`best` catches the iteration that happened to run while the desktop was idle and
+`median` carries the tax. A harness reporting only `best` would have shown a
+respectable number and hidden the whole problem. Reporting both is what made it
+visible. ([`bench/logs/mux_on_5080_contended.txt`](bench/logs/mux_on_5080_contended.txt)
+is the before half.)
+
+**A pinned clock is a ceiling, not a floor — and removing the contention is what
+exposed that.** With nothing keeping the card awake it deep-idles, and
+`nvidia-smi` reads **0 MHz**. A short workload can finish before the clock has
+climbed anywhere near the pin: the first cell of the `--splitk` sweep read 3105
+GF/s cold against 10703 warm, a **3.4× error**, and it survived three warm-up
+iterations and a min-of-twenty because the whole first shape is only ~2.6 ms of
+GPU work. The mechanism is the device and not the process, and the proof is that
+the warm-up which fixed it ran in a *separate binary*, which cannot have warmed
+this one's context or module cache.
+
+This is the failure mode that median-of-three cannot catch. It lands on the
+first cell measured and is identical on every run, so three runs agree with each
+other while all three are wrong. The fix is `warm_up_device()` — 300 ms of dense
+GEMM before any sweep times anything — not a wider tolerance. Under MUX on this
+never happened, because the desktop kept the card awake.
+
+*(Checked, not assumed: the ladder itself was never affected. A cold sweep and a
+warmed sweep agree on every cell at N ≥ 1024 except one at −2.5%, and `naive` at
+N=128 — the first thing timed and the most exposed — reads 33.5 cold against
+33.6 warm.)*
+
+**`nvidia-smi`'s instantaneous clock is not trustworthy on an idle card.** Five
+consecutive idle samples on this machine read 0, 2002, 5587, 3630 and 1290 MHz.
+5587 is impossible on a part whose maximum is 3090. The sampler in
+`scripts/measure.ps1` only ever judged *busy* samples, which was already hiding
+most of this; it now also drops anything above the reported ceiling.
+
+**Three verdicts, not two.** The clock check used to ask one question — is every
+sample within 2% of the target — and answer "NOT a result" to everything else.
+That is right for a lapsed lock and wrong for a card that is holding its lock
+and cannot reach it. Since `-lgc` sets a ceiling, a lapse lands 1.6× *above* the
+pin while a power- or workload-limited card sits just *under* it: the GEMM
+sweeps hold 1185–1192 MHz and the training step runs 1162–1192, which the old 2%
+test called invalid. It now separates a lapse (invalid) from a clock that moved
+mid-run (not internally comparable) from a clock held below the pin (usable, but
+the number must be quoted with it). It reports the watts too, so the difference
+between "power-capped" and "merely slow" is evidenced rather than guessed —
+peak draw during training is 78 W against a 175 W limit, so nothing is capped.
+
 **Every published cell is the median of three independent sweeps**, not one.
 Pinning the clock fixes the *within-run* variance; it does not protect against a
 bad run. It caught me twice in one sitting. Once a whole sweep came back with
@@ -2295,9 +2479,27 @@ flattered the result, which is what makes it worth guarding against rather than
 apologising for.
 
 `tools/merge_runs.py` takes several sweeps, publishes the per-cell median, and
-prints the spread; anything over 3% is flagged as not-a-result-yet. Current
-worst spread across the whole table is **1.0%**. The rule this encodes: a number
-measured once is a hypothesis.
+prints the spread; anything over 3% is flagged as not-a-result-yet. The rule
+this encodes: a number measured once is a hypothesis.
+
+**Which statistic the flag watches turns out to matter.** It used to flag on the
+spread of the per-run *bests*, since that is what caught the bad runs above. It
+also fires when nothing is wrong: `best` is an extreme-value statistic and one
+lucky iteration moves it on its own. `warptile` at N=2048 was flagged at 9.3%
+when its three runs read bests of 7964/7277/7356 and medians of 7274/7228/7205 —
+a 1.0% spread — and six standalone repeats confirmed the cell was stable. The
+two failure modes separate cleanly on *which* statistic moves: a bad run is slow
+in every iteration and drags the median with it, while a lucky iteration moves
+only the best. So the flag now watches the medians. The best spread is still
+printed, because on a machine sharing its GPU with a desktop the two diverging
+*is* the contention signature.
+
+After that correction the flag pointed somewhere real instead: the N=128 cells,
+which at 20 iterations genuinely wobbled 4–6%. Those three sizes are now taken
+from 400-iteration runs, and the remaining one — `cpasync` at N=128, 4.3% — is
+structural rather than noise. A 128×128 block tile at N=128 is **one thread
+block** on a 60-SM card, so what is being timed there is launch latency, not
+throughput. Worst median spread across the published table is now **1.0%**.
 
 **A reference bracket only guards what it does not contain.** Every batch of
 numbers here is bracketed by the ctx-256 training step, run before and after, on
