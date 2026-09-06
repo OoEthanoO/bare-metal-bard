@@ -93,6 +93,19 @@ bool gemm_tf32();
 void gemm_set_splitk(int splits);
 int gemm_splitk();
 
+// Which warp tile the WIDE tensor-core tile uses, for the same reason: so the
+// two can be A/B'd inside one binary and one machine state instead of two
+// builds minutes apart.
+//
+//   0  32x64 warp tile, 256 threads   (default, what the model has always run)
+//   1  64x64 warp tile, 128 threads   (kernel 11's shape, half the shared
+//                                      traffic per mma and half the warps)
+//
+// The narrow 64x128 tile is untouched by this; it is already 32x64 in 128
+// threads and a 64x64 warp tile would leave it two warps.
+void gemm_set_wide_warp(int mode);
+int gemm_wide_warp();
+
 // False on pre-Ampere hardware, where the TF32 kernels are not compiled in
 // at all. gemm_set_tf32(true) is then a no-op rather than an error.
 bool gemm_tf32_available();

@@ -157,12 +157,22 @@ int main(int argc, char **argv) {
     // --tf32 routes the same 56 cases through the tensor-core path. TF32 keeps
     // 10 mantissa bits, so the bar moves from 1e-4 to 5e-3: the point of the
     // run is that the transpose staging is right, not that the format is exact.
-    bool tf32 = false, bench = false, splitk = false;
+    bool tf32 = false, bench = false, splitk = false, warp = false;
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--tf32")) tf32 = true;
         else if (!strcmp(argv[i], "--bench")) bench = true;
         else if (!strcmp(argv[i], "--splitk")) splitk = true;
+        else if (!strcmp(argv[i], "--warp")) warp = true;
+        // Run the whole correctness suite on the alternative warp tile. A tile
+        // that is faster and wrong is not a result, and the 64x64 shape re-maps
+        // which warp owns which part of the output -- exactly the kind of
+        // change that shows up only in the transposed cases.
+        else if (!strcmp(argv[i], "--wide-warp") && i + 1 < argc)
+            gemm_set_wide_warp(atoi(argv[++i]));
     }
+    if (gemm_wide_warp())
+        printf("WIDE TILE WARP SHAPE: %d (0 = 32x64/256 thr, 1 = 64x64/128 thr)\n",
+               gemm_wide_warp());
     if (tf32) {
         gemm_set_tf32(true);
         printf("TENSOR-CORE path (TF32), tolerance 5e-3\n\n");
@@ -245,6 +255,58 @@ int main(int argc, char **argv) {
     // be right, and the forward shapes are here to show what the same rule
     // would do to them -- a split-K rule that helps dW and quietly costs the
     // forward pass is not an improvement.
+    // --warp A/Bs the wide tile's warp shape at every model shape. Both arms
+    // run in ONE process, back to back per shape and then again in the
+    // opposite order, because the thing being measured is a few percent and
+    // the machine drifts: interleaving is what makes the two arms comparable.
+    if (warp) {
+        gemm_set_tf32(true);
+        warm_up_device();
+        printf("Warp-tile A/B on the wide 128x128 tile, TF32. GF/s.\n");
+        printf("  32x64 = 8 warps/block, 192 B shared per mma, 123-128 regs\n");
+        printf("  64x64 = 4 warps/block, 128 B shared per mma, 230-255 regs\n\n");
+        printf("%-22s %-4s %10s %10s %8s\n", "shape", "op", "32x64", "64x64", "delta");
+        printf("--------------------------------------------------------------\n");
+        for (const Shape &s2 : shapes) {
+            if (s2.M % 128 || s2.N % 128 || s2.K % 32) continue;
+            if ((size_t)s2.M * s2.N * s2.K < 100000000ull) continue;
+            size_t szA = (size_t)s2.M * s2.K, szB = (size_t)s2.K * s2.N,
+                   szC = (size_t)s2.M * s2.N;
+            float *dA, *dB, *dC;
+            CUDA_CHECK(cudaMalloc(&dA, szA * 4));
+            CUDA_CHECK(cudaMalloc(&dB, szB * 4));
+            CUDA_CHECK(cudaMalloc(&dC, szC * 4));
+            CUDA_CHECK(cudaMemset(dA, 0, szA * 4));
+            CUDA_CHECK(cudaMemset(dB, 0, szB * 4));
+            const double flop = 2.0 * s2.M * s2.N * s2.K;
+            // NN is the forward shape and TN is what every weight gradient
+            // runs; a warp tile that helps one and costs the other is not an
+            // improvement, so both are printed.
+            for (int tn = 0; tn < 2; ++tn) {
+                const bool TA = tn == 1;
+                double t[2];
+                // Order reversed on the second pass and the better (minimum)
+                // taken, so neither arm can win by going first.
+                for (int pass = 0; pass < 2; ++pass)
+                    for (int m = 0; m < 2; ++m) {
+                        const int mode = pass ? 1 - m : m;
+                        gemm_set_wide_warp(mode);
+                        const double x = time_gemm(TA, false, s2.M, s2.N, s2.K,
+                                                   dA, dB, dC, 20);
+                        if (pass == 0 || x < t[mode]) t[mode] = x;
+                    }
+                gemm_set_wide_warp(0);
+                const double g0 = flop / (t[0] * 1e-3) / 1e9;
+                const double g1 = flop / (t[1] * 1e-3) / 1e9;
+                printf("%-22s %-4s %10.0f %10.0f %+7.1f%%\n", s2.tag,
+                       TA ? "TN" : "NN", g0, g1, 100.0 * (g1 / g0 - 1.0));
+            }
+            cudaFree(dA); cudaFree(dB); cudaFree(dC);
+        }
+        cublasDestroy(handle);
+        return 0;
+    }
+
     if (splitk) {
         gemm_set_tf32(true);
         warm_up_device();

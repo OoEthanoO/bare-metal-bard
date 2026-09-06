@@ -819,6 +819,21 @@ constexpr int FTM = 8, FTN = 4, FTHREADS = 128;
 constexpr int TBM = 128, TBN = 128, TBK = 32;
 constexpr int TWM = 32, TWN = 64, TTHREADS = 256, TMINB = 2;
 
+// The alternative warp tile for that same 128x128 block: 64x64 in 128 threads,
+// which is kernel 11's shape. Same block tile, same shared footprint, same
+// staging -- the ONLY thing that differs is how the block's warps divide the
+// output, and therefore how much shared memory each mma re-reads.
+//
+//   32x64 (default)   192 bytes of shared traffic per mma, 8 warps/block
+//   64x64             128 bytes per mma,                   4 warps/block
+//
+// It is here because the two other ways to cut this kernel's global-read cost
+// are both measured and both closed (cp.async loses at every model shape, and
+// register prefetch spills at 125 registers against a 128 cap), which left the
+// warp tile as the last unexplored move. Selected at runtime, not by a build
+// flag, so both arms come out of one binary in one machine state.
+constexpr int XWM = 64, XWN = 64, XTHREADS = 128, XMINB = 2;
+
 constexpr int SBM = 64, SBN = 128, SBK = 32;
 constexpr int SWM = 32, SWN = 64, STHREADS = 128, SMINB = 4;
 
@@ -1072,6 +1087,10 @@ inline int fill_blocks() {
 // Set by gemm_set_splitk() for sweeps; 0 means "use the derived rule".
 static int g_splitk_force = 0;
 
+// Set by gemm_set_wide_warp(); 0 is the 32x64 warp tile the model has always
+// run, 1 is the 64x64 one. See XWM above.
+static int g_wide_warp = 0;
+
 // THE SPLIT COUNT, DERIVED FROM A SWEEP RATHER THAN FROM A TARGET.
 //
 // The old rule was `s = TARGET_BLOCKS / blocks` -- cut K until the grid reaches
@@ -1190,6 +1209,10 @@ void dispatch_epi(int M, int N, int K, float alpha, const float *A,
                 gemm_mma<TA, TB, SBM, SBN, SBK, SWM, SWN, STHREADS, SMINB, SEPI>
                     <<<g2, STHREADS, 0, stream>>>(M, N, K, 1.0f, A, B, 0.0f, ws,
                                                   eps, 0, chunk);
+            else if (g_wide_warp)
+                gemm_mma<TA, TB, TBM, TBN, TBK, XWM, XWN, XTHREADS, XMINB, SEPI>
+                    <<<g2, XTHREADS, 0, stream>>>(M, N, K, 1.0f, A, B, 0.0f, ws,
+                                                  eps, 0, chunk);
             else
                 gemm_mma<TA, TB, TBM, TBN, TBK, TWM, TWN, TTHREADS, TMINB, SEPI>
                     <<<g2, TTHREADS, 0, stream>>>(M, N, K, 1.0f, A, B, 0.0f, ws,
@@ -1201,6 +1224,10 @@ void dispatch_epi(int M, int N, int K, float alpha, const float *A,
             gemm_mma<TA, TB, SBM, SBN, SBK, SWM, SWN, STHREADS, SMINB, EPI>
                 <<<sgrid, STHREADS, 0, stream>>>(M, N, K, alpha, A, B, beta, C,
                                                  ep, 0, K);
+        } else if (g_wide_warp) {
+            gemm_mma<TA, TB, TBM, TBN, TBK, XWM, XWN, XTHREADS, XMINB, EPI>
+                <<<grid, XTHREADS, 0, stream>>>(M, N, K, alpha, A, B, beta, C,
+                                                ep, 0, K);
         } else {
             gemm_mma<TA, TB, TBM, TBN, TBK, TWM, TWN, TTHREADS, TMINB, EPI>
                 <<<grid, TTHREADS, 0, stream>>>(M, N, K, alpha, A, B, beta, C,
@@ -1319,3 +1346,6 @@ bool gemm_tf32() { return g_tf32; }
 
 void gemm_set_splitk(int splits) { g_splitk_force = splits; }
 int gemm_splitk() { return g_splitk_force; }
+
+void gemm_set_wide_warp(int mode) { g_wide_warp = mode; }
+int gemm_wide_warp() { return g_wide_warp; }
