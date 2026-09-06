@@ -1,0 +1,52 @@
+64x64 vs 32x64 warp tile on the wide 128x128 tensor-core tile.
+RTX 5080 Laptop (60 SMs), TF32, clock pinned (1185-1192 MHz verified).
+Three independent A/B runs, both arms in one process, interleaved in both
+orders per shape with each arm's minimum taken.
+
+    32x64 = 8 warps/block, 192 B shared per mma, 123-128 registers
+    64x64 = 4 warps/block, 128 B shared per mma, 230-255 registers
+
+                    run 1    run 2    run 3
+    mean delta      +0.01%   +0.04%   +0.07%
+    min             -0.5%    -0.5%    -1.1%
+    max             +1.7%    +1.4%    +1.2%
+
+Across all 54 shape-measurements the mean is +0.04%. The per-shape deltas do
+NOT reproduce: the sign agreed across all three runs on 4 shapes of 18, which
+is what 18 coin flips look like. `padded vocab head TN` read +1.7%, -0.5%,
+-0.3%; `dW attnproj NN` read -0.1%, +1.4%, +0.3%. Every apparent winner in one
+run is inside the noise of the next.
+
+THE CONTROL IS THE INTERESTING ROW. A square 4096x4096x4096 is not a model
+shape; it is here because this tile was worth +8.7% at square N=4096 ON THE
+4070, and lost in the model. If it still won at square shapes and only lost in
+situ, the story would be about the model's skinny shapes. It does not:
+
+    square (control)   NN    16369    16370    +0.0%
+    square (control)   TN    15946    15944    -0.0%
+
+So the tile's benefit has not moved, it has EVAPORATED, and on the shape where
+it was strongest.
+
+WHAT THAT MEANS, and it needs no profiler to say it. Cutting shared-memory
+traffic per mma by a third buys exactly nothing here, so shared bandwidth is
+not what limits this kernel on Blackwell. On Ada it plainly was -- the same
+change, on the same code, was worth 8.7%. The resource that bound this kernel
+on one architecture does not bind it on the next.
+
+That sits beside the WMMA result from the same session without contradicting
+it. There the finding was that Blackwell prices GENERIC loads much higher than
+Ada (128 generic LD against 32 LDS, worth -43%). Here the finding is that it
+prices LDS traffic low enough that a third less of it is worth 0%. Both say the
+same thing from opposite ends: on this architecture what matters is WHICH LOAD
+PATH you are on, not how much shared traffic you move.
+
+DEFAULT UNCHANGED at 32x64, which is the same speed on half the registers
+(123-128 against 230-255) and twice the occupancy (16 warps/SM against 8). When
+two configurations tie, the one with headroom wins.
+
+The 64x64 path is KEPT rather than reverted, behind gemm_set_wide_warp(1). It
+lost on Ada, ties on Blackwell, and costs only compile time -- and the lesson
+of the WMMA section is precisely that a branch which is marginal on the
+hardware you have can be the one that matters on the hardware you get. Re-run
+`test_gemm --tf32 --warp` on the next card rather than trusting this table.

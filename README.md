@@ -134,6 +134,72 @@ is small on the hardware you have can be the one that survives the hardware you
 get**, and the only way to know is to keep the losing branch around and re-run
 it.
 
+### The warp tile was the last move, and it is a tie
+
+The model's tensor-core GEMM had three ways to make its global read cheaper.
+Two were measured and closed: `cp.async` staging loses 2–7% at every model
+shape, and prefetching into registers spills because `__launch_bounds__` caps
+the narrow tile at 128 registers and it already sits at 125. That left the warp
+tile — same 128×128 block, same shared footprint, same staging code, only a
+different division of the output among warps:
+
+| | shared traffic per `mma` | warps/block | registers |
+|---|---:|---:|---:|
+| 32×64 (default) | 192 B | 8 | 123–128 |
+| 64×64 | 128 B | 4 | **230–255** |
+
+`ptxas` says the second one before any timing does: 128 accumulator registers
+alone (4×4×2×4), landing flush against the 255 cap. It still fits two blocks per
+SM — 2 × 128 × 256 is exactly the 65536-register file — but that is 8 warps/SM
+against 16. A third less shared traffic, bought with half the occupancy.
+
+Selected at runtime rather than by a build flag, so both arms come out of one
+binary in one machine state; `test_gemm --tf32 --warp` runs the pair in both
+orders per shape and takes each arm's minimum. Three pinned runs, 18 model
+shape × transpose cases each:
+
+| | run 1 | run 2 | run 3 |
+|---|---:|---:|---:|
+| mean delta | +0.01% | +0.04% | +0.07% |
+| min / max | −0.5 / +1.7% | −0.5 / +1.4% | −1.1 / +1.2% |
+
+**+0.04% across all 54 measurements, and the per-shape deltas do not
+reproduce** — the sign agreed across all three runs on 4 shapes of 18, which is
+what eighteen coin flips look like. Every apparent winner in one run sits inside
+the noise of the next. There is no effect here.
+
+**The control row is the one worth reading.** A square 4096³ is not a model
+shape; it is in the sweep because this tile was worth **+8.7% at square N=4096
+on the 4070**, and lost in the model. If it still won at square shapes and only
+lost in situ, this would be another chapter in the story about the model's
+skinny `N=384` shapes eating GEMM gains. It is not:
+
+| shape | 32×64 | 64×64 | delta |
+|---|---:|---:|---:|
+| square 4096³, NN | 16369 | 16370 | **+0.0%** |
+| square 4096³, TN | 15946 | 15944 | **−0.0%** |
+
+The benefit did not move from square shapes to skinny ones. It **evaporated**,
+on the shape where it was strongest.
+
+That needs no profiler to interpret. Cutting shared-memory traffic per `mma` by
+a third buys exactly nothing here, so shared bandwidth is not what limits this
+kernel on Blackwell — and on Ada the identical change, on the same code, proved
+that it was. The resource that bound this kernel on one architecture does not
+bind it on the next.
+
+Which is the [WMMA result](#the-same-instructions-got-more-expensive-wmma-on-blackwell)
+from the other end. There, 128 generic `LD` against 32 `LDS` costs 43%. Here, a
+third less `LDS` traffic costs 0%. Both say the same thing: on this
+architecture what matters is **which load path you are on**, not how much shared
+traffic you move. Two experiments aimed at different kernels, agreeing.
+
+The default stays 32×64 — identical speed on half the registers and twice the
+occupancy, and when two configurations tie you take the one with headroom. The
+64×64 path is kept rather than reverted, because it lost on Ada, ties here, and
+the WMMA section is a worked example of exactly the branch that is marginal on
+one card and decisive on the next.
+
 ### The tensor-core number, stated honestly
 
 *Measured on the 4070; the 5080's own fp32-vs-TF32 comparison is the table
@@ -2623,6 +2689,16 @@ four scalar stores.
    register file blocks the other, so the remaining move really is the warp
    tile: 64×64 moves 128 bytes of shared traffic per `mma` against the current
    32×64's 192, which is *less* staging rather than better-hidden staging.
+
+   ~~**So try the warp tile.**~~ — [measured](#the-warp-tile-was-the-last-move-and-it-is-a-tie),
+   and it is a **tie**: +0.04% across 54 shape-measurements in three pinned
+   runs, with per-shape signs that do not reproduce. The default stays 32×64,
+   which is the same speed on half the registers and twice the occupancy.
+   The square control is what makes it worth reading — this tile was worth
+   **+8.7% at square N=4096 on the 4070** and reads +0.0% there now, so its
+   benefit evaporated rather than moved. All three routes out of this kernel's
+   global-read cost are now closed, and the third one closed because the
+   resource it was aimed at stopped being the binding one.
 3. ~~**The attention backward**~~ — [measured](#chunking-the-head-dimension-and-the-bug-that-made-it-look-four-times-better),
    and the prescribed cure works without paying off. Chunking the head dimension
    frees the shared memory the bigger register tile needed and doubles blocks/SM

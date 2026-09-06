@@ -193,6 +193,11 @@ int main(int argc, char **argv) {
         {384, 1536, 4096, "gpt: dW fc"},
         {1536, 384, 4096, "gpt: dW fcproj"},
         {4096, 128, 384,  "gpt: padded vocab head"},
+        // Not a model shape. It is here as the CONTROL for --warp: the 64x64
+        // warp tile was worth +8.7% at square N=4096 on the 4070 and lost in
+        // the model, so a square shape is what separates "the tile does
+        // nothing any more" from "the model's shapes cancel what it does".
+        {4096, 4096, 4096, "square (control)"},
         {100, 70, 33,     "ragged -> generic path"},
         {65, 65, 65,      "ragged square"},
         {130, 260, 60,    "ragged non-square"},

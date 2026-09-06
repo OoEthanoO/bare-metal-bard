@@ -873,9 +873,39 @@ constexpr int SWM = 32, SWN = 64, STHREADS = 128, SMINB = 4;
 // the barrier count against arithmetic that was already thinner. A pipeline
 // cannot pay for itself out of a k-chunk that does not have enough work in it.
 //
-// Which makes the next thing to try the warp tile, not the staging: 64x64 here
-// costs 128 threads instead of 256 and would have to be measured against the
-// epilogue and split-K paths that the current shape was picked for.
+// Which made the next thing to try the warp tile, not the staging: 64x64 here
+// costs 128 threads instead of 256 and had to be measured against the epilogue
+// and split-K paths that the current shape was picked for.
+//
+// THAT IS NOW MEASURED, AND IT IS A TIE. gemm_set_wide_warp(1) selects it at
+// runtime and `test_gemm --tf32 --warp` A/Bs the two in one process. Three
+// runs, clock pinned, 18 model shape x transpose cases each:
+//
+//   mean delta   +0.01%   +0.04%   +0.07%     (all 54 measurements: +0.04%)
+//
+// and the per-shape deltas do not reproduce -- the sign agreed across all
+// three runs on 4 shapes of 18. There is no effect here to find.
+//
+// The control is what makes it interesting. A square 4096^3, which is not a
+// model shape and is in the sweep only as a reference, reads +0.0% and -0.0%.
+// This tile was worth +8.7% at square N=4096 ON THE 4070. So its benefit did
+// not move from square shapes to skinny ones; it evaporated, on the shape
+// where it was strongest.
+//
+// Cutting shared traffic per mma by a third (192 -> 128 bytes) buying exactly
+// nothing means shared bandwidth is not what limits this kernel on Blackwell,
+// where on Ada the identical change proved it was. Which is the same story the
+// WMMA collapse tells from the other end: 128 generic LD against 32 LDS costs
+// 43% there, while a third less LDS traffic costs 0% here. On this
+// architecture what matters is WHICH LOAD PATH you are on, not how much shared
+// traffic you move.
+//
+// Default stays 32x64: same speed, half the registers (123-128 against
+// 230-255), twice the occupancy (16 warps/SM against 8). When two
+// configurations tie, take the one with headroom. The 64x64 path is kept
+// rather than deleted because it lost on Ada and ties here, and the WMMA
+// section is a worked example of a branch that is marginal on one card and
+// decisive on the next. bench/logs/warp_tile_ab_5080.txt has the tables.
 
 // AND THE OTHER WAY TO HIDE THE GLOBAL READ IS BLOCKED TOO -- BY REGISTERS.
 //
