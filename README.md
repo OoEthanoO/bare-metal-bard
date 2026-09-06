@@ -2380,7 +2380,7 @@ Rented multi-GPU boxes run one script each: `scripts/cloud_multigpu.sh` is
 the whole experiment (topology, peer probe, build, correctness gate, scaling),
 `scripts/cloud_bisect_anomaly.sh` and `scripts/cloud_anomaly_decider.sh` are
 the one-variable-at-a-time hunts described in the multi-GPU item below. On
-Windows, `set BMB_ARCH=sm_120` lets `scriptsuild.bat` proceed when
+Windows, `set BMB_ARCH=sm_120` lets `scripts\build.bat` proceed when
 `nvidia-smi` will not answer.
 
 Regenerate the charts:
