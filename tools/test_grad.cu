@@ -35,6 +35,7 @@
 #include <cuda_runtime.h>
 
 #include "../src/gpt.h"
+#include "../src/gemm.h"
 
 #define CUDA_CHECK(x) do { cudaError_t e=(x); if(e!=cudaSuccess){ \
     fprintf(stderr,"CUDA %s at %d\n",cudaGetErrorString(e),__LINE__); exit(1);} } while(0)
@@ -69,10 +70,48 @@ int main(int argc, char **argv) {
     // is instantiated for.
     int B = 4, T = 64, C = 128, L = 2, V = 65, Vp = 128;
     float eps = 1e-2f;
-    if (argc > 1) eps = atof(argv[1]);
+    // argv[1] is the step size only if it parses as a positive number; a run
+    // like `test_grad --tf32` would otherwise set eps to atof("--tf32") = 0
+    // and difference the loss against itself.
+    const bool eps_given = argc > 1 && atof(argv[1]) > 0.0;
+    if (eps_given) eps = atof(argv[1]);
     for (int i = 1; i + 1 < argc; ++i)
         if (!strcmp(argv[i], "--C")) C = atoi(argv[i + 1]);
     const int NH = C >= 256 ? C / 64 : 4;
+
+    // --tf32 gradient-checks the TENSOR-CORE epilogues, which nothing else
+    // does. The epilogue arithmetic exists twice -- once in gemm_fast for the
+    // fp32 path and once in gemm_mma for the TF32 one -- and a branch-coverage
+    // diff (BMB_COVER=1) showed this check reaching epi masks 1, 3, 5 and 8
+    // only on `fp32 fast`, while test_gemm reaches nothing but epi=0 and
+    // epi=16 on either path. So bias, bias+residual, bias+GELU and the GELU
+    // derivative were verified in the copy the model does NOT run: every
+    // recent training run passes --tf32.
+    bool tf32 = false;
+    for (int i = 1; i < argc; ++i)
+        if (!strcmp(argv[i], "--tf32")) tf32 = true;
+    if (tf32) {
+        gemm_set_tf32(true);
+        // A BIGGER STEP, BECAUSE THE LOSS IT DIFFERENCES IS NOISIER.
+        //
+        // Central differences trade two errors against each other: truncation
+        // falls as eps shrinks, and cancellation rises, because (L+ - L-) is a
+        // difference of nearly equal numbers divided by eps. TF32 keeps 10
+        // mantissa bits, so the loss carries ~1e-3 of relative noise and the
+        // cancellation term is ~100x what it is in fp32. eps=1e-2 lands on the
+        // wrong side of that trade and four layernorm tensors "fail":
+        //
+        //   ln1w numeric, TF32:  1.7017e-2 (eps 1e-2)  1.7938e-2 (3e-2)  1.8358e-2 (1e-1)
+        //   ln1w analytic, TF32: 1.827444e-2      fp32: 1.827458e-2
+        //
+        // The numeric estimate walks toward the analytic value as eps grows,
+        // which is what cancellation error looks like. And the ANALYTIC
+        // gradients agree with fp32 to 7.7e-6 -- so the kernels are right and
+        // it is the instrument that cannot resolve them at this step size.
+        // Raising the default only when TF32 is on leaves the fp32 check,
+        // which passes at 1e-2 with 1.2e-4 error, exactly as it was.
+        if (!eps_given) eps = 3e-2f;
+    }
 
     GPT g;
     g.use_flash = (argc > 2 && !strcmp(argv[2], "--unfused")) ? false : true;

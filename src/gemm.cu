@@ -20,6 +20,7 @@
 // transpose costs only the choice between a vector store and four scalar
 // stores into shared memory.
 #include "gemm.h"
+#include "cover.cuh"
 #include "gelu.cuh"
 // Tensor cores here are TF32, which is Ampere and newer. BMB_TF32 is set by
 // the build when the target arch is sm_80+; without it the whole tensor-core
@@ -1209,6 +1210,14 @@ void dispatch_epi(int M, int N, int K, float alpha, const float *A,
         const int blocks = (M / bm) * (N / bn);
         const int splits = splitk_for(blocks, K, bk);
         dim3 g2(N / bn, M / bm, splits);
+        // The branch actually taken, for the coverage diff. Tile, transpose
+        // case, epilogue mask, whether K was split, and which warp shape --
+        // every axis a test could miss independently.
+        BMB_COVERF("gemm tf32 tile=%s warp=%s %c%c epi=%d split=%s",
+                   narrow ? "64x128" : "128x128",
+                   (!narrow && g_wide_warp) ? "64x64" : "32x64",
+                   TA ? 'T' : 'N', TB ? 'T' : 'N', EPI,
+                   splits > 1 ? "yes" : "no");
 
         if (splits > 1) {
             // Partials live in a workspace, one plane per split. thread_local
@@ -1267,10 +1276,12 @@ void dispatch_epi(int M, int N, int K, float alpha, const float *A,
     } else
 #endif  // BMB_TF32
         if (M % FBM == 0 && N % FBN == 0 && K % FBK == 0) {
+        BMB_COVERF("gemm fp32 fast %c%c epi=%d", TA ? 'T' : 'N', TB ? 'T' : 'N', EPI);
         dim3 grid(N / FBN, M / FBM);
         gemm_fast<TA, TB, FBM, FBN, FBK, FWM, FWN, FWNITER, FTM, FTN, FTHREADS, EPI>
             <<<grid, FTHREADS, 0, stream>>>(M, N, K, alpha, A, B, beta, C, ep);
     } else {
+        BMB_COVERF("gemm generic %c%c epi=%d", TA ? 'T' : 'N', TB ? 'T' : 'N', EPI);
         constexpr int BS = 16;
         dim3 block(BS, BS);
         dim3 grid((N + BS - 1) / BS, (M + BS - 1) / BS);

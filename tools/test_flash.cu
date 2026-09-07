@@ -19,6 +19,7 @@
 
 #include "../src/attention.h"
 #include "../src/flash.h"
+#include "../src/gemm.h"
 
 #define CUDA_CHECK(x)                                                          \
     do {                                                                       \
@@ -147,6 +148,13 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "-c") && i + 1 < argc) C = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-n") && i + 1 < argc) NH = atoi(argv[++i]);
         else if (!strcmp(argv[i], "-i") && i + 1 < argc) iters = atoi(argv[++i]);
+        // --tf32 makes the DISPATCHER pick what training picks. Without it
+        // gemm_tf32() is false, so flash_default_bwd_config returns 5 where a
+        // --tf32 training run gets 18, and the config the model actually
+        // backprops through is never selected here. The config-18 KERNELS are
+        // covered by the sweep below, which calls the _cfg entry points
+        // directly; what was uncovered is the choice.
+        else if (!strcmp(argv[i], "--tf32")) gemm_set_tf32(true);
     }
     const int hs = C / NH;
     const size_t BTC = (size_t)B * T * C;

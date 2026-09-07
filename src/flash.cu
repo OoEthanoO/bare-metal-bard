@@ -36,6 +36,7 @@
 //     (B, T, 3C) projection: one block owns one head, so the head offset is a
 //     constant added to the row pointer.
 #include "flash.h"
+#include "cover.cuh"
 #include "gemm.h"  // gemm_tf32(): attention follows the matmuls' opt-in
 #include "kernels/lane_major.cuh"  // mma layout, shared with kernels 10 and 11
 #include <cstdio>
@@ -736,7 +737,10 @@ void flash_attention_forward(float *out, float *lse, const float *qkv, int B,
     // picked -- so config 1 is named explicitly rather than being fallen into.
     const int preferred[] = {flash_default_config(), 1};
     for (int c : preferred)
-        if (flash_attention_forward_cfg(c, out, lse, qkv, B, T, C, NH)) return;
+        if (flash_attention_forward_cfg(c, out, lse, qkv, B, T, C, NH)) {
+            BMB_COVERF("flash fwd cfg=%d hs=%d", c, C / NH);
+            return;
+        }
     for (int cfg = 0; cfg < flash_num_configs(); ++cfg)
         if (flash_attention_forward_cfg(cfg, out, lse, qkv, B, T, C, NH)) return;
     {
@@ -2061,8 +2065,10 @@ void flash_attention_backward(float *dqkv, float *dsum, const float *dout,
     const int preferred[] = {flash_default_bwd_config(T), 16, 12, 5};
     for (int cfg : preferred)
         if (flash_attention_backward_cfg(cfg, dqkv, dsum, dout, qkv, out, lse, B,
-                                         T, C, NH))
+                                         T, C, NH)) {
+            BMB_COVERF("flash bwd cfg=%d hs=%d ctx%s", cfg, C / NH, T > 512 ? ">512" : "<=512");
             return;
+        }
     for (int cfg = 0; cfg < flash_num_bwd_configs(); ++cfg)
         if (flash_attention_backward_cfg(cfg, dqkv, dsum, dout, qkv, out, lse, B,
                                          T, C, NH))

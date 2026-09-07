@@ -8,6 +8,7 @@
 // shuffle network does not pay the L1/MIO cost that shared memory does -- the
 // exact cost that was throttling GEMM kernel 6.
 #include "nn.h"
+#include "cover.cuh"
 #include "gelu.cuh"
 #include "reduce.cuh"
 #include <cstdio>
@@ -561,6 +562,8 @@ void layernorm_forward(float *out, float *mean, float *rstd, const float *inp,
     // already 192 registers before addressing and CPL=48 (C=1536) would need
     // 288 against a hard cap of 255. 768 is where this stops being free.
     const int blocks = ceil_div(N, LN_WARPS);
+    BMB_COVERF("layernorm fwd %s C=%d",
+               (C == 256 || C == 384 || C == 512 || C == 768) ? "warp" : "block-per-row", C);
 #define LN_FWD_CASE(CPL)                                                      \
     layernorm_fwd_warp_k<CPL, LN_WARPS><<<blocks, 32 * LN_WARPS>>>(           \
         out, mean, rstd, inp, weight, bias, N);                               \
@@ -645,6 +648,7 @@ void layernorm_backward(float *dinp, float *dweight, float *dbias,
     // travels, which is an assumption and is flagged as one. `--ln-blocks`
     // sweeps any of them.
     const bool warp_path = (C == 256 || C == 384 || C == 512 || C == 768);
+    BMB_COVERF("layernorm bwd %s C=%d", warp_path ? "warp" : "block-per-row", C);
     if (warp_path) {
         if (g_ln_blocks_force <= 0) blocks = target_blocks() / 8;
         if (blocks < 1) blocks = 1;
