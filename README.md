@@ -26,11 +26,25 @@ and the architecture change surfaced a
 [1.8x collapse in the WMMA kernel](#the-same-instructions-got-more-expensive-wmma-on-blackwell)
 that Ada had been hiding.
 
-Builds and runs on anything from **sm_70 upward**. The tensor-core kernels
-are TF32, which is Ampere and newer, so below sm_80 they are not compiled in
-and every matmul takes the fp32 path — the ladder then runs kernels 1-8 and
-`--tf32` is a no-op rather than an error. That matters because the obvious
-free hardware for this project is a Colab or Kaggle T4, which is sm_75.
+Builds and runs on anything from **sm_75 upward** — Turing and newer. The
+tensor-core kernels are TF32, which is Ampere and newer, so below sm_80 they
+are not compiled in and every matmul takes the fp32 path — the ladder then runs
+kernels 1-8 and `--tf32` is a no-op rather than an error. That matters because
+the obvious free hardware for this project is a Colab or Kaggle T4, which is
+sm_75.
+
+*This used to say sm_70, and that stopped being true without anything in this
+repo changing.* **CUDA 13 dropped Volta**: `nvcc --list-gpu-arch` on 13.3.1
+begins at `compute_75`, and `-arch=sm_70` is now a fatal error rather than a
+deprecation warning. The floor here is the toolkit's, not the code's, and a
+clone on CUDA 12.x still builds for sm_70. Checked rather than assumed, because
+a portability claim nobody tests is a claim that quietly rots — all eight
+targets build clean for sm_75 on 13.3.1, and the pre-Ampere path
+(`scripts\build_notf32.bat`, which compiles the fp32-only configuration a T4
+would take) passes both the 56-case GEMM suite and the gradient check on this
+machine. What that does *not* establish is T4 runtime behaviour: an sm_75 cubin
+cannot execute on this card, so the fp32 path is verified as logic and not as
+silicon.
 
 **Writeup:** <https://bare-metal-bard.vercel.app>
 
