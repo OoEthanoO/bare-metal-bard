@@ -125,6 +125,15 @@ int main(int argc, char **argv) {
         sweep_ln(N, 384);
         return 0;
     }
+    if (nCs > 1) {
+        printf("READ THIS TABLE ACROSS, NOT DOWN. Every width after the first\n"
+               "runs with L2 already warm and the thread_local partials buffer\n"
+               "already grown, so later rows are priced too cheaply -- layernorm\n"
+               "bwd at C=1536 reads 0.21 ms here and 1.14 ms in its own process,\n"
+               "5.4x apart, and each is reproducible to 0.5%%. Comparing kernels\n"
+               "at ONE width is sound; comparing one kernel across widths is not.\n"
+               "Use --only C for that.\n\n");
+    }
     printf("%-18s %6s %6s %10s %10s %9s\n", "kernel", "N", "C", "ms", "GB/s",
            "% peak");
     printf("---------------------------------------------------------------\n");

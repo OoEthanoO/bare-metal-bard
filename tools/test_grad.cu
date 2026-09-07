@@ -54,9 +54,25 @@ static double loss_double(GPT &g, const int *x, const int *y) {
 int main(int argc, char **argv) {
     // Small enough to run many forward passes, large enough that every code
     // path (multi-layer residual, multi-head attention, padded vocab) is live.
-    const int B = 4, T = 64, C = 128, L = 2, NH = 4, V = 65, Vp = 128;
+    //
+    // C IS SETTABLE, AND IT HAD TO BECOME SO. This check ran only at C=128,
+    // and layernorm dispatches on C: 128 takes the general block-per-row
+    // kernel, while the model trains at 384 on the warp-per-row one. So the
+    // kernel the model actually uses was never gradient-checked -- the check
+    // validated its neighbour. Widths 256/384/512/768 all take the warp path
+    // and each is a separate template instantiation with its own warp count,
+    // so each needs its own run:
+    //
+    //   ./bench/test_grad 1e-2 --fused --C 384
+    //
+    // NH tracks C so the head size stays 64, which is what the fused attention
+    // is instantiated for.
+    int B = 4, T = 64, C = 128, L = 2, V = 65, Vp = 128;
     float eps = 1e-2f;
     if (argc > 1) eps = atof(argv[1]);
+    for (int i = 1; i + 1 < argc; ++i)
+        if (!strcmp(argv[i], "--C")) C = atoi(argv[i + 1]);
+    const int NH = C >= 256 ? C / 64 : 4;
 
     GPT g;
     g.use_flash = (argc > 2 && !strcmp(argv[2], "--unfused")) ? false : true;

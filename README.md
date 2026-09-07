@@ -1143,6 +1143,53 @@ two kernels each is 24 launches for 1.1 ms of work, which puts the launch
 overhead itself near a fifth of the line. Fusing the reduction into the
 kernel's tail would take that, and it is the next thing to try here.
 
+#### That kernel was dispatched on `if (C == 384)`, and never gradient-checked
+
+Two problems, and the second is worse than the first.
+
+The warp-per-row path was selected by a literal comparison against this
+model's `n_embd`. Every other width fell to the block-per-row kernel with no
+warning, so a clone at GPT-2 small's 768 quietly got the slow one. A cliff
+keyed to one hard-coded number is invisible to the person who wrote it and
+obvious to everyone else. Both kernels are now templated on the warp count as
+well as the width, measured as an interleaved A/B in one machine state:
+
+| C | before | after | |
+|---|---:|---:|---:|
+| 256 | 0.391 ms | **0.128** | 3.05× |
+| 384 | 0.188 ms | 0.191 | 1.00× — unchanged, as intended |
+| 512 | 0.479 ms | **0.213** | 2.25× |
+| 768 | 0.570 ms | **0.338** | 1.69× |
+
+The warp count has to shrink as the width grows, and that is what caps the
+range. The fold through shared memory is `WARPS × 2 × C` floats — 48 KB at
+C=384 with sixteen warps, which is exactly the default per-block limit. Sixteen
+warps at C=768 would want 96 KB and the opt-in; at C=1024, 128 KB, which no
+Blackwell SM has. So the warp count is chosen per width to land at or under
+48 KB (16/16/12/8) and the opt-in is never needed. The hard ceiling above that
+is registers: the backward holds six `CPL`-length arrays per thread, so C=1024
+is already 192 registers and C=1536 would need 288 against a cap of 255.
+
+**And the gradient check was running at C=128.** Which is not 384 — so it took
+the block-per-row path, and *the kernel the model actually trains with had
+never been gradient-checked*. The check was validating its neighbour. It has
+been that way since the warp kernel was written. `--C` now sets the width, and
+all five paths pass:
+
+```
+C=128 (block-per-row)  ok      C=512 (warp, 12)  ok
+C=256 (warp, 16)       ok      C=768 (warp, 8)   ok
+C=384 (warp, 16)       ok
+```
+
+Worth stating plainly: the speedups above are the small half of this. A
+dispatch that silently picks a different kernel from the one your tests cover
+is how a correctness bug survives a test suite, and this repo had that
+arrangement for as long as the fast path has existed. The model's own losses
+are bit-identical across the change — 4.2625, 3.1102, 2.7430 with |g| 15.666 —
+which is what a re-dispatch that keeps C=384 on the same kernel should look
+like.
+
 ### The attention backward was starved of warps, not bandwidth
 
 *Measured on the 5070 Ti, sm_120, CUDA 13.3, SM clock pinned to 1200 MHz

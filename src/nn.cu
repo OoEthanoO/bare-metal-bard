@@ -188,14 +188,14 @@ __global__ void layernorm_bwd_reduce_k(float *dweight, float *dbias,
 // block and stays deterministic -- which is a spec here, not a nicety.
 constexpr int LN_WARPS = 16;
 
-template <int CPL>  // columns per lane; C == 32 * CPL
+template <int CPL, int WARPS>  // columns per lane; C == 32 * CPL
 __global__ void layernorm_fwd_warp_k(float *out, float *mean, float *rstd,
                                      const float *inp, const float *weight,
                                      const float *bias, int N) {
     constexpr int C = 32 * CPL;
     constexpr int F4 = CPL / 4;
     const int lane = threadIdx.x % 32, warp = threadIdx.x / 32;
-    for (int row = blockIdx.x * LN_WARPS + warp; row < N; row += gridDim.x * LN_WARPS) {
+    for (int row = blockIdx.x * WARPS + warp; row < N; row += gridDim.x * WARPS) {
         const float *x = inp + (size_t)row * C;
         float v[CPL];
         float sum = 0.0f;
@@ -230,7 +230,7 @@ __global__ void layernorm_fwd_warp_k(float *out, float *mean, float *rstd,
     }
 }
 
-template <int CPL>
+template <int CPL, int WARPS>
 __global__ void layernorm_bwd_warp_k(float *dinp, float *part_dw, float *part_db,
                                      const float *dout, const float *inp,
                                      const float *weight, const float *mean,
@@ -245,7 +245,7 @@ __global__ void layernorm_bwd_warp_k(float *dinp, float *part_dw, float *part_db
         const float4 t = CVEC4(weight[(k * 32 + lane) * 4]);
         w[4 * k + 0] = t.x; w[4 * k + 1] = t.y; w[4 * k + 2] = t.z; w[4 * k + 3] = t.w;
     }
-    for (int row = blockIdx.x * LN_WARPS + warp; row < N; row += gridDim.x * LN_WARPS) {
+    for (int row = blockIdx.x * WARPS + warp; row < N; row += gridDim.x * WARPS) {
         const float *x = inp + (size_t)row * C;
         const float *dy = dout + (size_t)row * C;
         const float mu = mean[row], rs = rstd[row];
@@ -290,7 +290,7 @@ __global__ void layernorm_bwd_warp_k(float *dinp, float *part_dw, float *part_db
         }
     }
     // Fold the warps' column partials, fixed order, one partial per block.
-    extern __shared__ float fold[];  // [LN_WARPS][2][C]
+    extern __shared__ float fold[];  // [WARPS][2][C]
 #pragma unroll
     for (int k = 0; k < F4; ++k) {
         const int c0 = (k * 32 + lane) * 4;
@@ -301,7 +301,7 @@ __global__ void layernorm_bwd_warp_k(float *dinp, float *part_dw, float *part_db
     for (int c = threadIdx.x; c < C; c += blockDim.x) {
         float sw = 0.0f, sb = 0.0f;
 #pragma unroll
-        for (int wv = 0; wv < LN_WARPS; ++wv) {
+        for (int wv = 0; wv < WARPS; ++wv) {
             sw += fold[(wv * 2 + 0) * C + c];
             sb += fold[(wv * 2 + 1) * C + c];
         }
@@ -546,14 +546,33 @@ void encoder_backward(float *dwte, float *dwpe, const float *dout,
 
 void layernorm_forward(float *out, float *mean, float *rstd, const float *inp,
                        const float *weight, const float *bias, int N, int C) {
-    // The warp-per-row kernel, for the width the model uses; the block-per-row
-    // one remains the general path.
-    if (C == 384) {
-        const int blocks = ceil_div(N, LN_WARPS);
-        layernorm_fwd_warp_k<12><<<blocks, 32 * LN_WARPS>>>(out, mean, rstd, inp,
-                                                          weight, bias, N);
-        return;
+    // The warp-per-row kernel, for the widths it is instantiated at; the
+    // block-per-row one remains the general path.
+    //
+    // THIS USED TO SAY `if (C == 384)`, which is this model's n_embd and
+    // nothing else. Every other width fell to the block-per-row kernel with no
+    // warning, so a clone at GPT-2 small's 768 quietly got the slow path -- a
+    // performance cliff keyed to one hard-coded number is the kind of thing
+    // that is invisible to the person who wrote it and obvious to everyone
+    // else.
+    //
+    // The ceiling is registers, not taste. The backward holds six CPL-length
+    // arrays per thread (acc_dw, acc_db, w, xh, g, dxo), so CPL=32 (C=1024) is
+    // already 192 registers before addressing and CPL=48 (C=1536) would need
+    // 288 against a hard cap of 255. 768 is where this stops being free.
+    const int blocks = ceil_div(N, LN_WARPS);
+#define LN_FWD_CASE(CPL)                                                      \
+    layernorm_fwd_warp_k<CPL, LN_WARPS><<<blocks, 32 * LN_WARPS>>>(           \
+        out, mean, rstd, inp, weight, bias, N);                               \
+    return
+    switch (C) {
+    case 256: LN_FWD_CASE(8);
+    case 384: LN_FWD_CASE(12);
+    case 512: LN_FWD_CASE(16);
+    case 768: LN_FWD_CASE(24);
+    default: break;
     }
+#undef LN_FWD_CASE
     layernorm_fwd_k<<<N, 128>>>(out, mean, rstd, inp, weight, bias, C);
 }
 
@@ -595,23 +614,53 @@ void layernorm_backward(float *dinp, float *dweight, float *dbias,
         cudaMalloc(&part, need * sizeof(float));
         cap = need;
     }
-    if (C == 384) {
-        // Warp per row: sixteen rows in flight per block, so a block's share of
-        // the rows is sixteen times what it was, and the block count still
-        // decides how many partials the reduction sums. Swept in situ with
-        // --ln-blocks (ms/step for the region, this card, 16 warps per block):
-        //
-        //   blocks      23     46     92    184    368    736
-        //   ms/step   1.11   1.15   1.26   1.24   1.44   1.75
-        //
-        // against 1.60 for the block-per-row kernel at its own best count.
-        // Fewer blocks win and the curve is flat at the bottom, so half a
-        // block per SM is the default rather than eight.
+    // Warp per row, for the widths it is instantiated at. Sixteen rows in
+    // flight per block at C=384, so a block's share of the rows is sixteen
+    // times what it was, and the block count still decides how many partials
+    // the reduction sums. Swept in situ with --ln-blocks (ms/step for the
+    // region, this card, 16 warps per block):
+    //
+    //   blocks      23     46     92    184    368    736
+    //   ms/step   1.11   1.15   1.26   1.24   1.44   1.75
+    //
+    // against 1.60 for the block-per-row kernel at its own best count. Fewer
+    // blocks win and the curve is flat at the bottom, so half a block per SM
+    // is the default rather than eight.
+    //
+    // THE WARP COUNT SHRINKS AS C GROWS, and it has to. The fold through
+    // shared memory is WARPS x 2 x C floats, which is 48 KB at C=384 with
+    // sixteen warps -- exactly the default per-block limit. Holding sixteen at
+    // C=768 would ask for 96 KB and need the opt-in; at C=1024 it would ask
+    // for 128 KB, which no Blackwell SM has. So WARPS is picked per width to
+    // land at or under 48 KB and the opt-in is never needed:
+    //
+    //   C     CPL   WARPS   fold
+    //   256     8      16   32 KB
+    //   384    12      16   48 KB   (unchanged, and swept)
+    //   512    16      12   48 KB
+    //   768    24       8   48 KB
+    //
+    // Only the 384 row has been swept for its block count; the others take the
+    // same half-a-block-per-SM rule on the assumption that the curve's shape
+    // travels, which is an assumption and is flagged as one. `--ln-blocks`
+    // sweeps any of them.
+    const bool warp_path = (C == 256 || C == 384 || C == 512 || C == 768);
+    if (warp_path) {
         if (g_ln_blocks_force <= 0) blocks = target_blocks() / 8;
         if (blocks < 1) blocks = 1;
-        const size_t fold = (size_t)LN_WARPS * 2 * C * sizeof(float);
-        layernorm_bwd_warp_k<12><<<blocks, 32 * LN_WARPS, fold>>>(
-            dinp, part, part + (size_t)blocks * C, dout, inp, weight, mean, rstd, N);
+#define LN_BWD_CASE(CPL, W)                                                   \
+    layernorm_bwd_warp_k<CPL, W><<<blocks, 32 * (W),                          \
+                                   (size_t)(W) * 2 * C * sizeof(float)>>>(    \
+        dinp, part, part + (size_t)blocks * C, dout, inp, weight, mean, rstd, \
+        N);                                                                   \
+    break
+        switch (C) {
+        case 256: LN_BWD_CASE(8, 16);
+        case 384: LN_BWD_CASE(12, 16);
+        case 512: LN_BWD_CASE(16, 12);
+        case 768: LN_BWD_CASE(24, 8);
+        }
+#undef LN_BWD_CASE
     } else {
         const size_t smem = (size_t)C * 2 * sizeof(float);
         layernorm_bwd_k<<<blocks, 128, smem>>>(dinp, part, part + (size_t)blocks * C,
