@@ -1,0 +1,60 @@
+The two-rank anomaly, tested on ONE RTX 5080 Laptop (both ranks on device 0,
+the --gpus 2 rehearsal). CUDA 13.3.1, driver 616.64.
+
+THE ANOMALY, as recorded from 2x A40: a two-rank run following sgemm, or
+test_ddp, or test_ddp + a one-rank run, reads step-1 losses of 4.2748 / 4.2655
+with |g| 32.750, against a clean 4.2873 / 4.2693 and |g| 15.023. Both ranks
+wrong, the same wrong digits every time, on two different A40 hosts. The
+recorded diagnosis was "a read of memory that was never written", depending on
+what the previous process left in device memory.
+
+That diagnosis is testable WITHOUT two GPUs, which is what this file does.
+
+    case                                    rank 0    rank 1     loss     |g|
+    1. sgemm, then 2-rank                   4.2577    4.2672   4.2625  15.666
+    2. sgemm, scrub ZEROS, then 2-rank      4.2577    4.2672   4.2625  15.666
+    3. sgemm, scrub NaN, then 2-rank        4.2577    4.2672   4.2625  15.666
+    4. test_ddp, then 2-rank                4.2577    4.2672   4.2625  15.666
+    6. scrub NaN, then 1-rank                    -         -   4.2625  15.666
+
+Bit-identical in every case, including after every free byte of device memory
+was filled with 0x7fc00000.
+
+WHAT THIS RULES OUT. The NaN scrub is the strong form of the test: it does not
+depend on the anomaly reproducing, because a read of scrubbed memory produces
+NaN whether or not the values would otherwise have been wrong. Filling 15 GB
+with NaN and getting a bit-identical loss says the forward pass reads nothing a
+predecessor left behind -- on this card, in both the one-rank and two-rank
+paths.
+
+compute-sanitizer --tool initcheck agrees, independently and from the other
+direction: ERROR SUMMARY 0 errors on the two-rank rehearsal and 0 on the
+one-rank run, each after an sgemm predecessor.
+
+WHAT SURVIVES. The anomaly needs something a single device cannot exercise.
+Two physical GPUs differ from this rehearsal in exactly the places the earlier
+bugs of this family lived: cudaMemcpyPeerAsync between distinct devices, the
+per-device thread_local caches, and ddp_init's peer probe. The ring itself is
+not a candidate on the evidence here -- chunk_of bounds every transfer and
+every add_into_k to c.len rather than to the padded `per`, and zero-length
+chunks are skipped, so d.recv is never read past what was written into it.
+
+So the open question is narrower than it was: not "does the forward read
+uninitialized memory" -- it does not -- but "what does the two-DEVICE path read
+that the two-RANK path does not". That still needs the rented hardware, and it
+now needs it for one specific question instead of a hypothesis.
+
+A CAVEAT ON THE CARDS. This is Blackwell and the anomaly is on Ampere, so a
+clean result here does not prove the A40s are clean; a driver or architecture
+difference could hide it. What it does establish is that the mechanism as
+written down -- a stale read in the forward -- is not sufficient on its own,
+because here the identical code with deliberately poisoned memory does not
+reproduce it.
+
+TOOLING NOTE. tools/gpu_scrub.cu could not run on Windows before this. It sized
+its fill by allocating until cudaMalloc failed, which terminates on Linux but
+not under WDDM, where the driver pages allocations out to system memory instead
+of refusing: the loop hit its 4096-allocation cap, burned 929 seconds of CPU,
+and held no VRAM at all by the end -- it had been scrubbing host memory. The
+budget now comes from cudaMemGetInfo. Same intent, 15003 MB of 15067 MB free,
+15 allocations, 2.0 seconds.

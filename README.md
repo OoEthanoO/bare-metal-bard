@@ -2912,9 +2912,42 @@ four scalar stores.
    between two processes, and `scripts/cloud_anomaly_decider.sh` runs it with
    zeros (which should make the run clean) and with NaN (which should make
    the stale rows scream), then `compute-sanitizer --tool initcheck`, which
-   names the kernel and the address. That run is waiting on A40 stock. Until
-   it has run, every multi-rank run prints each rank's own step-1 loss, and
-   this stays on the list as reproducible and unexplained rather than fixed.
+   names the kernel and the address.
+
+   **That test did not need the rented hardware after all, and it has now
+   run** — [`bench/logs/anomaly_decider_5080.txt`](bench/logs/anomaly_decider_5080.txt).
+   The scrub is the *strong* form of the experiment: it does not depend on the
+   anomaly reproducing, because a read of poisoned memory yields NaN whether
+   or not the values would otherwise have been wrong. On one 5080, both ranks
+   on one device, after filling all 15 GB of free memory with `0x7fc00000`:
+
+   | case | rank 0 | rank 1 | \|g\| |
+   |---|---:|---:|---:|
+   | sgemm, then 2-rank | 4.2577 | 4.2672 | 15.666 |
+   | sgemm, scrub **zeros**, then 2-rank | 4.2577 | 4.2672 | 15.666 |
+   | sgemm, scrub **NaN**, then 2-rank | 4.2577 | 4.2672 | 15.666 |
+   | `test_ddp`, then 2-rank | 4.2577 | 4.2672 | 15.666 |
+
+   Bit-identical. `initcheck` agrees from the other direction — 0 errors on
+   both the one-rank and two-rank paths. **So the forward reads nothing a
+   predecessor left behind**, and the recorded diagnosis is not sufficient on
+   its own.
+
+   What survives is narrower and better posed: not *does the forward read
+   uninitialized memory* — it does not — but *what does the two-**device**
+   path read that the two-**rank** path does not*. That is `cudaMemcpyPeerAsync`
+   between distinct devices, the per-device `thread_local` caches, and
+   `ddp_init`'s probe, which is exactly where every earlier bug of this family
+   lived. The ring is ruled out by inspection: `chunk_of` bounds every transfer
+   and every `add_into_k` to `c.len` rather than the padded `per`, so `d.recv`
+   is never read past what was written into it.
+
+   Caveat kept deliberately: this is Blackwell and the anomaly is Ampere, so a
+   clean result here does not prove the A40s are clean. It establishes that the
+   mechanism as written down does not reproduce when the identical code is run
+   against memory deliberately poisoned to expose it. Until the two-device
+   question is answered, every multi-rank run prints each rank's own step-1
+   loss, and this stays on the list as reproducible and unexplained.
 
    That fourth run also corrected an attribution above. Its traced runs read
    90 ms while the untraced one read 41, and the difference was the checksum
