@@ -59,7 +59,15 @@ export default function Page() {
   const tc = byName('tensorcore');
   const warp = byName('warptile');
   const vec = byName('vectorized');
-  const speedup = tc.gflops / first.gflops;
+  // The headline speedup is against the FASTEST kernel, not against kernel 9.
+  // It used to divide by `tensorcore`, which was the top of the ladder when
+  // this page was written on a 4070. On Blackwell kernel 9 collapses to 57% of
+  // its Ada throughput per SM and is no longer even the fastest tensor-core
+  // kernel, so anchoring on it understated the ladder by half (60x against
+  // 111x). Taking the maximum cannot go stale the next time the ladder grows
+  // or reorders.
+  const best = data.kernels.reduce((a, k) => (k.gflops > a.gflops ? k : a), data.kernels[0]);
+  const speedup = best.gflops / first.gflops;
 
   const tcTf32 = (data.tf32 as any)?.tensorcore?.[String(data.benchSize)];
   const dbTf32 = (data.tf32 as any)?.dbuffer?.[String(data.benchSize)];
@@ -70,10 +78,10 @@ export default function Page() {
         <p className="eyebrow">CUDA · from scratch</p>
         <h1>Writing a CUDA matmul that catches cuBLAS — then training a GPT on it</h1>
         <p className="lede">
-          Nine rewrites of a single kernel, from the naive version everyone writes first to a
-          double-buffered, warp-tiled one that matches NVIDIA&rsquo;s hand-tuned library — and a
-          tensor-core version that passes it. Then a language model trained end to end on those
-          kernels, with no PyTorch and no vendor BLAS anywhere in the training path.
+          Eleven rewrites of a single kernel, from the naive version everyone writes first to a
+          double-buffered, warp-tiled one — and then tensor-core versions that pass NVIDIA&rsquo;s
+          hand-tuned library. Then a language model trained end to end on those kernels, with no
+          PyTorch and no vendor BLAS anywhere in the training path.
         </p>
         <div className="statgrid">
           <div className="stat">
@@ -81,8 +89,8 @@ export default function Page() {
             <span className="k">faster than the naive kernel</span>
           </div>
           <div className="stat">
-            <span className="v">{dbuf.pct.toFixed(0)}%</span>
-            <span className="k">of cuBLAS in fp32, like for like</span>
+            <span className="v">{best.pct.toFixed(0)}%</span>
+            <span className="k">of cuBLAS at N={data.benchSize}</span>
           </div>
           <div className="stat">
             <span className="v">{(t.tokPerSec / 1000).toFixed(1)}k</span>
@@ -96,29 +104,33 @@ export default function Page() {
       </header>
 
       <p>
-        The hardware is an <strong>RTX 4070 Laptop</strong> (Ada, sm_89): 36 SMs, 256 GB/s of memory
-        bandwidth, 8 GB, and a 55 W power budget. Two numbers from that spec sheet explain
-        everything that follows.
+        The numbers on this page were measured on an <strong>RTX 5080 Laptop</strong> (Blackwell,
+        sm_120): 60 SMs, 896 GB/s of memory bandwidth, 16 GB, 48 MB of L2. It is the third card
+        this project has run on — it began on an RTX 4070 Laptop (Ada, sm_89; 36 SMs, 256 GB/s,
+        8 GB) and passed through an RTX 5070 Ti Laptop (46 SMs) — and where the text below reasons
+        about a specific card by name, that is the card it was measured on. No table mixes them.
       </p>
       <p>
-        At the clock these benchmarks run at, the card can do about 11.1 TFLOP/s of fp32 and move
-        256 GB/s. Divide them and you get the <strong>ridge point: 43 FLOP/byte</strong>. Every byte
-        read from memory has to feed 43 floating-point operations before the arithmetic units stop
-        waiting on memory. A naive matmul manages <strong>0.25</strong>.
+        At the clock these benchmarks run at, the card can do about 18.4 TFLOP/s of fp32 and move
+        896 GB/s. Divide them and you get the <strong>ridge point: 20.6 FLOP/byte</strong>. Every
+        byte read from memory has to feed 21 floating-point operations before the arithmetic units
+        stop waiting on memory. A naive matmul manages <strong>0.25</strong>.
       </p>
       <p>
-        That gap — a factor of ~170 — is the entire project. Almost every optimization below is the
+        That gap — a factor of ~80 — is the entire project. Almost every optimization below is the
         same move applied at a different level of the memory hierarchy:{' '}
         <em>load a value once, then spend it on as much arithmetic as possible before letting it
         go.</em>
       </p>
 
-      <h2>The nine kernels</h2>
+      <h2>The eleven kernels</h2>
       <KernelBars />
       <p className="cap">
-        GFLOP/s at N={data.benchSize}, SM clock pinned to 1200 MHz. The cuBLAS baseline is{' '}
-        <strong>fp32</strong>, which is what cuBLAS does by default. Kernel 9 uses tensor cores and
-        is therefore not computing the same thing — see below.
+        GFLOP/s at N={data.benchSize}, SM clock pinned to 1200 MHz, median of three independent
+        sweeps. The cuBLAS baseline is <strong>fp32</strong>, which is what cuBLAS does by default.
+        Kernels 9–11 use tensor cores and are therefore not computing the same thing — see below.
+        Kernel 9 sitting <em>below</em> kernel 8 here is not a typo; it is the finding described
+        in <a href="#wmma-blackwell">the section on WMMA</a> further down.
       </p>
 
       <div className="tablewrap">
@@ -362,8 +374,9 @@ __syncthreads()              <- and blocks again before overwriting`}</code>
       <figure>
         <img src="/sgemm_scaling.svg" alt="Fraction of cuBLAS achieved, by matrix size" />
         <figcaption>
-          Small matrices fall off because a 128×128 block tile leaves most of the 36 SMs idle — at
-          N=512 the grid is only 4×4 blocks.
+          Small matrices fall off because a 128×128 block tile leaves most of the 60 SMs idle — at
+          N=512 the grid is only 4×4 blocks, and at N=128 it is a single block on a 60-SM card,
+          which measures launch latency rather than throughput.
         </figcaption>
       </figure>
 
@@ -546,19 +559,31 @@ __syncthreads()              <- and blocks again before overwriting`}</code>
       </p>
       <p>
         <strong>And the best tile on a square benchmark is not the best tile in the model.</strong>{' '}
-        The 64×64 warp tile that is worth 8.7% at N=4096 <em>loses</em> in situ, 1.034× against the
-        narrower shape&rsquo;s 1.044×. The model&rsquo;s GEMMs are 4096×384×384 and friends, so a
-        128×128 block tile gives 96 blocks against 36 SMs — the machine is not full, and a
-        128-thread block brings half as many warps per SM to hide latency with. The extra reuse is
-        real and there is nothing to spend it on. The ladder and the model deliberately run
-        different tiles.
+        On the 4070, the 64×64 warp tile that was worth 8.7% at N=4096 <em>lost</em> in situ,
+        1.034× against the narrower shape&rsquo;s 1.044×. The model&rsquo;s GEMMs are 4096×384×384
+        and friends, so a 128×128 block tile gave 96 blocks against 36 SMs — the machine is not
+        full, and a 128-thread block brings half as many warps per SM to hide latency with. The
+        ladder and the model deliberately run different tiles.
+      </p>
+      <p>
+        <strong>On the 5080 that gap closed to nothing, which is the more interesting
+        outcome.</strong>{' '}
+        Re-run as a runtime A/B — both arms in one binary, interleaved in both orders — the two
+        warp tiles are separated by <strong>+0.04%</strong> across 54 shape-measurements, and the
+        per-shape signs agree across three runs on only 4 shapes of 18. The control is what says
+        why: a square 4096³, where this tile was worth +8.7% on the 4070, now reads +0.0%. The
+        benefit did not move from square shapes to skinny ones, it evaporated on the shape where it
+        was strongest. Cutting shared-memory traffic per <code>mma</code> by a third buys nothing
+        here, so shared bandwidth is no longer what limits this kernel — on Ada the identical change
+        proved that it was.
       </p>
 
       <h2>The compiler optimized the thing it could see</h2>
       <p>
         Kernel 9 sat at 8064 GF/s until a question about a version number. The writeup said CUDA
         12.5; 13.3 was also installed. Building the same source with both — same machine, same
-        pinned clock, N={data.benchSize} — eight of the nine kernels came out indistinguishable, and
+        pinned clock, N={data.benchSize} — eight of the nine kernels then written came out
+        indistinguishable, and
         one did not:
       </p>
       <div className="tablewrap">
@@ -624,7 +649,7 @@ __syncthreads()              <- and blocks again before overwriting`}</code>
       </pre>
       <p>
         Both toolkits then allocate 128 registers and accept the spill. This is not a 13.3
-        workaround — it is faster on both, and 8290 GF/s is the fastest this kernel has ever run:
+        workaround — it is faster on both. <strong>On the 4070</strong>, where this was found:
       </p>
       <div className="tablewrap">
         <table>
@@ -904,7 +929,8 @@ __syncthreads()              <- and blocks again before overwriting`}</code>
         None of them is badly written — the batched GEMM is the same code that reaches 90% of
         cuBLAS. The cost is <em>structural</em>. A (B, NH, T, T) score matrix gets written to global
         memory and read back, and the softmax over it does roughly 5 flops per 8 bytes on a card
-        whose ridge point is 43 FLOP/byte. That is 0.6% of peak no matter how good the kernel is.
+        whose ridge point is 20.6 FLOP/byte. That is a fraction of a percent of peak no matter how
+        good the kernel is.
         The only fix is to not have the intermediate.
       </p>
       <p>
@@ -1049,9 +1075,11 @@ O' = O * exp(m - m') + exp(S_j - m') @ V_j`}</code>
       )}
 
       <p>
-        This card has 8 GB. The unfused path tops out at context 1024; the fused path trains at
-        context 2048, and the unfused path would need nearly three times the card to do the same.{' '}
-        <strong>Fusing attention doubled the context this GPU can train.</strong>
+        The card this was measured on has 8 GB. The unfused path tops out at context 1024; the
+        fused path trains at context 2048, and the unfused path would need nearly three times the
+        card to do the same. <strong>Fusing attention doubled the context that GPU could
+        train.</strong> The 5080&rsquo;s 16 GB moves the ceiling without changing the ratio — the
+        fused path still holds twice the context of the unfused one, on twice the memory.
       </p>
       <div className="note">
         <p>
@@ -1204,7 +1232,11 @@ O' = O * exp(m - m') + exp(S_j - m') @ V_j`}</code>
       </div>
 
       <h3>Does TF32 cost the model anything?</h3>
-      <p>Full 5000-step runs, same seed, same configuration, clock pinned:</p>
+      <p>
+        Full 5000-step runs, same seed, same configuration, clock pinned.{' '}
+        <strong>Measured on the 4070</strong>, which is the card the fp32-vs-TF32 pair was run on;
+        the 5080 numbers this page opens with are TF32 throughout.
+      </p>
       <div className="tablewrap">
         <table>
           <thead>
@@ -1757,6 +1789,85 @@ run1 2.7130  run2 2.7135  DIFFERS`}</pre>
         </p>
       </div>
 
+      <h2 id="wmma-blackwell">The same instructions got more expensive</h2>
+      <p>
+        Moving to a third card reordered the ladder, which is not something an algorithm is
+        supposed to do. Kernel 7 is now slower than kernel 6, where on the 4070 it was faster. And
+        kernel 9 — the WMMA tensor-core kernel — fell to <strong>64.8% of cuBLAS</strong> from
+        117.6% on Ada, putting it <em>below</em> the plain fp32 double-buffered kernel. Both
+        inversions reproduce on a 5070 Ti, so neither is a bad sample.
+      </p>
+      <p>
+        Dividing out the SM count, which is the only fair way to compare three cards, and
+        normalising each kernel to its own Ada number:
+      </p>
+      <div className="tablewrap">
+        <table>
+          <thead>
+            <tr>
+              <th>kernel</th>
+              <th className="n">4070 (Ada)</th>
+              <th className="n">5070 Ti</th>
+              <th className="n">5080</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>k8 <code>dbuffer</code> (fp32)</td>
+              <td className="n">100%</td>
+              <td className="n">98%</td>
+              <td className="n">95%</td>
+            </tr>
+            <tr>
+              <td>k10 <code>mma.sync</code> + <code>LDS</code></td>
+              <td className="n">100%</td>
+              <td className="n">94%</td>
+              <td className="n">92%</td>
+            </tr>
+            <tr className="hi">
+              <td>k9 WMMA</td>
+              <td className="n">100%</td>
+              <td className="n">58%</td>
+              <td className="n">57%</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        The SASS says what differs, and it is not the tensor-core work: both kernels issue exactly{' '}
+        <strong>128 HMMA</strong>. The loads differ. Kernel 10 issues 32 <code>LDS</code>; kernel 9
+        issues <strong>128 generic <code>LD</code></strong> and not one <code>LDS</code>, despite
+        reading its fragments out of <code>__shared__</code> memory.{' '}
+        <code>wmma::load_matrix_sync</code> takes an opaque <code>fragment</code> type, the address
+        space is lost at the API boundary, and the compiler falls back on generic addressing.
+      </p>
+      <p>
+        <strong>My first guess was wrong, and that is the useful part.</strong> I expected a
+        Blackwell codegen regression. Compiling the same source for <code>sm_89</code> and{' '}
+        <code>sm_120</code> gives 960 and 984 instructions with the same 128 <code>LD</code> and 128
+        HMMA in both. Ada emitted those generic loads too. The instruction <em>mix</em> did not
+        change — its <em>price</em> did. The identical structural weakness cost about 10% on Ada and
+        costs 43% here.
+      </p>
+      <p>
+        Which retroactively raises the value of kernel 10. When it was written, hand-written PTX at
+        the same tile shape was worth only 2.7%, and the honest conclusion was that most of its win
+        came from a wider warp tile instead. On this card the same choice — owning the shared layout
+        so the loads can be <code>LDS</code> — is worth 1.8×.{' '}
+        <strong>An optimization that is marginal on the hardware you have can be the one that
+        survives the hardware you get</strong>, and the only way to find out is to keep the losing
+        branch and re-run it.
+      </p>
+      <div className="note">
+        <p style={{ margin: 0 }}>
+          The warp-tile A/B above is the same finding from the other end. There, 128 generic loads
+          against 32 shared ones cost 43%. Here, a third <em>less</em> shared traffic costs 0%. Two
+          experiments aimed at different kernels, agreeing that on this architecture what matters is{' '}
+          <em>which load path you are on</em>, not how much shared traffic you move. Neither would
+          have supported that alone.
+        </p>
+      </div>
+
       <h2>What I&rsquo;d do next</h2>
       <ol>
         <li>
@@ -1829,8 +1940,9 @@ run1 2.7130  run2 2.7135  DIFFERS`}</pre>
 
       <footer>
         <p>
-          Built on an RTX 4070 Laptop and continued on an RTX 5070 Ti Laptop (sm_120), CUDA 13.3,
-          SM clock pinned to 1200 MHz. The two cards are not comparable and no table here mixes
+          Built on an RTX 4070 Laptop, continued on an RTX 5070 Ti Laptop, and now measured on an
+          RTX 5080 Laptop (Blackwell, sm_120, 60 SMs), CUDA 13.3.1, SM clock pinned to 1200 MHz.
+          The three cards are not comparable and no table here mixes
           them. Every
           benchmark cell is the median of three independent sweeps, because pinning the clock fixes
           variance <em>within</em> a run and does nothing about a bad run — which cost me a
