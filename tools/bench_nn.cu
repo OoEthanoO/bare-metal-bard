@@ -94,7 +94,15 @@ int main(int argc, char **argv) {
            memclk * 1e-6);
 
     const int N = 4096;
-    const int Cs[] = {384, 1152, 1536};
+    // 384 is this model's width and the only one with a warp-per-row path.
+    // 512 and 768 are the next two GPT widths up and are here to price what a
+    // clone with a different n_embd pays for falling off that hard-coded case;
+    // 1152 and 1536 are the MLP and qkv widths the other kernels see.
+    int Cs[] = {384, 512, 768, 1152, 1536};
+    int nCs = 5;
+    // --only C runs one width, for A/B-ing a change to a single path.
+    for (int i = 1; i + 1 < argc; ++i)
+        if (!strcmp(argv[i], "--only")) { Cs[0] = atoi(argv[i + 1]); nCs = 1; }
     size_t maxel = (size_t)N * 1536;
     CUDA_CHECK(cudaMalloc(&g.dout, maxel * 4));
     CUDA_CHECK(cudaMalloc(&g.inp,  maxel * 4));
@@ -120,7 +128,8 @@ int main(int argc, char **argv) {
     printf("%-18s %6s %6s %10s %10s %9s\n", "kernel", "N", "C", "ms", "GB/s",
            "% peak");
     printf("---------------------------------------------------------------\n");
-    for (int C : Cs) {
+    for (int ci = 0; ci < nCs; ++ci) {
+        const int C = Cs[ci];
         g.N = N; g.C = C;
         const double el = (double)N * C * 4.0 / 1e9;  // one pass, GB
         struct Case { const char *name; void (*fn)(void *); double gb; };
