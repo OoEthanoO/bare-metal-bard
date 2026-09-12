@@ -1,0 +1,33 @@
+data      1003855 train / 111539 val tokens, vocab 65 (padded 128)
+model     6 layers, 6 heads, 384 embd, ctx 256, fused attention
+matmul    TF32 tensor cores
+gemm tile measured shape rule
+fwd tile  config 5 (mma br64 bc32 t128)
+bwd tile  config 18 (br32 bc32 mma-q mma-kv w2)
+params    10.80M (41.2 MB; +41.2 MB grads, +82.4 MB adam state)
+memory    593.0 MB forward activations, 74.1 MB backward scratch
+total     0.81 GB resident (params+grads+adam+activations+scratch)
+step     1/30  loss 4.2625  lr 1.00e-05  |g| 15.666   111.61 ms    36699 tok/s   2637 GFLOP/s
+step    10/30  loss 3.1102  lr 1.00e-04  |g| 6.343    25.30 ms   161907 tok/s  11633 GFLOP/s
+step    20/30  loss 2.7430  lr 2.00e-04  |g| 1.405    25.28 ms   161997 tok/s  11639 GFLOP/s
+step    30/30  loss 2.6151  lr 3.00e-04  |g| 1.379    25.32 ms   161757 tok/s  11622 GFLOP/s
+=== BMB_COVER 15 branches ===
+COVER flash bwd cfg=18 hs=64 ctx<=512
+COVER flash fwd cfg=5 hs=64
+COVER gemm tf32 tile=64x128 warp=32x64 NN epi=0 split=no
+COVER gemm tf32 tile=64x128 warp=32x64 NN epi=0 split=yes
+COVER gemm tf32 tile=64x128 warp=32x64 NN epi=8 split=no
+COVER gemm tf32 tile=64x128 warp=32x64 NT epi=1 split=no
+COVER gemm tf32 tile=64x128 warp=32x64 NT epi=3 split=yes
+COVER gemm tf32 tile=64x128 warp=32x64 NT epi=5 split=no
+COVER gemm tf32 tile=64x128 warp=32x64 TN epi=0 split=yes
+COVER gemm tf32 tile=64x128 warp=32x64 TN epi=16 split=yes
+COVER gemm tf32 tile=64x64 warp=32x32 NN epi=0 split=no
+COVER gemm tf32 tile=64x64 warp=32x32 NT epi=0 split=no
+COVER gemm tf32 tile=64x64 warp=32x32 NT epi=3 split=no
+COVER layernorm bwd warp C=384
+COVER layernorm fwd warp C=384
+
+(profile discards steps 1-15: allocator warm-up and the SM
+ clock ramp, which is a fixed duration rather than a fixed
+ number of steps -- see the comment at prof::reset)

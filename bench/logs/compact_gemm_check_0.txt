@@ -1,0 +1,117 @@
+TENSOR-CORE path (TF32), tolerance 5e-3
+
+shape                       M      N      K  op       norm_rel  
+--------------------------------------------------------------------------
+aligned tiny              128    128    128  NN       2.46e-04  ok
+aligned tiny              128    128    128  TN       2.72e-04  ok
+aligned tiny              128    128    128  NT       3.15e-04  ok
+aligned tiny              128    128    128  TT       2.53e-04  ok
+aligned                   256    512    128  NN       2.17e-04  ok
+aligned                   256    512    128  TN       2.79e-04  ok
+aligned                   256    512    128  NT       2.76e-04  ok
+aligned                   256    512    128  TT       2.78e-04  ok
+gpt: attn proj           4096    384    384  NN       2.52e-04  ok
+gpt: attn proj           4096    384    384  TN       2.38e-04  ok
+gpt: attn proj           4096    384    384  NT       2.61e-04  ok
+gpt: attn proj           4096    384    384  TT       2.63e-04  ok
+gpt: mlp up              4096   1536    384  NN       2.69e-04  ok
+gpt: mlp up              4096   1536    384  TN       2.41e-04  ok
+gpt: mlp up              4096   1536    384  NT       2.58e-04  ok
+gpt: mlp up              4096   1536    384  TT       2.57e-04  ok
+gpt: mlp down            4096    384   1536  NN       2.53e-04  ok
+gpt: mlp down            4096    384   1536  TN       2.29e-04  ok
+gpt: mlp down            4096    384   1536  NT       2.49e-04  ok
+gpt: mlp down            4096    384   1536  TT       2.60e-04  ok
+gpt: qkv proj            4096   1152    384  NN       2.84e-04  ok
+gpt: qkv proj            4096   1152    384  TN       2.71e-04  ok
+gpt: qkv proj            4096   1152    384  NT       2.70e-04  ok
+gpt: qkv proj            4096   1152    384  TT       2.60e-04  ok
+gpt: dW attnproj          384    384   4096  NN       2.45e-04  ok
+gpt: dW attnproj          384    384   4096  TN       2.78e-04  ok
+gpt: dW attnproj          384    384   4096  NT       2.54e-04  ok
+gpt: dW attnproj          384    384   4096  TT       2.50e-04  ok
+gpt: dW qkv               384   1152   4096  NN       2.39e-04  ok
+gpt: dW qkv               384   1152   4096  TN       2.69e-04  ok
+gpt: dW qkv               384   1152   4096  NT       2.42e-04  ok
+gpt: dW qkv               384   1152   4096  TT       2.61e-04  ok
+gpt: dW fc                384   1536   4096  NN       2.29e-04  ok
+gpt: dW fc                384   1536   4096  TN       3.00e-04  ok
+gpt: dW fc                384   1536   4096  NT       2.43e-04  ok
+gpt: dW fc                384   1536   4096  TT       2.72e-04  ok
+gpt: dW fcproj           1536    384   4096  NN       2.32e-04  ok
+gpt: dW fcproj           1536    384   4096  TN       2.79e-04  ok
+gpt: dW fcproj           1536    384   4096  NT       2.54e-04  ok
+gpt: dW fcproj           1536    384   4096  TT       2.66e-04  ok
+gpt: padded vocab head   4096    128    384  NN       3.11e-04  ok
+gpt: padded vocab head   4096    128    384  TN       3.04e-04  ok
+gpt: padded vocab head   4096    128    384  NT       2.62e-04  ok
+gpt: padded vocab head   4096    128    384  TT       2.75e-04  ok
+square (control)         4096   4096   4096  NN       2.89e-04  ok
+square (control)         4096   4096   4096  TN       2.70e-04  ok
+square (control)         4096   4096   4096  NT       2.48e-04  ok
+square (control)         4096   4096   4096  TT       2.63e-04  ok
+ragged -> generic path    100     70     33  NN       2.36e-07  ok
+ragged -> generic path    100     70     33  TN       2.10e-07  ok
+ragged -> generic path    100     70     33  NT       1.87e-07  ok
+ragged -> generic path    100     70     33  TT       7.48e-08  ok
+ragged square              65     65     65  NN       2.12e-07  ok
+ragged square              65     65     65  TN       2.16e-07  ok
+ragged square              65     65     65  NT       2.13e-07  ok
+ragged square              65     65     65  TT       5.58e-08  ok
+ragged non-square         130    260     60  NN       3.39e-07  ok
+ragged non-square         130    260     60  TN       2.12e-07  ok
+=== BMB_COVER 19 branches ===
+COVER gemm generic NN epi=0
+COVER gemm generic NT epi=0
+COVER gemm generic TN epi=0
+COVER gemm generic TT epi=0
+COVER gemm tf32 tile=64x128 warp=32x64 NN epi=0 split=no
+COVER gemm tf32 tile=64x128 warp=32x64 NN epi=0 split=yes
+COVER gemm tf32 tile=64x128 warp=32x64 NT epi=0 split=no
+COVER gemm tf32 tile=64x128 warp=32x64 NT epi=0 split=yes
+COVER gemm tf32 tile=64x128 warp=32x64 TN epi=0 split=no
+COVER gemm tf32 tile=64x128 warp=32x64 TN epi=0 split=yes
+COVER gemm tf32 tile=64x128 warp=32x64 TN epi=16 split=no
+COVER gemm tf32 tile=64x128 warp=32x64 TN epi=16 split=yes
+COVER gemm tf32 tile=64x128 warp=32x64 TT epi=0 split=no
+COVER gemm tf32 tile=64x128 warp=32x64 TT epi=0 split=yes
+COVER gemm tf32 tile=64x64 warp=32x32 NN epi=0 split=no
+COVER gemm tf32 tile=64x64 warp=32x32 NT epi=0 split=no
+COVER gemm tf32 tile=64x64 warp=32x32 TN epi=0 split=no
+COVER gemm tf32 tile=64x64 warp=32x32 TN epi=16 split=no
+COVER gemm tf32 tile=64x64 warp=32x32 TT epi=0 split=no
+ragged non-square         130    260     60  NT       2.67e-07  ok
+ragged non-square         130    260     60  TT       5.37e-08  ok
+
+batched GEMM (attention shapes), vs cuBLAS per batch
+--------------------------------------------------------------------------
+q@k^T   (B*NH=96)         256    256     64  NN       0.00e+00  ok
+q@k^T   (B*NH=96)         256    256     64  TN       0.00e+00  ok
+q@k^T   (B*NH=96)         256    256     64  NT       0.00e+00  ok
+q@k^T   (B*NH=96)         256    256     64  TT       0.00e+00  ok
+att@v   (B*NH=96)         256     64    256  NN       7.03e-07  ok
+att@v   (B*NH=96)         256     64    256  TN       7.03e-07  ok
+att@v   (B*NH=96)         256     64    256  NT       5.93e-07  ok
+att@v   (B*NH=96)         256     64    256  TT       6.66e-07  ok
+small heads                64     64     32  NN       0.00e+00  ok
+small heads                64     64     32  TN       2.11e-07  ok
+small heads                64     64     32  NT       0.00e+00  ok
+small heads                64     64     32  TT       0.00e+00  ok
+ragged                    100     48     33  NN       1.80e-07  ok
+ragged                    100     48     33  TN       1.83e-07  ok
+ragged                    100     48     33  NT       1.79e-07  ok
+ragged                    100     48     33  TT       0.00e+00  ok
+
+fused bias gradient (dbias_out), TN, vs CPU column sum
+--------------------------------------------------------------------------
+dW fcproj-like, derived    384   1536   4096  TN       7.63e-09  ok
+dW fc-like, derived      1536    384   4096  TN       1.18e-08  ok
+dW qkv-like, derived     1152    384   4096  TN       9.20e-09  ok
+dW attnproj-like          384    384   4096  TN       7.63e-09  ok
+K=384: never splits      1536    384    384  TN       3.43e-08  ok
+forced s=1                384   1536   4096  TN       2.69e-08  ok
+forced s=2                384   1536   4096  TN       1.68e-08  ok
+forced s=5                384   1536   4096  TN       1.52e-08  ok
+tiny aligned              256    128    128  TN       3.20e-08  ok
+--------------------------------------------------------------------------
+all passed (0 failures)

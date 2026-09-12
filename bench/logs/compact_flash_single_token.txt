@@ -1,0 +1,61 @@
+B=1 T=1 C=384 NH=6 (hs=64)
+
+impl                     best ms    med ms    GFLOP/s vs unfused     norm err
+unfused (3 kernels)        0.040     0.043        0.0      1.00x            -
+br64 bc64 t128 4x8         0.022     0.023        0.1      1.78x     0.00e+00 ok
+br64 bc32 t128 4x4         0.014     0.014        0.1      2.83x     0.00e+00 ok
+br64 bc64 t256 4x4         0.019     0.019        0.1      2.13x     0.00e+00 ok
+br128 bc32 t256 4x4        0.020     0.021        0.1      1.99x     0.00e+00 ok
+br32 bc32 t64 4x4          0.015     0.015        0.1      2.75x     0.00e+00 ok
+mma br64 bc32 t128         0.011     0.012        0.1      3.55x     2.42e-04 ok
+mma br64 bc64 t128         0.015     0.016        0.1      2.65x     2.42e-04 ok
+mma br128 bc32 t256        0.014     0.015        0.1      2.85x     2.42e-04 ok
+mma br32 bc32 t64          0.012     0.013        0.1      3.28x     2.42e-04 ok
+
+backward                 best ms    med ms    GFLOP/s vs unfused     dq err     dk err     dv err
+unfused (7 kernels)        0.059     0.060        0.1      1.00x
+br64 bc32 t128 kv4x4 q8x4     0.055     0.058        0.1      1.06x   8.77e-08   8.49e-08   0.00e+00 ok
+br64 bc32 t128 kv4x4 q4x8     0.059     0.059        0.1      1.00x   8.77e-08   8.49e-08   0.00e+00 ok
+br32 bc32 t64  kv4x8 q4x8     0.047     0.048        0.1      1.25x   8.77e-08   8.49e-08   0.00e+00 ok
+br32 bc32 t64  kv8x4 q8x4     0.050     0.050        0.1      1.18x   8.77e-08   8.49e-08   0.00e+00 ok
+br32 bc32 t64  kv4x4 q4x4         - (not valid for hs=64)
+br32 bc32 t128 kv4x4 q4x4     0.037     0.037        0.1      1.61x   8.77e-08   8.49e-08   0.00e+00 ok
+br32 bc64 t128 kv8x4 q4x4     0.047     0.048        0.1      1.26x   8.77e-08   8.49e-08   0.00e+00 ok
+br64 bc32 t64  8x4 kv8x4 q8x8     0.066     0.066        0.1      0.89x   8.77e-08   8.49e-08   0.00e+00 ok
+br32 bc64 t128 kv8x4 q4x4 c16     0.051     0.052        0.1      1.14x   8.77e-08   8.49e-08   0.00e+00 ok
+br32 bc64 t128 kv8x4 q4x4 c32     0.049     0.050        0.1      1.19x   8.77e-08   8.49e-08   0.00e+00 ok
+br32 bc32 t128 kv4x4 q4x4 c16     0.036     0.038        0.1      1.62x   8.77e-08   8.49e-08   0.00e+00 ok
+br32 bc32 t128 kv4x4 q4x4 c32     0.036     0.038        0.1      1.62x   8.77e-08   8.49e-08   0.00e+00 ok
+br32 bc64 t128 kv8x4 q4x4 c8     0.047     0.047        0.1      1.25x   8.77e-08   8.49e-08   0.00e+00 ok
+br64 bc32 t128 mma-q       0.049     0.050        0.1      1.20x   1.84e-04   8.49e-08   0.00e+00 ok
+br32 bc32 t64  mma-q       0.039     0.041        0.1      1.52x   1.84e-04   8.49e-08   0.00e+00 ok
+br32 bc64 t128 c8 mma-q     0.044     0.044        0.1      1.35x   1.84e-04   8.49e-08   0.00e+00 ok
+br32 bc32 t128 mma-q       0.031     0.031        0.2      1.92x   1.84e-04   8.49e-08   0.00e+00 ok
+br32 bc32 t128 c16 mma-q     0.030     0.032        0.2      1.98x   1.84e-04   8.49e-08   0.00e+00 ok
+br32 bc32 mma-q mma-kv w2     0.026     0.027        0.2      2.26x   1.84e-04   1.82e-04   2.42e-04 ok
+br32 bc32 mma-kv only w2     0.032     0.033        0.2      1.85x   8.77e-08   1.82e-04   2.42e-04 ok
+br32 bc32 mma-q mma-kv w1     0.032     0.033        0.2      1.85x   1.84e-04   1.82e-04   2.42e-04 ok
+br32 bc32 mma-kv only w1         - (not valid for hs=64)
+
+per layer, per forward pass:
+  score matrix (B,NH,T,T)        0.0 MB   written once, read twice
+  permuted qkvr (4,B,NH,T,hs)    0.0 MB   written once, read twice
+  fused saves                    0.0 MB of resident activation memory
+  lse kept instead             0.000 MB
+
+default forward + backward at the requested shape:
+  B=1   T=1     C=384  NH=6  (hs=64)   out 2.42e-04   dq 1.35e-04   dk 1.32e-04   dv 2.43e-04  ok
+
+ragged shapes (context does not divide the tile):
+  B=3   T=100   C=384  NH=6  (hs=64)   out 3.43e-04   dq 5.56e-04   dk 4.59e-04   dv 2.72e-04  ok
+  B=2   T=33    C=384  NH=6  (hs=64)   out 3.43e-04   dq 5.26e-04   dk 4.13e-04   dv 3.24e-04  ok
+  B=1   T=1     C=384  NH=6  (hs=64)   out 2.42e-04   dq 1.35e-04   dk 1.32e-04   dv 2.43e-04  ok
+=== BMB_COVER 4 branches ===
+COVER flash bwd cfg=18 hs=32 ctx<=512
+COVER flash bwd cfg=18 hs=64 ctx<=512
+COVER flash fwd cfg=5 hs=32
+COVER flash fwd cfg=5 hs=64
+  B=2   T=129   C=256  NH=8  (hs=32)   out 3.12e-04   dq 4.89e-04   dk 4.81e-04   dv 2.26e-04  ok
+  B=5   T=200   C=128  NH=4  (hs=32)   out 3.30e-04   dq 3.77e-04   dk 3.95e-04   dv 2.52e-04  ok
+
+fastest config: mma br64 bc32 t128 (0.011 ms)

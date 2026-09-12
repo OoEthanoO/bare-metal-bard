@@ -1,0 +1,40 @@
+TENSOR-CORE path (TF32), tolerance 5e-3
+
+Block-tile A/B, TF32. GF/s.
+  default = device-derived 64x128 or 128x128 tile
+  compact = 64x64 block, four 32x32 warps, 128 threads
+            twice the grid, but 16 FLOP/B arithmetic intensity
+
+shape                  op      default    compact    delta
+--------------------------------------------------------------
+gpt: attn proj         NN        10610      11647    +9.8%
+gpt: attn proj         NT        10595      11789   +11.3%
+gpt: attn proj         TN        10536      11408    +8.3%
+gpt: mlp up            NN        14851      13767    -7.3%
+gpt: mlp up            NT        14866      14036    -5.6%
+gpt: mlp up            TN        14460      13571    -6.1%
+gpt: mlp down          NN        13759      12509    -9.1%
+gpt: mlp down          NT        13771      12751    -7.4%
+gpt: mlp down          TN        13477      12255    -9.1%
+gpt: qkv proj          NN        14401      13445    -6.6%
+gpt: qkv proj          NT        14401      13742    -4.6%
+gpt: qkv proj          TN        13974      13220    -5.4%
+gpt: dW attnproj       NN        11387      11292    -0.8%
+gpt: dW attnproj       NT        11278      11425    +1.3%
+gpt: dW attnproj       TN        11158      10736    -3.8%
+gpt: dW qkv            NN        13816      12928    -6.4%
+gpt: dW qkv            NT        13816      13086    -5.3%
+gpt: dW qkv            TN        13498      12576    -6.8%
+gpt: dW fc             NN        14023      13295    -5.2%
+gpt: dW fc             NT        14166      13571    -4.2%
+gpt: dW fc             TN        13800      12942    -6.2%
+gpt: dW fcproj         NN        14128      13313    -5.8%
+gpt: dW fcproj         NT        14155      13568    -4.2%
+gpt: dW fcproj         TN        13737      12888    -6.2%
+gpt: padded vocab head NN         6853       7608   +11.0%
+gpt: padded vocab head NT         6352       7984   +25.7%
+gpt: padded vocab head TN         6336       7320   +15.5%
+square (control)       NN        16359      14700   -10.1%
+square (control)       NT        16424      15229    -7.3%
+square (control)       TN        15937      14511    -9.0%
+[clock] 1177-1192 MHz across 7 busy samples, target 1200 -- timings above are comparable.

@@ -106,11 +106,12 @@ int gemm_splitk();
 void gemm_set_wide_warp(int mode);
 int gemm_wide_warp();
 
-// Select the experimental 64x64 tensor-core BLOCK tile. It uses four 32x32
+// Select the 64x64 tensor-core BLOCK tile. It uses four 32x32
 // warp tiles in 128 threads. Compared with the normal 64x128 tile it doubles
 // the grid, filling otherwise-empty block slots on skinny outputs, at the cost
-// of lower arithmetic intensity. 0 uses the measured shape rule, -1 forces the old/default tile,
-// and 1 forces compact. tools/test_gemm.cu --block A/Bs the forced arms.
+// of lower arithmetic intensity. 0 uses the measured shape rule, -1 forces
+// the old/default tile, and 1 forces compact. tools/test_gemm.cu --block A/Bs
+// the forced arms.
 void gemm_set_compact_block(int mode);
 int gemm_compact_block();
 

@@ -1,0 +1,40 @@
+=== BMB_COVER 14 branches ===
+COVER flash bwd cfg=18 hs=64 ctx<=512
+COVER flash fwd cfg=5 hs=64
+COVER gemm tf32 tile=64x128 warp=32x64 NN epi=0 split=no
+COVER gemm tf32 tile=64x128 warp=32x64 NN epi=0 split=yes
+COVER gemm tf32 tile=64x128 warp=32x64 NN epi=8 split=no
+COVER gemm tf32 tile=64x128 warp=32x64 NT epi=0 split=no
+COVER gemm tf32 tile=64x128 warp=32x64 NT epi=1 split=no
+COVER gemm tf32 tile=64x128 warp=32x64 NT epi=3 split=no
+COVER gemm tf32 tile=64x128 warp=32x64 NT epi=3 split=yes
+COVER gemm tf32 tile=64x128 warp=32x64 NT epi=5 split=no
+COVER gemm tf32 tile=64x128 warp=32x64 TN epi=0 split=no
+COVER gemm tf32 tile=64x128 warp=32x64 TN epi=16 split=no
+COVER layernorm bwd warp C=512
+COVER layernorm fwd warp C=512
+gradient check: B=4 T=64 C=512 L=2 NH=8 V=65(->128)  eps=3e-02
+loss at theta = 4.285402   (ln(V) = 4.174387)
+
+tensor              n       analytic        numeric    rel err  
+---------------------------------------------------------------------------
+wte             65536   1.824765e+00   1.823928e+00   4.59e-04  ok
+wpe             32768   1.034346e+00   1.033888e+00   4.43e-04  ok
+ln1w             1024   2.509062e-02   2.541253e-02   1.28e-02  ok
+ln1b             1024   9.179312e-02   9.197132e-02   1.94e-03  ok
+qkvw          1572864   1.286479e+00   1.284315e+00   1.68e-03  ok
+qkvb             3072   2.072935e-01   2.071201e-01   8.37e-04  ok
+attprojw       524288   2.449038e+00   2.436338e+00   5.19e-03  ok
+attprojb         1024   8.577932e-01   8.552220e-01   3.00e-03  ok
+ln2w             1024   3.362866e-02   3.302096e-02   1.81e-02  ok
+ln2b             1024   3.500368e-02   3.482408e-02   5.13e-03  ok
+fcw           2097152   1.713266e+00   1.712513e+00   4.40e-04  ok
+fcb              4096   7.941040e-02   7.899425e-02   5.24e-03  ok
+fcprojw       2097152   3.354538e+00   3.344192e+00   3.08e-03  ok
+fcprojb          1024   3.020918e-01   3.018588e-01   7.71e-04  ok
+lnfw              512   3.088276e-02   3.101475e-02   4.27e-03  ok
+lnfb              512   2.730922e-02   2.723327e-02   2.78e-03  ok
+---------------------------------------------------------------------------
+ALL           6404096   5.208658e+00   5.158362e+00   9.66e-03  ok
+
+gradient check passed (16 checked, 0 failures)

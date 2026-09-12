@@ -177,8 +177,10 @@ int main(int argc, char **argv) {
     if (gemm_wide_warp())
         printf("WIDE TILE WARP SHAPE: %d (0 = 32x64/256 thr, 1 = 64x64/128 thr)\n",
                gemm_wide_warp());
-    if (gemm_compact_block())
+    if (gemm_compact_block() > 0)
         printf("COMPACT BLOCK TILE: 64x64, four 32x32 warps, 128 threads\n");
+    else if (gemm_compact_block() < 0)
+        printf("COMPACT BLOCK TILE: disabled (old/default tile forced)\n");
     if (tf32) {
         gemm_set_tf32(true);
         printf("TENSOR-CORE path (TF32), tolerance 5e-3\n\n");
@@ -322,7 +324,8 @@ int main(int argc, char **argv) {
     // compact tile doubles the N grid against 64x128, filling otherwise-empty
     // block slots on skinny outputs, but drops arithmetic intensity from 21.3
     // to 16 FLOP/byte. Interleave both orders so clock or temperature drift cannot
-    // choose the winner. NN prices the forward/dX path; TN prices dW.
+    // choose the winner. NN prices dX, NT forward, and TN dW. Forward stores
+    // its weights transposed, so measuring NN alone misses its load path.
     if (block) {
         gemm_set_tf32(true);
         warm_up_device();
@@ -344,14 +347,14 @@ int main(int argc, char **argv) {
             CUDA_CHECK(cudaMemset(dA, 0, szA * 4));
             CUDA_CHECK(cudaMemset(dB, 0, szB * 4));
             const double flop = 2.0 * s2.M * s2.N * s2.K;
-            for (int tn = 0; tn < 2; ++tn) {
-                const bool TA = tn == 1;
+            for (int op = 0; op < 3; ++op) {
+                const bool TA = op == 2, TB = op == 1;
                 double t[2];
                 for (int pass = 0; pass < 2; ++pass)
                     for (int m = 0; m < 2; ++m) {
                         const int arm = pass ? 1 - m : m;
                         gemm_set_compact_block(arm ? 1 : -1);
-                        const double x = time_gemm(TA, false, s2.M, s2.N, s2.K,
+                        const double x = time_gemm(TA, TB, s2.M, s2.N, s2.K,
                                                    dA, dB, dC, 20);
                         if (pass == 0 || x < t[arm]) t[arm] = x;
                     }
@@ -359,7 +362,8 @@ int main(int argc, char **argv) {
                 const double g0 = flop / (t[0] * 1e-3) / 1e9;
                 const double g1 = flop / (t[1] * 1e-3) / 1e9;
                 printf("%-22s %-4s %10.0f %10.0f %+7.1f%%\n", s2.tag,
-                       TA ? "TN" : "NN", g0, g1, 100.0 * (g1 / g0 - 1.0));
+                       TA ? "TN" : (TB ? "NT" : "NN"), g0, g1,
+                       100.0 * (g1 / g0 - 1.0));
             }
             cudaFree(dA); cudaFree(dB); cudaFree(dC);
         }

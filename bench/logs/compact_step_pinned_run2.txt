@@ -1,0 +1,67 @@
+data      1003855 train / 111539 val tokens, vocab 65 (padded 128)
+model     6 layers, 6 heads, 384 embd, ctx 256, fused attention
+matmul    TF32 tensor cores
+gemm tile measured shape rule
+fwd tile  config 5 (mma br64 bc32 t128)
+bwd tile  config 18 (br32 bc32 mma-q mma-kv w2)
+params    10.80M (41.2 MB; +41.2 MB grads, +82.4 MB adam state)
+memory    593.0 MB forward activations, 74.1 MB backward scratch
+total     0.81 GB resident (params+grads+adam+activations+scratch)
+step     1/500  loss 4.2617  lr 1.00e-05  |g| 15.666   111.77 ms    36646 tok/s   2633 GFLOP/s
+step    10/500  loss 3.1102  lr 1.00e-04  |g| 6.342    25.82 ms   158621 tok/s  11397 GFLOP/s
+step    20/500  loss 2.7430  lr 2.00e-04  |g| 1.406    25.86 ms   158407 tok/s  11381 GFLOP/s
+step    30/500  loss 2.6151  lr 3.00e-04  |g| 1.379    25.82 ms   158648 tok/s  11399 GFLOP/s
+step    40/500  loss 2.5988  lr 4.00e-04  |g| 1.657    25.81 ms   158713 tok/s  11403 GFLOP/s
+step    50/500  loss 2.5338  lr 5.00e-04  |g| 0.915    25.82 ms   158667 tok/s  11400 GFLOP/s
+step    60/500  loss 2.5305  lr 6.00e-04  |g| 0.880    25.88 ms   158287 tok/s  11373 GFLOP/s
+step    70/500  loss 2.4765  lr 7.00e-04  |g| 0.731    25.88 ms   158293 tok/s  11373 GFLOP/s
+step    80/500  loss 2.4956  lr 8.00e-04  |g| 0.947    25.81 ms   158691 tok/s  11402 GFLOP/s
+step    90/500  loss 2.5091  lr 9.00e-04  |g| 0.710    25.84 ms   158496 tok/s  11388 GFLOP/s
+step   100/500  loss 2.4958  lr 1.00e-03  |g| 0.701    25.86 ms   158396 tok/s  11380 GFLOP/s
+step   110/500  loss 2.5246  lr 9.99e-04  |g| 0.728    25.85 ms   158477 tok/s  11386 GFLOP/s
+step   120/500  loss 2.4467  lr 9.94e-04  |g| 0.690    25.80 ms   158778 tok/s  11408 GFLOP/s
+step   130/500  loss 2.4263  lr 9.88e-04  |g| 0.686    25.34 ms   161635 tok/s  11613 GFLOP/s
+step   140/500  loss 2.4540  lr 9.78e-04  |g| 0.683    25.36 ms   161500 tok/s  11603 GFLOP/s
+step   150/500  loss 2.4150  lr 9.66e-04  |g| 0.699    25.26 ms   162147 tok/s  11650 GFLOP/s
+step   160/500  loss 2.4092  lr 9.51e-04  |g| 0.746    25.24 ms   162271 tok/s  11659 GFLOP/s
+step   170/500  loss 2.4085  lr 9.34e-04  |g| 0.594    25.28 ms   161996 tok/s  11639 GFLOP/s
+step   180/500  loss 2.3903  lr 9.14e-04  |g| 0.868    25.24 ms   162269 tok/s  11659 GFLOP/s
+step   190/500  loss 2.3863  lr 8.92e-04  |g| 0.727    25.33 ms   161735 tok/s  11620 GFLOP/s
+step   200/500  loss 2.3779  lr 8.68e-04  |g| 0.778    25.28 ms   162026 tok/s  11641 GFLOP/s
+step   210/500  loss 2.3857  lr 8.42e-04  |g| 0.867    25.28 ms   162047 tok/s  11643 GFLOP/s
+step   220/500  loss 2.3219  lr 8.15e-04  |g| 1.411    25.23 ms   162316 tok/s  11662 GFLOP/s
+step   230/500  loss 2.2527  lr 7.85e-04  |g| 0.974    25.25 ms   162225 tok/s  11656 GFLOP/s
+step   240/500  loss 2.1849  lr 7.54e-04  |g| 0.829    25.33 ms   161725 tok/s  11620 GFLOP/s
+step   250/500  loss 2.1695  lr 7.22e-04  |g| 0.749    25.29 ms   161964 tok/s  11637 GFLOP/s
+step   260/500  loss 2.0994  lr 6.89e-04  |g| 0.897    25.23 ms   162335 tok/s  11663 GFLOP/s
+step   270/500  loss 2.1105  lr 6.55e-04  |g| 0.689    25.28 ms   162045 tok/s  11643 GFLOP/s
+step   280/500  loss 2.0586  lr 6.20e-04  |g| 0.858    25.24 ms   162256 tok/s  11658 GFLOP/s
+step   290/500  loss 2.0825  lr 5.85e-04  |g| 1.060    25.29 ms   161973 tok/s  11637 GFLOP/s
+step   300/500  loss 1.9970  lr 5.50e-04  |g| 0.932    25.25 ms   162204 tok/s  11654 GFLOP/s
+step   310/500  loss 2.0096  lr 5.15e-04  |g| 0.855    25.25 ms   162236 tok/s  11656 GFLOP/s
+step   320/500  loss 2.0270  lr 4.80e-04  |g| 0.848    25.24 ms   162307 tok/s  11661 GFLOP/s
+step   330/500  loss 1.9731  lr 4.45e-04  |g| 0.890    25.32 ms   161799 tok/s  11625 GFLOP/s
+step   340/500  loss 1.9663  lr 4.11e-04  |g| 0.754    25.27 ms   162069 tok/s  11644 GFLOP/s
+step   350/500  loss 1.8894  lr 3.78e-04  |g| 0.817    25.30 ms   161902 tok/s  11632 GFLOP/s
+step   360/500  loss 1.8365  lr 3.46e-04  |g| 0.870    25.23 ms   162332 tok/s  11663 GFLOP/s
+step   370/500  loss 1.8945  lr 3.15e-04  |g| 0.835    25.25 ms   162208 tok/s  11654 GFLOP/s
+step   380/500  loss 1.8460  lr 2.85e-04  |g| 1.016    25.29 ms   161975 tok/s  11638 GFLOP/s
+step   390/500  loss 1.7873  lr 2.58e-04  |g| 0.920    25.24 ms   162271 tok/s  11659 GFLOP/s
+step   400/500  loss 1.8684  lr 2.32e-04  |g| 0.899    25.23 ms   162352 tok/s  11665 GFLOP/s
+step   410/500  loss 1.7837  lr 2.08e-04  |g| 0.795    25.31 ms   161838 tok/s  11628 GFLOP/s
+step   420/500  loss 1.7992  lr 1.86e-04  |g| 0.782    25.30 ms   161879 tok/s  11631 GFLOP/s
+step   430/500  loss 1.8811  lr 1.66e-04  |g| 0.944    25.24 ms   162308 tok/s  11662 GFLOP/s
+step   440/500  loss 1.8125  lr 1.49e-04  |g| 0.918    25.25 ms   162193 tok/s  11653 GFLOP/s
+step   450/500  loss 1.8384  lr 1.34e-04  |g| 1.033    25.28 ms   162016 tok/s  11640 GFLOP/s
+step   460/500  loss 1.7898  lr 1.22e-04  |g| 0.863    25.29 ms   161961 tok/s  11637 GFLOP/s
+step   470/500  loss 1.7345  lr 1.12e-04  |g| 0.907    25.33 ms   161720 tok/s  11619 GFLOP/s
+step   480/500  loss 1.7965  lr 1.06e-04  |g| 0.910    25.28 ms   162030 tok/s  11642 GFLOP/s
+step   490/500  loss 1.6617  lr 1.01e-04  |g| 0.841    25.27 ms   162084 tok/s  11645 GFLOP/s
+step   500/500  loss 1.7243  lr 1.00e-04  |g| 0.898    25.27 ms   162111 tok/s  11647 GFLOP/s
+
+(profile discards steps 1-113: allocator warm-up and the SM
+ clock ramp, which is a fixed duration rather than a fixed
+ number of steps -- see the comment at prof::reset)
+[clock] HELD BELOW THE PIN: 1162-1192 MHz across 28 busy samples, target 1200, peak 81.79 W.
+[clock] The lock is applied; the card cannot reach it under this load. Timings are
+[clock] comparable ONLY to other runs at 1162-1192 MHz -- quote the clock with them.

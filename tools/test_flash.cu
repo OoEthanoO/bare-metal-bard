@@ -120,19 +120,33 @@ static bool check_shape(int B, int T, int C, int NH) {
     CUDA_CHECK(cudaMemcpy(da.data(), d_d1, BTC * 3 * sizeof(float), cudaMemcpyDeviceToHost));
     CUDA_CHECK(cudaMemcpy(db.data(), d_d2, BTC * 3 * sizeof(float), cudaMemcpyDeviceToHost));
 
-    double eo = 0, ro = 0, eg = 0, rg = 0;
+    double eo = 0, ro = 0, eg[3] = {}, rg[3] = {};
+    bool finite = true;
     for (size_t i = 0; i < BTC; ++i) {
+        finite &= std::isfinite(a[i]) && std::isfinite(b[i]);
         ro = fmax(ro, fabs((double)a[i]));
         eo = fmax(eo, fabs((double)a[i] - (double)b[i]));
     }
     for (size_t i = 0; i < BTC * 3; ++i) {
-        rg = fmax(rg, fabs((double)da[i]));
-        eg = fmax(eg, fabs((double)da[i] - (double)db[i]));
+        const int s = (i / C) % 3;
+        finite &= std::isfinite(da[i]) && std::isfinite(db[i]);
+        rg[s] = fmax(rg[s], fabs((double)da[i]));
+        eg[s] = fmax(eg[s], fabs((double)da[i] - (double)db[i]));
     }
-    const double no = eo / ro, ng = eg / rg;
-    const bool ok = no < 1e-5 && ng < 1e-5;
-    printf("  B=%-3d T=%-5d C=%-4d NH=%-2d (hs=%2d)   out %8.2e   dqkv %8.2e  %s\n",
-           B, T, C, NH, hs, no, ng, ok ? "ok" : "FAIL");
+    auto relerr = [](double e, double r) { return r > 0.0 ? e / r : e; };
+    const double no = relerr(eo, ro);
+    const double nq = relerr(eg[0], rg[0]), nk = relerr(eg[1], rg[1]),
+                 nv = relerr(eg[2], rg[2]);
+    const double ftol = flash_config_tol(flash_default_config());
+    double tq, tk, tv;
+    flash_bwd_config_tol(flash_default_bwd_config(T), &tq, &tk, &tv);
+    // This checks the COMPOSED default path, including forward rounding in
+    // out/lse. Allow its forward budget in each backward component as well;
+    // the isolated sweep below keeps the tighter per-kernel bars.
+    const bool ok = finite && no < ftol && nq < tq + ftol &&
+                    nk < tk + ftol && nv < tv + ftol;
+    printf("  B=%-3d T=%-5d C=%-4d NH=%-2d (hs=%2d)   out %8.2e   dq %8.2e   dk %8.2e   dv %8.2e  %s\n",
+           B, T, C, NH, hs, no, nq, nk, nv, ok ? "ok" : "FAIL");
 
     cudaFree(d_qkv); cudaFree(d_o1); cudaFree(d_o2); cudaFree(d_qkvr);
     cudaFree(d_att); cudaFree(d_lse); cudaFree(d_dout); cudaFree(d_d1);
@@ -201,7 +215,7 @@ int main(int argc, char **argv) {
            ref_t.best_ms, ref_t.median_ms, gf(ref_t.best_ms), "1.00x", "-");
 
     // ---- every fused config ----
-    int best_cfg = -1;
+    int fails = 0, best_cfg = -1;
     double best_ms = 1e30;
     for (int cfg = 0; cfg < flash_num_configs(); ++cfg) {
         CUDA_CHECK(cudaMemset(d_out, 0, BTC * sizeof(float)));
@@ -216,9 +230,14 @@ int main(int argc, char **argv) {
                               cudaMemcpyDeviceToHost));
 
         double maxabs = 0.0;
-        for (size_t i = 0; i < BTC; ++i)
+        bool finite = true;
+        for (size_t i = 0; i < BTC; ++i) {
+            finite &= std::isfinite(h_out[i]) && std::isfinite(h_ref[i]);
             maxabs = fmax(maxabs, fabs((double)h_out[i] - (double)h_ref[i]));
-        const double rel = maxabs / maxref;
+        }
+        const double rel = maxref > 0.0 ? maxabs / maxref : maxabs;
+        const bool ok = finite && rel < flash_config_tol(cfg);
+        if (!ok) ++fails;
 
         const Timing t = time_it(
             [&] {
@@ -231,7 +250,7 @@ int main(int argc, char **argv) {
         snprintf(ratio, sizeof ratio, "%.2fx", ref_t.best_ms / t.best_ms);
         printf("%-22s %9.3f %9.3f %10.1f %10s %12.2e %s\n",
                flash_config_name(cfg), t.best_ms, t.median_ms, gf(t.best_ms),
-               ratio, rel, rel < flash_config_tol(cfg) ? "ok" : "FAIL");
+               ratio, rel, ok ? "ok" : "FAIL");
     }
 
     // ---- backward ----
@@ -279,11 +298,17 @@ int main(int argc, char **argv) {
     printf("%-22s %9.3f %9.3f %10.1f %10s\n", "unfused (7 kernels)",
            bref_t.best_ms, bref_t.median_ms, gfb(bref_t.best_ms), "1.00x");
 
-    // Flash backward consumes the flash forward's lse, so produce it once.
-    flash_attention_forward(d_out, d_lse, d_qkv, B, T, C, NH);
+    // Isolate backward arithmetic with FP32 out/lse even under --tf32.
+    // The per-config tolerances only budget rounding inside that backward
+    // kernel. Using the TF32 default forward here made every FP32 backward
+    // config fail at ~4e-4 against a 1e-5 bar, entirely from its inputs.
+    // check_shape() separately exercises the actual composed default path.
+    if (!flash_attention_forward_cfg(1, d_out, d_lse, d_qkv, B, T, C, NH)) {
+        fprintf(stderr, "FP32 forward fixture unavailable for hs=%d\n", hs);
+        return 1;
+    }
     CUDA_CHECK(cudaDeviceSynchronize());
 
-    int fails = 0;
     for (int cfg = 0; cfg < flash_num_bwd_configs(); ++cfg) {
         CUDA_CHECK(cudaMemset(d_dqkv, 0, BTC * 3 * sizeof(float)));
         if (!flash_attention_backward_cfg(cfg, d_dqkv, d_dsum, d_dout, d_qkv,
@@ -298,10 +323,12 @@ int main(int argc, char **argv) {
                               cudaMemcpyDeviceToHost));
 
         double err[3] = {0, 0, 0}, ref[3] = {0, 0, 0};
+        bool finite = true;
         for (size_t r = 0; r < (size_t)B * T; ++r) {
             for (int s = 0; s < 3; ++s) {
                 for (int c = 0; c < C; ++c) {
                     const size_t i = r * 3 * C + (size_t)s * C + c;
+                    finite &= std::isfinite(h_dflash[i]) && std::isfinite(h_dref[i]);
                     ref[s] = fmax(ref[s], fabs((double)h_dref[i]));
                     err[s] = fmax(err[s],
                                   fabs((double)h_dflash[i] - (double)h_dref[i]));
@@ -329,7 +356,7 @@ int main(int argc, char **argv) {
                      rv = relerr(err[2], ref[2]);
         double tq, tk, tv;
         flash_bwd_config_tol(cfg, &tq, &tk, &tv);
-        const bool ok = rq < tq && rk < tk && rv < tv;
+        const bool ok = finite && rq < tq && rk < tk && rv < tv;
         if (!ok) ++fails;
         printf("%-22s %9.3f %9.3f %10.1f %10s %10.2e %10.2e %10.2e %s\n",
                flash_bwd_config_name(cfg), t.best_ms, t.median_ms,
@@ -349,6 +376,9 @@ int main(int argc, char **argv) {
     printf("  lse kept instead          %8.3f MB\n",
            (double)B * NH * T * 4.0 / 1e6);
 
+    printf("\ndefault forward + backward at the requested shape:\n");
+    if (!check_shape(B, T, C, NH)) ++fails;
+
     // ---- ragged shapes ----
     printf("\nragged shapes (context does not divide the tile):\n");
     if (!check_shape(3, 100, 384, 6)) ++fails;   // T mod 64 = 36, mod 32 = 4
@@ -361,5 +391,5 @@ int main(int argc, char **argv) {
     if (best_cfg >= 0)
         printf("\nfastest config: %s (%.3f ms)\n", flash_config_name(best_cfg),
                best_ms);
-    return 0;
+    return fails ? 1 : 0;
 }

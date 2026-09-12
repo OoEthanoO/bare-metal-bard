@@ -1,0 +1,114 @@
+Compact 64x64 block tile vs default, NN / NT / TN. RTX 5080 Laptop, TF32,
+clock pinned (1185-1192 MHz, 7 busy samples per run). Three independent runs,
+each interleaving both arms in both orders per shape, minimum taken per arm.
+
+This is the measurement bench/logs/compact_block_ab_5080.txt did not contain:
+that log timed NN and TN only, but the forward stores its weights transposed
+and runs NT, so the rule prefer_compact_block(N,K) was committed without data
+for the case the forward actually takes.
+
+===== run 1 =====
+shape                  op      default    compact    delta
+--------------------------------------------------------------
+gpt: attn proj         NN        10755      11562    +7.5%
+gpt: attn proj         NT        10736      11749    +9.4%
+gpt: attn proj         TN        10538      11422    +8.4%
+gpt: mlp up            NN        14959      13853    -7.4%
+gpt: mlp up            NT        14946      14062    -5.9%
+gpt: mlp up            TN        14492      13629    -6.0%
+gpt: mlp down          NN        13871      12499    -9.9%
+gpt: mlp down          NT        13791      12753    -7.5%
+gpt: mlp down          TN        13488      12288    -8.9%
+gpt: qkv proj          NN        14496      13504    -6.8%
+gpt: qkv proj          NT        14391      13712    -4.7%
+gpt: qkv proj          TN        14010      13237    -5.5%
+gpt: dW attnproj       NN        11336      11248    -0.8%
+gpt: dW attnproj       NT        11057      11251    +1.8%
+gpt: dW attnproj       TN        10970      10758    -1.9%
+gpt: dW qkv            NN        13873      12872    -7.2%
+gpt: dW qkv            NT        13822      13211    -4.4%
+gpt: dW qkv            TN        13520      12582    -6.9%
+gpt: dW fc             NN        14040      13325    -5.1%
+gpt: dW fc             NT        14215      13551    -4.7%
+gpt: dW fc             TN        13742      12945    -5.8%
+gpt: dW fcproj         NN        14087      13267    -5.8%
+gpt: dW fcproj         NT        14151      13586    -4.0%
+gpt: dW fcproj         TN        13713      12984    -5.3%
+gpt: padded vocab head NN         6765       7608   +12.5%
+gpt: padded vocab head NT         6317       7899   +25.0%
+gpt: padded vocab head TN         6365       7363   +15.7%
+square (control)       NN        16361      14841    -9.3%
+square (control)       NT        16421      15249    -7.1%
+square (control)       TN        15939      14477    -9.2%
+[clock] 1185-1192 MHz across 7 busy samples, target 1200 -- timings above are comparable.
+
+===== run 2 =====
+shape                  op      default    compact    delta
+--------------------------------------------------------------
+gpt: attn proj         NN        10694      11477    +7.3%
+gpt: attn proj         NT        10700      11705    +9.4%
+gpt: attn proj         TN        10530      11302    +7.3%
+gpt: mlp up            NN        14869      13703    -7.8%
+gpt: mlp up            NT        14962      14037    -6.2%
+gpt: mlp up            TN        14437      13551    -6.1%
+gpt: mlp down          NN        13749      12527    -8.9%
+gpt: mlp down          NT        13737      12753    -7.2%
+gpt: mlp down          TN        13464      12285    -8.8%
+gpt: qkv proj          NN        14487      13493    -6.9%
+gpt: qkv proj          NT        14423      13707    -5.0%
+gpt: qkv proj          TN        14005      13216    -5.6%
+gpt: dW attnproj       NN        11380      11316    -0.6%
+gpt: dW attnproj       NT        11148      11467    +2.9%
+gpt: dW attnproj       TN        11106      10715    -3.5%
+gpt: dW qkv            NN        13836      12907    -6.7%
+gpt: dW qkv            NT        13779      13136    -4.7%
+gpt: dW qkv            TN        13540      12608    -6.9%
+gpt: dW fc             NN        14043      13334    -5.1%
+gpt: dW fc             NT        14158      13569    -4.2%
+gpt: dW fc             TN        13805      13021    -5.7%
+gpt: dW fcproj         NN        14051      13273    -5.5%
+gpt: dW fcproj         NT        14225      13549    -4.7%
+gpt: dW fcproj         TN        13759      12958    -5.8%
+gpt: padded vocab head NN         6791       7668   +12.9%
+gpt: padded vocab head NT         6358       7874   +23.8%
+gpt: padded vocab head TN         6358       7410   +16.5%
+square (control)       NN        16354      14838    -9.3%
+square (control)       NT        16415      15250    -7.1%
+square (control)       TN        15928      14519    -8.8%
+[clock] 1185-1192 MHz across 7 busy samples, target 1200 -- timings above are comparable.
+
+===== run 3 =====
+shape                  op      default    compact    delta
+--------------------------------------------------------------
+gpt: attn proj         NN        10700      11579    +8.2%
+gpt: attn proj         NT        10709      11785   +10.1%
+gpt: attn proj         TN        10715      11537    +7.7%
+gpt: mlp up            NN        14946      13883    -7.1%
+gpt: mlp up            NT        15000      14075    -6.2%
+gpt: mlp up            TN        14566      13634    -6.4%
+gpt: mlp down          NN        13786      12544    -9.0%
+gpt: mlp down          NT        13795      12778    -7.4%
+gpt: mlp down          TN        13477      12288    -8.8%
+gpt: qkv proj          NN        14441      13498    -6.5%
+gpt: qkv proj          NT        14353      13709    -4.5%
+gpt: qkv proj          TN        14045      13219    -5.9%
+gpt: dW attnproj       NN        11272      11255    -0.1%
+gpt: dW attnproj       NT        11070      11218    +1.3%
+gpt: dW attnproj       TN        11067      10767    -2.7%
+gpt: dW qkv            NN        13848      12904    -6.8%
+gpt: dW qkv            NT        13765      13113    -4.7%
+gpt: dW qkv            TN        13478      12605    -6.5%
+gpt: dW fc             NN        14109      13277    -5.9%
+gpt: dW fc             NT        14197      13551    -4.5%
+gpt: dW fc             TN        13768      12961    -5.9%
+gpt: dW fcproj         NN        14108      13300    -5.7%
+gpt: dW fcproj         NT        14222      13562    -4.6%
+gpt: dW fcproj         TN        13716      13016    -5.1%
+gpt: padded vocab head NN         6865       7603   +10.8%
+gpt: padded vocab head NT         6349       7969   +25.5%
+gpt: padded vocab head TN         6466       7299   +12.9%
+square (control)       NN        16365      14837    -9.3%
+square (control)       NT        16403      15267    -6.9%
+square (control)       TN        15932      14437    -9.4%
+[clock] 1185-1192 MHz across 7 busy samples, target 1200 -- timings above are comparable.
+

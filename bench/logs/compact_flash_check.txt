@@ -1,0 +1,60 @@
+=== BMB_COVER 4 branches ===
+COVER flash bwd cfg=18 hs=32 ctx<=512
+COVER flash bwd cfg=18 hs=64 ctx<=512
+COVER flash fwd cfg=5 hs=32
+COVER flash fwd cfg=5 hs=64
+B=16 T=256 C=384 NH=6 (hs=64)
+
+impl                     best ms    med ms    GFLOP/s vs unfused     norm err
+unfused (3 kernels)        0.682     0.689     1186.3      1.00x            -
+br64 bc64 t128 4x8         0.285     0.289     2839.3      2.39x     2.09e-07 ok
+br64 bc32 t128 4x4         0.216     0.226     3735.6      3.15x     2.09e-07 ok
+br64 bc64 t256 4x4         0.216     0.218     3748.9      3.16x     2.09e-07 ok
+br128 bc32 t256 4x4        0.293     0.295     2762.0      2.33x     2.09e-07 ok
+br32 bc32 t64 4x4          0.255     0.263     3164.7      2.67x     2.09e-07 ok
+mma br64 bc32 t128         0.121     0.128     6664.2      5.62x     3.76e-04 ok
+mma br64 bc64 t128         0.132     0.138     6132.1      5.17x     3.76e-04 ok
+mma br128 bc32 t256        0.135     0.137     5993.9      5.05x     3.76e-04 ok
+mma br32 bc32 t64          0.158     0.163     5122.5      4.32x     3.76e-04 ok
+
+backward                 best ms    med ms    GFLOP/s vs unfused     dq err     dk err     dv err
+unfused (7 kernels)        1.139     1.158     2484.9      1.00x
+br64 bc32 t128 kv4x4 q8x4     1.397     1.408     2025.9      0.82x   3.08e-04   4.19e-04   9.96e-05 FAIL
+br64 bc32 t128 kv4x4 q4x8     1.513     1.518     1870.5      0.75x   3.08e-04   4.19e-04   9.96e-05 FAIL
+br32 bc32 t64  kv4x8 q4x8     1.297     1.322     2181.0      0.88x   3.08e-04   4.19e-04   9.96e-05 FAIL
+br32 bc32 t64  kv8x4 q8x4     1.231     1.249     2297.9      0.92x   3.08e-04   4.19e-04   9.96e-05 FAIL
+br32 bc32 t64  kv4x4 q4x4         - (not valid for hs=64)
+br32 bc32 t128 kv4x4 q4x4     1.007     1.032     2810.1      1.13x   3.08e-04   4.19e-04   9.96e-05 FAIL
+br32 bc64 t128 kv8x4 q4x4     1.095     1.101     2583.7      1.04x   3.08e-04   4.19e-04   9.96e-05 FAIL
+br64 bc32 t64  8x4 kv8x4 q8x8     1.747     1.752     1619.3      0.65x   3.08e-04   4.19e-04   9.96e-05 FAIL
+br32 bc64 t128 kv8x4 q4x4 c16     1.064     1.092     2659.4      1.07x   3.08e-04   4.19e-04   9.96e-05 FAIL
+br32 bc64 t128 kv8x4 q4x4 c32     1.277     1.284     2215.0      0.89x   3.08e-04   4.19e-04   9.96e-05 FAIL
+br32 bc32 t128 kv4x4 q4x4 c16     1.025     1.046     2759.4      1.11x   3.08e-04   4.19e-04   9.96e-05 FAIL
+br32 bc32 t128 kv4x4 q4x4 c32     1.058     1.083     2673.5      1.08x   3.08e-04   4.19e-04   9.96e-05 FAIL
+br32 bc64 t128 kv8x4 q4x4 c8     1.054     1.082     2685.8      1.08x   3.08e-04   4.19e-04   9.96e-05 FAIL
+br64 bc32 t128 mma-q       1.169     1.173     2420.0      0.97x   4.28e-04   4.19e-04   9.96e-05 FAIL
+br32 bc32 t64  mma-q       1.024     1.037     2763.2      1.11x   4.28e-04   4.19e-04   9.96e-05 FAIL
+br32 bc64 t128 c8 mma-q     0.865     0.894     3269.8      1.32x   4.28e-04   4.19e-04   9.96e-05 FAIL
+br32 bc32 t128 mma-q       0.734     0.747     3853.4      1.55x   4.28e-04   4.19e-04   9.96e-05 FAIL
+br32 bc32 t128 c16 mma-q     0.738     0.758     3831.5      1.54x   4.28e-04   4.19e-04   9.96e-05 FAIL
+br32 bc32 mma-q mma-kv w2     0.476     0.484     5943.3      2.39x   4.28e-04   5.21e-04   2.34e-04 ok
+br32 bc32 mma-kv only w2     0.755     0.773     3747.9      1.51x   3.08e-04   5.21e-04   2.34e-04 FAIL
+br32 bc32 mma-q mma-kv w1     0.658     0.668     4297.7      1.73x   4.28e-04   5.21e-04   2.34e-04 ok
+br32 bc32 mma-kv only w1         - (not valid for hs=64)
+
+per layer, per forward pass:
+  score matrix (B,NH,T,T)       25.2 MB   written once, read twice
+  permuted qkvr (4,B,NH,T,hs)   25.2 MB   written once, read twice
+  fused saves                   50.3 MB of resident activation memory
+  lse kept instead             0.098 MB
+
+ragged shapes (context does not divide the tile):
+  B=3   T=100   C=384  NH=6  (hs=64)   out 3.43e-04   dqkv 2.72e-04  FAIL
+  B=2   T=33    C=384  NH=6  (hs=64)   out 3.43e-04   dqkv 3.24e-04  FAIL
+  B=1   T=1     C=384  NH=6  (hs=64)   out 2.42e-04   dqkv 2.43e-04  FAIL
+  B=2   T=129   C=256  NH=8  (hs=32)   out 3.12e-04   dqkv 2.26e-04  FAIL
+  B=5   T=200   C=128  NH=4  (hs=32)   out 3.30e-04   dqkv 2.52e-04  FAIL
+
+23 config(s)/shape(s) FAILED
+
+fastest config: mma br64 bc32 t128 (0.121 ms)

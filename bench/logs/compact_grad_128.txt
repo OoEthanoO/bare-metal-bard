@@ -1,0 +1,39 @@
+=== BMB_COVER 13 branches ===
+COVER flash bwd cfg=18 hs=32 ctx<=512
+COVER flash fwd cfg=5 hs=32
+COVER gemm tf32 tile=64x128 warp=32x64 NN epi=0 split=no
+COVER gemm tf32 tile=64x128 warp=32x64 NN epi=8 split=no
+COVER gemm tf32 tile=64x128 warp=32x64 NT epi=0 split=no
+COVER gemm tf32 tile=64x128 warp=32x64 NT epi=1 split=no
+COVER gemm tf32 tile=64x128 warp=32x64 NT epi=3 split=no
+COVER gemm tf32 tile=64x128 warp=32x64 NT epi=5 split=no
+COVER gemm tf32 tile=64x128 warp=32x64 TN epi=0 split=no
+COVER gemm tf32 tile=64x128 warp=32x64 TN epi=16 split=no
+COVER gemm tf32 tile=64x64 warp=32x32 NN epi=0 split=no
+COVER layernorm bwd block-per-row C=128
+COVER layernorm fwd block-per-row C=128
+gradient check: B=4 T=64 C=128 L=2 NH=4 V=65(->128)  eps=3e-02
+loss at theta = 4.240162   (ln(V) = 4.174387)
+
+tensor              n       analytic        numeric    rel err  
+---------------------------------------------------------------------------
+wte             16384   8.672443e-01   8.670948e-01   1.72e-04  ok
+wpe              8192   4.973931e-01   4.971569e-01   4.75e-04  ok
+ln1w              256   5.461157e-03   5.368159e-03   1.70e-02  ok
+ln1b              256   1.788687e-02   1.781678e-02   3.92e-03  ok
+qkvw            98304   2.705873e-01   2.701651e-01   1.56e-03  ok
+qkvb              768   7.860239e-02   7.856541e-02   4.70e-04  ok
+attprojw        32768   5.564934e-01   5.533785e-01   5.60e-03  ok
+attprojb          256   6.847434e-01   6.717372e-01   1.90e-02  ok
+ln2w              256   1.151764e-02   1.149587e-02   1.89e-03  ok
+ln2b              256   1.286458e-02   1.291240e-02   3.72e-03  ok
+fcw            131072   6.174450e-01   6.172358e-01   3.39e-04  ok
+fcb              1024   6.170106e-02   6.174944e-02   7.84e-04  ok
+fcprojw        131072   1.207562e+00   1.206234e+00   1.10e-03  ok
+fcprojb           256   5.214445e-01   5.167891e-01   8.93e-03  ok
+lnfw              128   1.720616e-02   1.732707e-02   7.03e-03  ok
+lnfb              128   1.334269e-02   1.328993e-02   3.95e-03  ok
+---------------------------------------------------------------------------
+ALL            421376   1.993425e+00   1.967919e+00   1.28e-02  ok
+
+gradient check passed (16 checked, 0 failures)

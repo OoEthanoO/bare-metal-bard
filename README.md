@@ -214,6 +214,55 @@ occupancy, and when two configurations tie you take the one with headroom. The
 the WMMA section is a worked example of exactly the branch that is marginal on
 one card and decisive on the next.
 
+### A smaller block helps the two skinny projections
+
+The 64×64 **warp** above tied. A 64×64 **block**, divided into four 32×32
+warps, makes a different trade: it doubles the grid against the normal 64×128
+block. At 4096×384 that is 384 blocks instead of 192 on a 60-SM GPU. The live
+NN/NT kernels still use 112–126 registers per thread and fit four blocks per
+SM; the gain comes from having enough blocks to fill those slots, not from a
+higher residency limit. Shared memory falls from 25.5 to 17 KiB per block,
+while input arithmetic intensity falls from 21.3 to 16 FLOP/byte.
+
+Three interleaved A/B sweeps on the RTX 5080 Laptop, MUX off, 1177–1192 MHz.
+These are throughput changes against the previous tile, without fused
+epilogues; the forward stores its weights transposed, so NT is essential:
+
+| shape | operation | compact tile throughput gain, three runs |
+|---|---|---:|
+| attention projection, 4096×384×384 | NN, input gradient | +7.9 / +9.8 / +8.6% |
+| attention projection, 4096×384×384 | NT, forward | +9.8 / +11.3 / +10.8% |
+| padded vocab head, 4096×128×384 | NT, forward | +24.5 / +25.7 / +26.6% |
+| MLP down, 4096×384×1536 | NN, input gradient | −9.2% in run 1 |
+| square 4096³ control | NN | −10.2% in run 1 |
+
+The last two rows explain why this is a third tile, rather than a replacement.
+The automatic rule is `N <= 384 && K == 384`, within the existing alignment
+checks. Small output width alone is insufficient: the same width with a deep
+reduction loses. This rule is calibrated on this GPU and model; remeasure it
+on another device. `--compact-block -1` forces the previous tile and
+`--compact-block 1` forces compact, so both sides remain measurable from one
+binary.
+
+The end-to-end check is smaller than the kernel percentages, as expected.
+Four alternating 500-step training runs, 36 reported step samples per run
+after step 150, all at **1162–1192 MHz**:
+
+| run | tile selection | median ms/step | sample range, ms |
+|---|---|---:|---:|
+| 1 | previous | 25.410 | 25.35–25.50 |
+| 2 | automatic compact rule | 25.270 | 25.23–25.33 |
+| 3 | previous | 25.415 | 25.35–25.47 |
+| 4 | automatic compact rule | 25.280 | 25.20–25.38 |
+
+That is **about 0.54% less training time**, or roughly 162,000 tokens/s.
+These short runs establish speed; the 5,000-step validation result below
+still describes its original checkpoint and implementation. The full logs,
+commands and correctness checks are indexed in
+[`docs/compact-block-5080.md`](docs/compact-block-5080.md). The earlier claim
+that these two projections were too small to justify a third tile was too
+strong: their combined effect is small, but repeatable.
+
 ### The tensor-core number, stated honestly
 
 *Measured on the 4070; the 5080's own fp32-vs-TF32 comparison is the table
@@ -2811,12 +2860,11 @@ four scalar stores.
    this repo did not have — cuBLAS timed at the model's own shapes rather than
    at square N, which is what showed the gap was mine and not the shape's.
 
-   What is left in the GEMMs is `attn proj` (4096×384×384, 80% of cuBLAS) and
-   the padded vocab head (4096×128×384, 70%). Both are small in *every*
-   dimension at once against a 64×128 tile, and neither is big enough in the
-   profile to be worth a third tile. **The largest line in the step is now
-   `GEMM bwd dX` at 22%**, which is the first time since the profiler was
-   written that dW has not been on top.
+   The remaining skinny `attn proj` and padded vocab head now have a
+   [measured compact block tile](#a-smaller-block-helps-the-two-skinny-projections).
+   Together they save about **0.54% of a step on the 5080**, revising the
+   earlier judgment that neither justified a third tile. The deep-reduction
+   GEMMs keep their previous tile; making those compact lost throughput.
 
 6. ~~**The GELU backward**~~ — [done](#the-gelu-backward-did-not-need-to-exist-either),
    folded into the `dX` GEMM's epilogue the way the forward's bias, residual and

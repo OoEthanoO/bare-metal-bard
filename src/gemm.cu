@@ -838,14 +838,15 @@ constexpr int XWM = 64, XWN = 64, XTHREADS = 128, XMINB = 2;
 constexpr int SBM = 64, SBN = 128, SBK = 32;
 constexpr int SWM = 32, SWN = 64, STHREADS = 128, SMINB = 4;
 
-// Experimental skinny-output tile. The normal 64x128 tile gives each warp a
+// Skinny-output tile. The normal 64x128 tile gives each warp a
 // 32x64 output. Cutting N in half and the warp tile to 32x32 halves the
-// accumulator footprint and the block's shared memory, but the live NN/NT
+// accumulator footprint and cuts shared memory from 25.5 to 17 KiB. The live NN/NT
 // kernels still use 112-126 registers and therefore keep the same four-block,
 // 16-warp residency. What changes is grid depth: at 4096x384 the old tile has
 // 192 blocks (3.2 per 60-SM machine), while this one has 384 and fills all four
 // resident block slots. The price is arithmetic intensity: 21.3 -> 16
-// FLOP/byte. Keep it behind a runtime knob until that trade has been measured.
+// FLOP/byte. prefer_compact_block() selects the shapes that won the measured
+// trade; the forced modes retain a one-binary A/B against the previous tile.
 constexpr int CBM = 64, CBN = 64, CBK = 32;
 constexpr int CWM = 32, CWN = 32, CTHREADS = 128, CMINB = 4;
 
