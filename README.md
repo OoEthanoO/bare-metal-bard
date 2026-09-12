@@ -2522,6 +2522,20 @@ Gradient-check the model:
 make bench/test_grad && ./bench/test_grad
 ```
 
+Check the complete data-parallel path against a full-batch reference,
+including every gradient tensor, clipped/unclipped updates and Adam state:
+
+```powershell
+scripts\build.bat test_ddp_gpt
+scripts\measure.bat bench\test_ddp_gpt.exe --tf32 --ranks 3
+```
+
+On one GPU this is a correctness rehearsal. Add `--require-multi-gpu` on
+separate devices to reject an accidental rehearsal. The
+[test design and negative control](docs/ddp-model-check.md) explain why
+matching a gradient norm is insufficient and how optimizer normalization is
+checked separately from floating-point reduction order.
+
 Train the GPT (about 7.5 minutes for 5000 steps on a 4070 Laptop):
 
 ```bash
@@ -2935,6 +2949,14 @@ four scalar stores.
    [`bench/logs/multigpu_a40.txt`](bench/logs/multigpu_a40.txt). A ring
    all-reduce written from scratch (no NCCL), data-parallel training behind
    `--gpus N`, run on 2x A40. Two findings, neither the expected one:
+
+   The current correctness gate is
+   [`test_ddp_gpt`](docs/ddp-model-check.md): compare the full-batch and
+   distributed gradients tensor by tensor, then check gradient averaging,
+   clipping, every updated weight and both Adam moments. A sign-reversed
+   gradient can preserve its norm and still fail this comparison. The cloud
+   runner requires the gate to pass on distinct devices before reporting
+   performance; one-device rehearsals cannot close the A40 anomaly below.
 
    **Peer-to-peer was advertised and did not work.** Every `cudaMemcpyPeerAsync`
    returned success, every sync returned success, and the bytes never arrived —

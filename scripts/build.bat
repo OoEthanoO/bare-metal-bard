@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 REM Windows build, mirroring the Makefile target for target.
 REM
 REM Usage:  scripts\build.bat [target ...]      (no args = all)
-REM Targets: sgemm test_gemm train_gpt test_grad test_flash device_query
+REM Targets: sgemm test_gemm train_gpt test_grad test_flash test_ddp test_ddp_gpt device_query
 REM
 REM Two Windows-specific notes:
 REM   * nvcc needs cl.exe and the Windows SDK on PATH, which is what vcvars64
@@ -42,7 +42,7 @@ set "TARGETS=!TARGETS! %~1"
 shift
 goto argloop
 :argdone
-if "%TARGETS%"=="" set "TARGETS=sgemm test_gemm train_gpt test_grad test_flash test_ddp bench_nn device_query"
+if "%TARGETS%"=="" set "TARGETS=sgemm test_gemm train_gpt test_grad test_flash test_ddp test_ddp_gpt bench_nn device_query"
 
 for %%t in (%TARGETS%) do (
   echo [build] %%t
@@ -52,6 +52,7 @@ for %%t in (%TARGETS%) do (
   if "%%t"=="test_grad"    "%NVCC%" %FLAGS% tools\test_grad.cu %GPT_SRC% -o bench\test_grad.exe
   if "%%t"=="test_flash"   "%NVCC%" %FLAGS% tools\test_flash.cu src\flash.cu src\attention.cu src\bgemm.cu src\gemm.cu -o bench\test_flash.exe
   if "%%t"=="test_ddp"     "%NVCC%" %FLAGS% tools\test_ddp.cu src\ddp.cu -o bench\test_ddp.exe
+  if "%%t"=="test_ddp_gpt" "%NVCC%" %FLAGS% tools\test_ddp_gpt.cu %GPT_SRC% -o bench\test_ddp_gpt.exe
   if "%%t"=="bench_nn"     "%NVCC%" %FLAGS% tools\bench_nn.cu src\nn.cu -o bench\bench_nn.exe
   if "%%t"=="device_query" "%NVCC%" -arch=%ARCH% -O2 -std=c++17 -allow-unsupported-compiler tools\device_query.cu -o bench\device_query.exe
   if errorlevel 1 exit /b 1

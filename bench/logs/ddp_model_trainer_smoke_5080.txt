@@ -1,0 +1,42 @@
+Trainer smoke regression after extracting RankPool, native Windows RTX 5080, no clock pin.
+=== ranks=1 exit=0 ===
+data      1003855 train / 111539 val tokens, vocab 65 (padded 128)
+model     6 layers, 6 heads, 384 embd, ctx 256, fused attention
+matmul    TF32 tensor cores
+gemm tile measured shape rule
+fwd tile  config 5 (mma br64 bc32 t128)
+bwd tile  config 18 (br32 bc32 mma-q mma-kv w2)
+params    10.80M (41.2 MB; +41.2 MB grads, +82.4 MB adam state)
+memory    593.0 MB forward activations, 74.1 MB backward scratch
+total     0.81 GB resident (params+grads+adam+activations+scratch)
+step     1/30  loss 4.2625  lr 1.00e-05  |g| 15.666    98.42 ms    41620 tok/s   2990 GFLOP/s
+step    10/30  loss 3.1102  lr 1.00e-04  |g| 6.342    13.38 ms   306156 tok/s  21997 GFLOP/s
+step    20/30  loss 2.7430  lr 2.00e-04  |g| 1.406    13.36 ms   306621 tok/s  22030 GFLOP/s
+step    30/30  loss 2.6151  lr 3.00e-04  |g| 1.379    13.39 ms   305932 tok/s  21981 GFLOP/s
+
+(profile discards steps 1-15: allocator warm-up and the SM
+ clock ramp, which is a fixed duration rather than a fixed
+ number of steps -- see the comment at prof::reset)
+=== ranks=2 exit=0 ===
+data      1003855 train / 111539 val tokens, vocab 65 (padded 128)
+model     6 layers, 6 heads, 384 embd, ctx 256, fused attention
+matmul    TF32 tensor cores
+gemm tile measured shape rule
+fwd tile  config 5 (mma br64 bc32 t128)
+bwd tile  config 18 (br32 bc32 mma-q mma-kv w2)
+params    10.80M (41.2 MB; +41.2 MB grads, +82.4 MB adam state)
+memory    296.5 MB forward activations, 37.0 MB backward scratch
+total     0.49 GB resident (params+grads+adam+activations+scratch)
+ddp       2 rank(s) on device(s) 0 0  [SIMULATED: one physical GPU]
+links     peer-to-peer enabled on every pair
+  rank 0 inputs on device: 0 of 2048 tokens and 0 targets differ from what was sent
+  rank 1 inputs on device: 0 of 2048 tokens and 0 targets differ from what was sent
+  rank losses  0:4.2577  1:4.2673
+step     1/30  loss 4.2625  lr 1.00e-05  |g| 15.666   104.09 ms    39352 tok/s   2827 GFLOP/s  comm   1.2 ms ( 1.2%)
+step    10/30  loss 3.1102  lr 1.00e-04  |g| 6.342    15.99 ms   256102 tok/s  18400 GFLOP/s  comm   0.4 ms ( 2.6%)
+step    20/30  loss 2.7430  lr 2.00e-04  |g| 1.405    15.92 ms   257299 tok/s  18486 GFLOP/s  comm   0.4 ms ( 2.5%)
+step    30/30  loss 2.6151  lr 3.00e-04  |g| 1.379    15.90 ms   257550 tok/s  18504 GFLOP/s  comm   0.4 ms ( 2.5%)
+
+(profile discards steps 1-15: allocator warm-up and the SM
+ clock ramp, which is a fixed duration rather than a fixed
+ number of steps -- see the comment at prof::reset)

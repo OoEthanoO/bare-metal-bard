@@ -78,7 +78,7 @@ make clean >/dev/null 2>&1
 # Shown, not piped to tail: nvcc takes a couple of minutes on nine kernels and
 # a silent terminal looks like a hang. -j because the box has cores going spare.
 echo "compiling with -j$(nproc); nvcc is slow, give it ~2 minutes"
-make -j"$(nproc)" bench/test_ddp bench/train_gpt bench/sgemm bench/test_flash bench/test_grad || { echo BUILD FAILED; exit 1; }
+make -j"$(nproc)" bench/test_ddp bench/test_ddp_gpt bench/train_gpt bench/sgemm bench/test_flash bench/test_grad || { echo BUILD FAILED; exit 1; }
 
 log "correctness gate: attention, gradients, and the two-rank config that produced NaN"
 # The laptop's GPU was unavailable when the cross-device fixes were made, so
@@ -87,8 +87,17 @@ log "correctness gate: attention, gradients, and the two-rank config that produc
 # forward returned garbage on rank 1 (loss 9.24 at step 1, |g| 2402, then NaN)
 # when the flash kernels' shared-memory opt-in was guarded per process
 # instead of per device, and grad_global_norm cached its scratch on device 0.
-./bench/test_flash 2>&1 | tail -3
-./bench/test_grad 2>&1 | tail -2
+./bench/test_flash 2>&1 | tail -3 || { echo ATTENTION CHECK FAILED; exit 1; }
+./bench/test_grad 2>&1 | tail -2 || { echo GRADIENT CHECK FAILED; exit 1; }
+log "full-batch versus distributed gradients and Adam state, two real devices"
+./bench/test_ddp_gpt --ranks 2 --require-multi-gpu || exit 1
+if nvidia-smi --query-gpu=compute_cap --format=csv,noheader | awk -F. '$1 < 8 {exit 1}'; then
+  ./bench/test_ddp_gpt --tf32 --ranks 2 --require-multi-gpu || exit 1
+  DDP_NO_P2P=1 ./bench/test_ddp_gpt --tf32 --ranks 2 --require-multi-gpu || exit 1
+else
+  echo "TF32 checks skipped on pre-Ampere hardware; checking staged FP32 instead"
+  DDP_NO_P2P=1 ./bench/test_ddp_gpt --ranks 2 --require-multi-gpu || exit 1
+fi
 ./scripts/get_data.sh >/dev/null 2>&1 || true
 # One hundred short attempts, because the residual anomaly (one run in
 # twenty-one read step-1 loss 4.2701 / |g| 32.75 instead of 4.2783 / 15.023)

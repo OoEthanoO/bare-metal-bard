@@ -34,11 +34,8 @@
 #include "ddp.h"
 #include "flash.h"
 #include "prof.cuh"
+#include "rank_pool.h"
 #include <chrono>
-#include <thread>
-#include <mutex>
-#include <condition_variable>
-#include <functional>
 
 #define CUDA_CHECK(x)                                                          \
     do {                                                                       \
@@ -250,52 +247,8 @@ static bool load_checkpoint(GPT &g, const char *path, std::vector<char> &itos) {
 // were always fine and the 2-rank step on the A40 box was 3.6x one rank's
 // shard time while communication measured 6%: the missing time was the two
 // ranks taking turns rebuilding their caches inside a driver lock.
-struct RankPool {
-    std::vector<std::thread> threads;
-    std::function<void(int)> job;
-    std::mutex mu;
-    std::condition_variable cv_start, cv_done;
-    unsigned long long epoch = 0;
-    int pending = 0;
-    bool quit = false;
-
-    void start(int n) {
-        for (int r = 0; r < n; ++r)
-            threads.emplace_back([this, r] {
-                unsigned long long seen = 0;
-                for (;;) {
-                    std::unique_lock<std::mutex> lk(mu);
-                    cv_start.wait(lk, [&] { return quit || epoch != seen; });
-                    if (quit) return;
-                    seen = epoch;
-                    auto fn = job;  // copied under the lock
-                    lk.unlock();
-                    fn(r);
-                    lk.lock();
-                    if (--pending == 0) cv_done.notify_one();
-                }
-            });
-    }
-    // Runs fn(r) on every rank's worker and returns when all have finished.
-    void run(const std::function<void(int)> &fn) {
-        std::unique_lock<std::mutex> lk(mu);
-        job = fn;
-        pending = (int)threads.size();
-        ++epoch;
-        cv_start.notify_all();
-        cv_done.wait(lk, [&] { return pending == 0; });
-    }
-    void stop() {
-        {
-            std::lock_guard<std::mutex> lk(mu);
-            quit = true;
-        }
-        cv_start.notify_all();
-        for (auto &t : threads) t.join();
-        threads.clear();
-    }
-    ~RankPool() { if (!threads.empty()) stop(); }
-};
+// The implementation lives in rank_pool.h so the multi-rank regression test
+// exercises this same worker lifecycle.
 
 // Linear warmup then cosine decay to lr_max/10. Warmup matters here because
 // Adam's second-moment estimate is near-meaningless for the first few steps,

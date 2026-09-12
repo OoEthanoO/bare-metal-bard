@@ -1,0 +1,222 @@
+DDP model regression, 2026-09-12, native Windows, CUDA 13.3.73
+One physical RTX 5080 Laptop GPU, MUX off. Correctness only; clocks unlocked.
+=== ranks=1 precision=fp32 host_staged=False exit=0 ===
+ddp       1 rank(s) on device(s) 0
+DDP model check: FP32, global B=2, T=64, C=384, L=2, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+step 1 loss full=4.3366165 shards=4.3366165 max_token_error=0.00e+00 gradient_budget=0.001
+       optimizer clipped norm=6.010483 clip=1.502621 state_budget=0.000
+step 2 loss full=4.2659359 shards=4.2659359 max_token_error=0.00e+00 gradient_budget=0.001
+       optimizer unclipped norm=6.139256 clip=12.278513 state_budget=0.000
+step 3 loss full=4.2572389 shards=4.2572389 max_token_error=0.00e+00 gradient_budget=0.001
+       optimizer clipped norm=5.841047 clip=1.460262 state_budget=0.000
+DDP MODEL CHECK PASSED
+=== ranks=2 precision=fp32 host_staged=False exit=0 ===
+ddp       2 rank(s) on device(s) 0 0  [SIMULATED: one physical GPU]
+links     peer-to-peer enabled on every pair
+DDP model check: FP32, global B=4, T=64, C=384, L=2, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+step 1 loss full=4.3030167 shards=4.3030162 max_token_error=0.00e+00 gradient_budget=0.006
+       optimizer clipped norm=4.473725 clip=1.118431 state_budget=0.000
+step 2 loss full=4.2587624 shards=4.2587624 max_token_error=0.00e+00 gradient_budget=0.006
+       optimizer unclipped norm=4.358731 clip=8.717462 state_budget=0.000
+step 3 loss full=4.2705917 shards=4.2705920 max_token_error=0.00e+00 gradient_budget=0.006
+       optimizer clipped norm=4.197261 clip=1.049315 state_budget=0.000
+DDP MODEL CHECK PASSED
+=== ranks=3 precision=fp32 host_staged=False exit=0 ===
+ddp       3 rank(s) on device(s) 0 0 0  [SIMULATED: one physical GPU]
+links     peer-to-peer enabled on every pair
+DDP model check: FP32, global B=6, T=64, C=384, L=2, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+step 1 loss full=4.2843938 shards=4.2843940 max_token_error=0.00e+00 gradient_budget=0.018
+       optimizer clipped norm=3.645268 clip=0.911317 state_budget=0.000
+step 2 loss full=4.2655749 shards=4.2655748 max_token_error=0.00e+00 gradient_budget=0.012
+       optimizer unclipped norm=3.624080 clip=7.248159 state_budget=0.000
+step 3 loss full=4.2670331 shards=4.2670329 max_token_error=0.00e+00 gradient_budget=0.013
+       optimizer clipped norm=3.565714 clip=0.891428 state_budget=0.012
+DDP MODEL CHECK PASSED
+=== ranks=5 precision=fp32 host_staged=False exit=0 ===
+ddp       5 rank(s) on device(s) 0 0 0 0 0  [SIMULATED: one physical GPU]
+links     peer-to-peer enabled on every pair
+DDP model check: FP32, global B=10, T=64, C=384, L=2, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+step 1 loss full=4.2795372 shards=4.2795374 max_token_error=0.00e+00 gradient_budget=0.013
+       optimizer clipped norm=2.963838 clip=0.740959 state_budget=0.000
+step 2 loss full=4.2715149 shards=4.2715149 max_token_error=0.00e+00 gradient_budget=0.012
+       optimizer unclipped norm=2.841113 clip=5.682225 state_budget=0.000
+step 3 loss full=4.2712884 shards=4.2712885 max_token_error=0.00e+00 gradient_budget=0.012
+       optimizer clipped norm=2.585295 clip=0.646324 state_budget=0.000
+DDP MODEL CHECK PASSED
+=== ranks=8 precision=fp32 host_staged=False exit=0 ===
+ddp       8 rank(s) on device(s) 0 0 0 0 0 0 0 0  [SIMULATED: one physical GPU]
+links     peer-to-peer enabled on every pair
+DDP model check: FP32, global B=16, T=64, C=384, L=2, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+step 1 loss full=4.2725930 shards=4.2725933 max_token_error=0.00e+00 gradient_budget=0.012
+       optimizer clipped norm=2.391745 clip=0.597936 state_budget=0.000
+step 2 loss full=4.2689481 shards=4.2689481 max_token_error=0.00e+00 gradient_budget=0.016
+       optimizer unclipped norm=2.154774 clip=4.309548 state_budget=0.000
+step 3 loss full=4.2391109 shards=4.2391112 max_token_error=0.00e+00 gradient_budget=0.013
+       optimizer clipped norm=2.114281 clip=0.528570 state_budget=0.000
+DDP MODEL CHECK PASSED
+=== ranks=1 precision=tf32 host_staged=False exit=0 ===
+ddp       1 rank(s) on device(s) 0
+DDP model check: TF32, global B=2, T=64, C=384, L=2, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+step 1 loss full=4.3366404 shards=4.3366404 max_token_error=0.00e+00 gradient_budget=0.000
+       optimizer clipped norm=6.010491 clip=1.502623 state_budget=0.000
+step 2 loss full=4.2659473 shards=4.2659473 max_token_error=0.00e+00 gradient_budget=0.000
+       optimizer unclipped norm=6.139076 clip=12.278152 state_budget=0.000
+step 3 loss full=4.2572422 shards=4.2572422 max_token_error=0.00e+00 gradient_budget=0.000
+       optimizer clipped norm=5.840635 clip=1.460159 state_budget=0.000
+DDP MODEL CHECK PASSED
+=== ranks=2 precision=tf32 host_staged=False exit=0 ===
+ddp       2 rank(s) on device(s) 0 0  [SIMULATED: one physical GPU]
+links     peer-to-peer enabled on every pair
+DDP model check: TF32, global B=4, T=64, C=384, L=2, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+step 1 loss full=4.3030272 shards=4.3030272 max_token_error=0.00e+00 gradient_budget=0.000
+       optimizer clipped norm=4.473673 clip=1.118418 state_budget=0.000
+step 2 loss full=4.2587385 shards=4.2587388 max_token_error=0.00e+00 gradient_budget=0.000
+       optimizer unclipped norm=4.358850 clip=8.717699 state_budget=0.000
+step 3 loss full=4.2705612 shards=4.2705615 max_token_error=0.00e+00 gradient_budget=0.000
+       optimizer clipped norm=4.197155 clip=1.049289 state_budget=0.000
+DDP MODEL CHECK PASSED
+=== ranks=3 precision=tf32 host_staged=False exit=0 ===
+ddp       3 rank(s) on device(s) 0 0 0  [SIMULATED: one physical GPU]
+links     peer-to-peer enabled on every pair
+DDP model check: TF32, global B=6, T=64, C=384, L=2, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+step 1 loss full=4.2844038 shards=4.2844039 max_token_error=0.00e+00 gradient_budget=0.142
+       optimizer clipped norm=3.645297 clip=0.911324 state_budget=0.000
+step 2 loss full=4.2655797 shards=4.2655799 max_token_error=0.00e+00 gradient_budget=0.136
+       optimizer unclipped norm=3.624257 clip=7.248514 state_budget=0.000
+step 3 loss full=4.2670045 shards=4.2670045 max_token_error=0.00e+00 gradient_budget=0.155
+       optimizer clipped norm=3.565603 clip=0.891401 state_budget=0.012
+DDP MODEL CHECK PASSED
+=== ranks=5 precision=tf32 host_staged=False exit=0 ===
+ddp       5 rank(s) on device(s) 0 0 0 0 0  [SIMULATED: one physical GPU]
+links     peer-to-peer enabled on every pair
+DDP model check: TF32, global B=10, T=64, C=384, L=2, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+step 1 loss full=4.2795401 shards=4.2795407 max_token_error=0.00e+00 gradient_budget=0.132
+       optimizer clipped norm=2.963863 clip=0.740966 state_budget=0.000
+step 2 loss full=4.2715096 shards=4.2715095 max_token_error=0.00e+00 gradient_budget=0.124
+       optimizer unclipped norm=2.841059 clip=5.682119 state_budget=0.000
+step 3 loss full=4.2712793 shards=4.2712793 max_token_error=0.00e+00 gradient_budget=0.131
+       optimizer clipped norm=2.585286 clip=0.646322 state_budget=0.019
+DDP MODEL CHECK PASSED
+=== ranks=8 precision=tf32 host_staged=False exit=0 ===
+ddp       8 rank(s) on device(s) 0 0 0 0 0 0 0 0  [SIMULATED: one physical GPU]
+links     peer-to-peer enabled on every pair
+DDP model check: TF32, global B=16, T=64, C=384, L=2, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+step 1 loss full=4.2726026 shards=4.2726029 max_token_error=0.00e+00 gradient_budget=0.000
+       optimizer clipped norm=2.391722 clip=0.597931 state_budget=0.000
+step 2 loss full=4.2689257 shards=4.2689260 max_token_error=0.00e+00 gradient_budget=0.001
+       optimizer unclipped norm=2.154688 clip=4.309377 state_budget=0.000
+step 3 loss full=4.2391024 shards=4.2391023 max_token_error=0.00e+00 gradient_budget=0.000
+       optimizer clipped norm=2.114240 clip=0.528560 state_budget=0.000
+DDP MODEL CHECK PASSED
+=== ranks=3 precision=fp32 host_staged=True exit=0 ===
+ddp       DDP_NO_P2P set: staging every transfer through host
+ddp       3 rank(s) on device(s) 0 0 0  [SIMULATED: one physical GPU]
+links     NO peer access -- every transfer staged through host memory
+DDP model check: FP32, global B=6, T=64, C=384, L=2, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+step 1 loss full=4.2843938 shards=4.2843940 max_token_error=0.00e+00 gradient_budget=0.018
+       optimizer clipped norm=3.645268 clip=0.911317 state_budget=0.000
+step 2 loss full=4.2655749 shards=4.2655748 max_token_error=0.00e+00 gradient_budget=0.013
+       optimizer unclipped norm=3.624079 clip=7.248159 state_budget=0.000
+step 3 loss full=4.2670331 shards=4.2670331 max_token_error=0.00e+00 gradient_budget=0.012
+       optimizer clipped norm=3.565714 clip=0.891428 state_budget=0.000
+DDP MODEL CHECK PASSED
+=== ranks=2 precision=tf32 host_staged=True exit=0 ===
+ddp       DDP_NO_P2P set: staging every transfer through host
+ddp       2 rank(s) on device(s) 0 0  [SIMULATED: one physical GPU]
+links     NO peer access -- every transfer staged through host memory
+DDP model check: TF32, global B=4, T=64, C=384, L=2, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+step 1 loss full=4.3030272 shards=4.3030272 max_token_error=0.00e+00 gradient_budget=0.000
+       optimizer clipped norm=4.473673 clip=1.118418 state_budget=0.000
+step 2 loss full=4.2587385 shards=4.2587388 max_token_error=0.00e+00 gradient_budget=0.000
+       optimizer unclipped norm=4.358850 clip=8.717699 state_budget=0.000
+step 3 loss full=4.2705612 shards=4.2705615 max_token_error=0.00e+00 gradient_budget=0.000
+       optimizer clipped norm=4.197155 clip=1.049289 state_budget=0.000
+DDP MODEL CHECK PASSED
+=== ranks=3 precision=tf32 host_staged=True exit=0 ===
+ddp       DDP_NO_P2P set: staging every transfer through host
+ddp       3 rank(s) on device(s) 0 0 0  [SIMULATED: one physical GPU]
+links     NO peer access -- every transfer staged through host memory
+DDP model check: TF32, global B=6, T=64, C=384, L=2, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+step 1 loss full=4.2844038 shards=4.2844039 max_token_error=0.00e+00 gradient_budget=0.142
+       optimizer clipped norm=3.645297 clip=0.911324 state_budget=0.000
+step 2 loss full=4.2655797 shards=4.2655799 max_token_error=0.00e+00 gradient_budget=0.136
+       optimizer unclipped norm=3.624257 clip=7.248514 state_budget=0.000
+step 3 loss full=4.2670035 shards=4.2670035 max_token_error=0.00e+00 gradient_budget=0.148
+       optimizer clipped norm=3.565616 clip=0.891404 state_budget=0.019
+DDP MODEL CHECK PASSED
+=== ranks=5 precision=tf32 host_staged=True exit=0 ===
+ddp       DDP_NO_P2P set: staging every transfer through host
+ddp       5 rank(s) on device(s) 0 0 0 0 0  [SIMULATED: one physical GPU]
+links     NO peer access -- every transfer staged through host memory
+DDP model check: TF32, global B=10, T=64, C=384, L=2, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+step 1 loss full=4.2795401 shards=4.2795407 max_token_error=0.00e+00 gradient_budget=0.132
+       optimizer clipped norm=2.963863 clip=0.740966 state_budget=0.000
+step 2 loss full=4.2715096 shards=4.2715095 max_token_error=0.00e+00 gradient_budget=0.124
+       optimizer unclipped norm=2.841059 clip=5.682119 state_budget=0.000
+step 3 loss full=4.2712793 shards=4.2712793 max_token_error=0.00e+00 gradient_budget=0.131
+       optimizer clipped norm=2.585286 clip=0.646322 state_budget=0.019
+DDP MODEL CHECK PASSED
+=== Negative control fp32 expected_exit=1 actual_exit=1 ===
+ddp       2 rank(s) on device(s) 0 0  [SIMULATED: one physical GPU]
+links     peer-to-peer enabled on every pair
+DDP model check: FP32, global B=4, T=64, C=384, L=2, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+Injected sign reversal on rank 0: same gradient norm, wrong direction.
+FAIL rank=0 mean gradient/wte index=7049 abs_err=8.046e-02 limit=6.470e-06 finite=1
+FAIL rank=0 mean gradient/wpe index=379 abs_err=5.612e-02 limit=3.693e-06 finite=1
+FAIL rank=0 mean gradient/ln1w index=397 abs_err=3.922e-03 limit=6.814e-07 finite=1
+FAIL rank=0 mean gradient/ln1b index=254 abs_err=1.326e-02 limit=1.331e-06 finite=1
+FAIL rank=0 mean gradient/qkvw index=442085 abs_err=2.295e-02 limit=1.534e-06 finite=1
+FAIL rank=0 mean gradient/qkvb index=1151 abs_err=3.807e-02 limit=2.444e-06 finite=1
+FAIL rank=0 mean gradient/attprojw index=239649 abs_err=5.406e-02 limit=3.430e-06 finite=1
+FAIL rank=0 mean gradient/attprojb index=165 abs_err=1.689e-01 limit=1.426e-05 finite=1
+FAIL rank=0 mean gradient/ln2w index=237 abs_err=5.541e-03 limit=4.896e-07 finite=1
+FAIL rank=0 mean gradient/ln2b index=343 abs_err=5.064e-03 limit=5.233e-07 finite=1
+FAIL rank=0 mean gradient/fcw index=198285 abs_err=1.724e-02 limit=1.178e-06 finite=1
+FAIL rank=0 mean gradient/fcb index=1063 abs_err=8.459e-03 limit=7.520e-07 finite=1
+FAIL rank=0 mean gradient/fcprojw index=125409 abs_err=3.590e-02 limit=2.761e-06 finite=1
+FAIL rank=0 mean gradient/fcprojb index=170 abs_err=6.575e-02 limit=5.830e-06 finite=1
+FAIL rank=0 mean gradient/lnfw index=306 abs_err=9.639e-03 limit=8.139e-07 finite=1
+FAIL rank=0 mean gradient/lnfb index=306 abs_err=6.696e-03 limit=6.031e-07 finite=1
+step 1 loss full=4.3030167 shards=4.3030162 max_token_error=0.00e+00 gradient_budget=15759.255
+DDP MODEL CHECK FAILED
+=== Negative control tf32 expected_exit=1 actual_exit=1 ===
+ddp       2 rank(s) on device(s) 0 0  [SIMULATED: one physical GPU]
+links     peer-to-peer enabled on every pair
+DDP model check: TF32, global B=4, T=64, C=384, L=2, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+Injected sign reversal on rank 0: same gradient norm, wrong direction.
+FAIL rank=0 mean gradient/wte index=7049 abs_err=8.047e-02 limit=3.186e-04 finite=1
+FAIL rank=0 mean gradient/wpe index=379 abs_err=5.612e-02 limit=1.797e-04 finite=1
+FAIL rank=0 mean gradient/ln1w index=397 abs_err=3.921e-03 limit=2.915e-05 finite=1
+FAIL rank=0 mean gradient/ln1b index=254 abs_err=1.325e-02 limit=6.160e-05 finite=1
+FAIL rank=0 mean gradient/qkvw index=442085 abs_err=2.295e-02 limit=7.178e-05 finite=1
+FAIL rank=0 mean gradient/qkvb index=1151 abs_err=3.808e-02 limit=1.173e-04 finite=1
+FAIL rank=0 mean gradient/attprojw index=239649 abs_err=5.406e-02 limit=1.666e-04 finite=1
+FAIL rank=0 mean gradient/attprojb index=165 abs_err=1.689e-01 limit=7.082e-04 finite=1
+FAIL rank=0 mean gradient/ln2w index=237 abs_err=5.541e-03 limit=1.958e-05 finite=1
+FAIL rank=0 mean gradient/ln2b index=343 abs_err=5.065e-03 limit=2.126e-05 finite=1
+FAIL rank=0 mean gradient/fcw index=198285 abs_err=1.724e-02 limit=5.399e-05 finite=1
+FAIL rank=0 mean gradient/fcb index=1063 abs_err=8.458e-03 limit=3.270e-05 finite=1
+FAIL rank=0 mean gradient/fcprojw index=125409 abs_err=3.588e-02 limit=1.332e-04 finite=1
+FAIL rank=0 mean gradient/fcprojb index=170 abs_err=6.576e-02 limit=2.866e-04 finite=1
+FAIL rank=0 mean gradient/lnfw index=306 abs_err=9.633e-03 limit=3.578e-05 finite=1
+FAIL rank=0 mean gradient/lnfb index=306 abs_err=6.695e-03 limit=2.526e-05 finite=1
+step 1 loss full=4.3030272 shards=4.3030272 max_token_error=0.00e+00 gradient_budget=324.666
+DDP MODEL CHECK FAILED
+=== Distinct-device guard expected_exit=2 actual_exit=2 ===
+need 2 distinct CUDA devices; found 1

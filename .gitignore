@@ -6,6 +6,7 @@ bench/test_grad
 bench/train_gpt
 bench/test_flash
 bench/test_ddp
+bench/test_ddp_gpt
 bench/probe
 *.o
 # MSVC leaves an import library and export table beside every .exe
