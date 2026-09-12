@@ -158,21 +158,27 @@ int main(int argc, char **argv) {
     // 10 mantissa bits, so the bar moves from 1e-4 to 5e-3: the point of the
     // run is that the transpose staging is right, not that the format is exact.
     bool tf32 = false, bench = false, splitk = false, warp = false;
+    bool block = false;
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--tf32")) tf32 = true;
         else if (!strcmp(argv[i], "--bench")) bench = true;
         else if (!strcmp(argv[i], "--splitk")) splitk = true;
         else if (!strcmp(argv[i], "--warp")) warp = true;
+        else if (!strcmp(argv[i], "--block")) block = true;
         // Run the whole correctness suite on the alternative warp tile. A tile
         // that is faster and wrong is not a result, and the 64x64 shape re-maps
         // which warp owns which part of the output -- exactly the kind of
         // change that shows up only in the transposed cases.
         else if (!strcmp(argv[i], "--wide-warp") && i + 1 < argc)
             gemm_set_wide_warp(atoi(argv[++i]));
+        else if (!strcmp(argv[i], "--compact-block") && i + 1 < argc)
+            gemm_set_compact_block(atoi(argv[++i]));
     }
     if (gemm_wide_warp())
         printf("WIDE TILE WARP SHAPE: %d (0 = 32x64/256 thr, 1 = 64x64/128 thr)\n",
                gemm_wide_warp());
+    if (gemm_compact_block())
+        printf("COMPACT BLOCK TILE: 64x64, four 32x32 warps, 128 threads\n");
     if (tf32) {
         gemm_set_tf32(true);
         printf("TENSOR-CORE path (TF32), tolerance 5e-3\n\n");
@@ -301,6 +307,55 @@ int main(int argc, char **argv) {
                         if (pass == 0 || x < t[mode]) t[mode] = x;
                     }
                 gemm_set_wide_warp(0);
+                const double g0 = flop / (t[0] * 1e-3) / 1e9;
+                const double g1 = flop / (t[1] * 1e-3) / 1e9;
+                printf("%-22s %-4s %10.0f %10.0f %+7.1f%%\n", s2.tag,
+                       TA ? "TN" : "NN", g0, g1, 100.0 * (g1 / g0 - 1.0));
+            }
+            cudaFree(dA); cudaFree(dB); cudaFree(dC);
+        }
+        cublasDestroy(handle);
+        return 0;
+    }
+
+    // --block asks whether skinny outputs want more, smaller blocks. The
+    // compact tile doubles the N grid against 64x128, filling otherwise-empty
+    // block slots on skinny outputs, but drops arithmetic intensity from 21.3
+    // to 16 FLOP/byte. Interleave both orders so clock or temperature drift cannot
+    // choose the winner. NN prices the forward/dX path; TN prices dW.
+    if (block) {
+        gemm_set_tf32(true);
+        warm_up_device();
+        printf("Block-tile A/B, TF32. GF/s.\n");
+        printf("  default = device-derived 64x128 or 128x128 tile\n");
+        printf("  compact = 64x64 block, four 32x32 warps, 128 threads\n");
+        printf("            twice the grid, but 16 FLOP/B arithmetic intensity\n\n");
+        printf("%-22s %-4s %10s %10s %8s\n", "shape", "op", "default", "compact", "delta");
+        printf("--------------------------------------------------------------\n");
+        for (const Shape &s2 : shapes) {
+            if (s2.M % 128 || s2.N % 128 || s2.K % 32) continue;
+            if ((size_t)s2.M * s2.N * s2.K < 100000000ull) continue;
+            size_t szA = (size_t)s2.M * s2.K, szB = (size_t)s2.K * s2.N,
+                   szC = (size_t)s2.M * s2.N;
+            float *dA, *dB, *dC;
+            CUDA_CHECK(cudaMalloc(&dA, szA * 4));
+            CUDA_CHECK(cudaMalloc(&dB, szB * 4));
+            CUDA_CHECK(cudaMalloc(&dC, szC * 4));
+            CUDA_CHECK(cudaMemset(dA, 0, szA * 4));
+            CUDA_CHECK(cudaMemset(dB, 0, szB * 4));
+            const double flop = 2.0 * s2.M * s2.N * s2.K;
+            for (int tn = 0; tn < 2; ++tn) {
+                const bool TA = tn == 1;
+                double t[2];
+                for (int pass = 0; pass < 2; ++pass)
+                    for (int m = 0; m < 2; ++m) {
+                        const int arm = pass ? 1 - m : m;
+                        gemm_set_compact_block(arm ? 1 : -1);
+                        const double x = time_gemm(TA, false, s2.M, s2.N, s2.K,
+                                                   dA, dB, dC, 20);
+                        if (pass == 0 || x < t[arm]) t[arm] = x;
+                    }
+                gemm_set_compact_block(0);
                 const double g0 = flop / (t[0] * 1e-3) / 1e9;
                 const double g1 = flop / (t[1] * 1e-3) / 1e9;
                 printf("%-22s %-4s %10.0f %10.0f %+7.1f%%\n", s2.tag,

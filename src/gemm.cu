@@ -838,6 +838,17 @@ constexpr int XWM = 64, XWN = 64, XTHREADS = 128, XMINB = 2;
 constexpr int SBM = 64, SBN = 128, SBK = 32;
 constexpr int SWM = 32, SWN = 64, STHREADS = 128, SMINB = 4;
 
+// Experimental skinny-output tile. The normal 64x128 tile gives each warp a
+// 32x64 output. Cutting N in half and the warp tile to 32x32 halves the
+// accumulator footprint and the block's shared memory, but the live NN/NT
+// kernels still use 112-126 registers and therefore keep the same four-block,
+// 16-warp residency. What changes is grid depth: at 4096x384 the old tile has
+// 192 blocks (3.2 per 60-SM machine), while this one has 384 and fills all four
+// resident block slots. The price is arithmetic intensity: 21.3 -> 16
+// FLOP/byte. Keep it behind a runtime knob until that trade has been measured.
+constexpr int CBM = 64, CBN = 64, CBK = 32;
+constexpr int CWM = 32, CWN = 32, CTHREADS = 128, CMINB = 4;
+
 // WHAT `cp.async` DID HERE, measured and then reverted, recorded so it is not
 // retried on the same reasoning.
 //
@@ -1122,6 +1133,18 @@ static int g_splitk_force = 0;
 // run, 1 is the 64x64 one. See XWM above.
 static int g_wide_warp = 0;
 
+// 0 selects the measured shape rule, -1 forces the old/default tile, and 1
+// forces compact. Keeping both forced arms is what lets the end-to-end A/B use
+// one binary.
+static int g_compact_block = 0;
+
+// The compact tile won only where BOTH output width and reduction depth are
+// skinny: +7-9% at 4096x384x384 and +9-16% at 4096x128x384. The same N=384
+// with K=1152/1536 loses 6-10%, so "small N" is not the rule. This boundary
+// names the observed mechanism: a deeper grid fills otherwise-empty block
+// slots while the shallow K has too little reuse to repay a wider tile anyway.
+inline bool prefer_compact_block(int N, int K) { return N <= 384 && K == 384; }
+
 // THE SPLIT COUNT, DERIVED FROM A SWEEP RATHER THAN FROM A TARGET.
 //
 // The old rule was `s = TARGET_BLOCKS / blocks` -- cut K until the grid reaches
@@ -1203,10 +1226,14 @@ void dispatch_epi(int M, int N, int K, float alpha, const float *A,
                 C, ep, N, total);
         }
 #else
-        const bool narrow =
-            prefer_narrow_tile() && M % SBM == 0;
-        const int bm = narrow ? SBM : TBM, bn = narrow ? SBN : TBN;
-        const int bk = narrow ? SBK : TBK;
+        const bool compact =
+            (g_compact_block > 0 ||
+             (g_compact_block == 0 && prefer_compact_block(N, K))) &&
+            M % CBM == 0 && N % CBN == 0;
+        const bool narrow = !compact && prefer_narrow_tile() && M % SBM == 0;
+        const int bm = compact ? CBM : (narrow ? SBM : TBM);
+        const int bn = compact ? CBN : (narrow ? SBN : TBN);
+        const int bk = compact ? CBK : (narrow ? SBK : TBK);
         const int blocks = (M / bm) * (N / bn);
         const int splits = splitk_for(blocks, K, bk);
         dim3 g2(N / bn, M / bm, splits);
@@ -1214,8 +1241,8 @@ void dispatch_epi(int M, int N, int K, float alpha, const float *A,
         // case, epilogue mask, whether K was split, and which warp shape --
         // every axis a test could miss independently.
         BMB_COVERF("gemm tf32 tile=%s warp=%s %c%c epi=%d split=%s",
-                   narrow ? "64x128" : "128x128",
-                   (!narrow && g_wide_warp) ? "64x64" : "32x64",
+                   compact ? "64x64" : (narrow ? "64x128" : "128x128"),
+                   compact ? "32x32" : ((!narrow && g_wide_warp) ? "64x64" : "32x64"),
                    TA ? 'T' : 'N', TB ? 'T' : 'N', EPI,
                    splits > 1 ? "yes" : "no");
 
@@ -1244,7 +1271,11 @@ void dispatch_epi(int M, int N, int K, float alpha, const float *A,
             if constexpr (SEPI) eps.dbias_out = ws + total * splits;
             // The split kernels compute raw partials: alpha, beta and the
             // epilogue are applied once, by the reduction.
-            if (narrow)
+            if (compact)
+                gemm_mma<TA, TB, CBM, CBN, CBK, CWM, CWN, CTHREADS, CMINB, SEPI>
+                    <<<g2, CTHREADS, 0, stream>>>(M, N, K, 1.0f, A, B, 0.0f, ws,
+                                                  eps, 0, chunk);
+            else if (narrow)
                 gemm_mma<TA, TB, SBM, SBN, SBK, SWM, SWN, STHREADS, SMINB, SEPI>
                     <<<g2, STHREADS, 0, stream>>>(M, N, K, 1.0f, A, B, 0.0f, ws,
                                                   eps, 0, chunk);
@@ -1258,6 +1289,11 @@ void dispatch_epi(int M, int N, int K, float alpha, const float *A,
                                                   eps, 0, chunk);
             splitk_reduce_k<EPI><<<(unsigned)((total + 255) / 256), 256, 0, stream>>>(
                 C, ws, N, total, splits, alpha, beta, ep);
+        } else if (compact) {
+            dim3 cgrid(N / CBN, M / CBM);
+            gemm_mma<TA, TB, CBM, CBN, CBK, CWM, CWN, CTHREADS, CMINB, EPI>
+                <<<cgrid, CTHREADS, 0, stream>>>(M, N, K, alpha, A, B, beta, C,
+                                                 ep, 0, K);
         } else if (narrow) {
             dim3 sgrid(N / SBN, M / SBM);
             gemm_mma<TA, TB, SBM, SBN, SBK, SWM, SWN, STHREADS, SMINB, EPI>
@@ -1390,3 +1426,6 @@ int gemm_splitk() { return g_splitk_force; }
 
 void gemm_set_wide_warp(int mode) { g_wide_warp = mode; }
 int gemm_wide_warp() { return g_wide_warp; }
+
+void gemm_set_compact_block(int mode) { g_compact_block = mode; }
+int gemm_compact_block() { return g_compact_block; }

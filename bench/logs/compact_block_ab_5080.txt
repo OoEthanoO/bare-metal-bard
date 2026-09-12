@@ -1,0 +1,93 @@
+=== run 1 ===
+TENSOR-CORE path (TF32), tolerance 5e-3
+
+Block-tile A/B, TF32. GF/s.
+  default = device-derived 64x128 or 128x128 tile
+  compact = 64x64 block, four 32x32 warps, 128 threads
+            more blocks/warps, but 16 FLOP/B arithmetic intensity
+
+shape                  op      default    compact    delta
+--------------------------------------------------------------
+gpt: attn proj         NN        10709      11615    +8.5%
+gpt: attn proj         TN        10610      11540    +8.8%
+gpt: mlp up            NN        15038      13876    -7.7%
+gpt: mlp up            TN        14566      13556    -6.9%
+gpt: mlp down          NN        13810      12528    -9.3%
+gpt: mlp down          TN        13419      12279    -8.5%
+gpt: qkv proj          NN        14506      13507    -6.9%
+gpt: qkv proj          TN        14049      13250    -5.7%
+gpt: dW attnproj       NN        11356      11282    -0.7%
+gpt: dW attnproj       TN        11139      10832    -2.8%
+gpt: dW qkv            NN        13794      12913    -6.4%
+gpt: dW qkv            TN        13470      12631    -6.2%
+gpt: dW fc             NN        14074      13331    -5.3%
+gpt: dW fc             TN        13791      12939    -6.2%
+gpt: dW fcproj         NN        14057      13291    -5.4%
+gpt: dW fcproj         TN        13742      12950    -5.8%
+gpt: padded vocab head NN         6865       7677   +11.8%
+gpt: padded vocab head TN         6420       7419   +15.6%
+square (control)       NN        16338      14781    -9.5%
+square (control)       TN        15911      14458    -9.1%
+[clock] 1185-1192 MHz across 5 busy samples, target 1200 -- timings above are comparable.
+=== run 2 ===
+TENSOR-CORE path (TF32), tolerance 5e-3
+
+Block-tile A/B, TF32. GF/s.
+  default = device-derived 64x128 or 128x128 tile
+  compact = 64x64 block, four 32x32 warps, 128 threads
+            more blocks/warps, but 16 FLOP/B arithmetic intensity
+
+shape                  op      default    compact    delta
+--------------------------------------------------------------
+gpt: attn proj         NN        10767      11611    +7.8%
+gpt: attn proj         TN        10706      11640    +8.7%
+gpt: mlp up            NN        15035      13813    -8.1%
+gpt: mlp up            TN        14572      13574    -6.9%
+gpt: mlp down          NN        13854      12534    -9.5%
+gpt: mlp down          TN        13512      12278    -9.1%
+gpt: qkv proj          NN        14391      13495    -6.2%
+gpt: qkv proj          TN        13998      13307    -4.9%
+gpt: dW attnproj       NN        11282      11251    -0.3%
+gpt: dW attnproj       TN        11044      10844    -1.8%
+gpt: dW qkv            NN        13824      12937    -6.4%
+gpt: dW qkv            TN        13525      12646    -6.5%
+gpt: dW fc             NN        14095      13268    -5.9%
+gpt: dW fc             TN        13812      12973    -6.1%
+gpt: dW fcproj         NN        14057      13271    -5.6%
+gpt: dW fcproj         TN        13732      13010    -5.3%
+gpt: padded vocab head NN         6899       7668   +11.2%
+gpt: padded vocab head TN         6420       7384   +15.0%
+square (control)       NN        16322      14713    -9.9%
+square (control)       TN        15906      14450    -9.2%
+[clock] 1185-1192 MHz across 5 busy samples, target 1200 -- timings above are comparable.
+=== run 3 ===
+TENSOR-CORE path (TF32), tolerance 5e-3
+
+Block-tile A/B, TF32. GF/s.
+  default = device-derived 64x128 or 128x128 tile
+  compact = 64x64 block, four 32x32 warps, 128 threads
+            more blocks/warps, but 16 FLOP/B arithmetic intensity
+
+shape                  op      default    compact    delta
+--------------------------------------------------------------
+gpt: attn proj         NN        10749      11597    +7.9%
+gpt: attn proj         TN        10736      11516    +7.3%
+gpt: mlp up            NN        15002      13782    -8.1%
+gpt: mlp up            TN        14537      13566    -6.7%
+gpt: mlp down          NN        13879      12549    -9.6%
+gpt: mlp down          TN        13467      12277    -8.8%
+gpt: qkv proj          NN        14491      13451    -7.2%
+gpt: qkv proj          TN        14075      13254    -5.8%
+gpt: dW attnproj       NN        11346      11322    -0.2%
+gpt: dW attnproj       TN        11112      10847    -2.4%
+gpt: dW qkv            NN        13831      12907    -6.7%
+gpt: dW qkv            TN        13424      12548    -6.5%
+gpt: dW fc             NN        14088      13232    -6.1%
+gpt: dW fc             TN        13788      12951    -6.1%
+gpt: dW fcproj         NN        14141      13272    -6.1%
+gpt: dW fcproj         TN        13724      12889    -6.1%
+gpt: padded vocab head NN         6921       7557    +9.2%
+gpt: padded vocab head TN         6368       7384   +16.0%
+square (control)       NN        16343      14720    -9.9%
+square (control)       TN        15922      14439    -9.3%
+[clock] 1185-1192 MHz across 5 busy samples, target 1200 -- timings above are comparable.

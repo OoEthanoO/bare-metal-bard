@@ -327,6 +327,7 @@ int main(int argc, char **argv) {
     bool alloc_only = false;
     int nranks = 1;  // --gpus N: data-parallel replicas
     bool tf32 = false;  // --tf32: route the matmuls through the tensor cores
+    int compact_block = 0;  // 0 measured rule, -1 old tile, 1 force compact
     bool ddp_trace = false;  // --ddp-trace: per-rank host-side phase timing
 
     for (int i = 1; i < argc; ++i) {
@@ -349,6 +350,8 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--alloc-only")) alloc_only = true;
         else if (!strcmp(argv[i], "--gpus") && i + 1 < argc) nranks = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--tf32")) tf32 = true;
+        else if (!strcmp(argv[i], "--compact-block") && i + 1 < argc)
+            compact_block = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--ddp-trace")) ddp_trace = true;
         else if (!strcmp(argv[i], "--unfused")) use_flash = false;
         // Pin the fused-backward tile config, for A/B without a rebuild.
@@ -392,6 +395,7 @@ int main(int argc, char **argv) {
     }
     const int Bshard = B / nranks;
     gemm_set_tf32(tf32);
+    gemm_set_compact_block(compact_block);
     int ndev = 0;
     CUDA_CHECK(cudaGetDeviceCount(&ndev));
     if (ndev < 1) { fprintf(stderr, "no CUDA device\n"); return 1; }
@@ -428,6 +432,10 @@ int main(int argc, char **argv) {
     printf("model     %d layers, %d heads, %d embd, ctx %d, %s attention\n",
            n_layer, n_head, n_embd, T, use_flash ? "fused" : "unfused");
     printf("matmul    %s\n", tf32 ? "TF32 tensor cores" : "fp32");
+    if (tf32)
+        printf("gemm tile %s\n", compact_block < 0 ? "old/default forced"
+                             : compact_block > 0 ? "64x64 compact forced"
+                                                 : "measured shape rule");
     // Which backward tile a run used is part of what the run measured, so it
     // is printed rather than inferred -- the context-dependent rule means two
     // runs of the same binary can take different tiles.
@@ -704,7 +712,10 @@ int main(int argc, char **argv) {
         ema_comm = (step == 1) ? comm_ms : 0.9 * ema_comm + 0.1 * comm_ms;
 
         if (step % 10 == 0 || step == 1) {
-            printf("step %5d/%d  loss %.4f  lr %.2e  |g| %.3f  %6.1f ms  %7.0f tok/s  %5.0f GFLOP/s",
+            // Two decimals are intentional: the compact GEMM tile is worth
+            // ~0.15 ms on a 25 ms step, which the old one-decimal display
+            // quantised to either 0.0 or 0.1 ms depending on the run.
+            printf("step %5d/%d  loss %.4f  lr %.2e  |g| %.3f  %7.2f ms  %7.0f tok/s  %5.0f GFLOP/s",
                    step, steps, loss, lr_now, gnorm, ms,
                    tokens_per_step / (ms * 1e-3),
                    flops_per_step / (ms * 1e-3) / 1e9);
