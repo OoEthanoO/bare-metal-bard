@@ -1,0 +1,15 @@
+ddp       DDP_NO_P2P set: skipping peer setup; staging every transfer through host
+ddp       3 rank(s) on device(s) 0 0 0  [SIMULATED: one physical GPU]
+links     NO peer access -- every transfer staged through host memory
+DDP model check: TF32, global B=6, T=64, C=384, L=2, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+Scratch poisoning: fill model activation/gradient arenas with NaN before every step.
+step 1 loss full=4.2844038 shards=4.2844039 max_token_error=0.00e+00 gradient_budget=0.142
+       optimizer clipped norm=3.645297 clip=0.911324 state_budget=0.000
+step 2 loss full=4.2655797 shards=4.2655799 max_token_error=0.00e+00 gradient_budget=0.136
+       optimizer unclipped norm=3.624257 clip=7.248514 state_budget=0.000
+step 3 loss full=4.2670035 shards=4.2670035 max_token_error=0.00e+00 gradient_budget=0.144
+       optimizer clipped norm=3.565616 clip=0.891404 state_budget=0.013
+DDP MODEL CHECK PASSED
+[clock] no busy samples -- the command was too short to judge.
+[clock] Timings above are unverified.

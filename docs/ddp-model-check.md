@@ -12,6 +12,12 @@ attention paths under `--tf32`. A deterministic stream generates new inputs
 and next-token targets each step. No dataset, checkpoint or network access
 is needed. Parameters and optimizer moments persist for all three steps.
 
+`--production-shape` uses six layers, context 256 and eight sequences per
+rank, keeping width 384. This fixture reproduced the two-A40 failure after
+a GEMM predecessor on September 13. The [investigation record](a40-forward-investigation.md)
+links the raw logs and explains the new forward-only, in-process scratch
+poisoning, and failure-localization controls. The A40 issue remains open.
+
 ## What a passing check establishes
 
 1. A reference model processes the complete batch. Persistent rank workers

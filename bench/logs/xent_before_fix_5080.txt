@@ -1,0 +1,16 @@
+FAIL V=65 rep=2 row=5947 target=32 loss=2.50000000 expected=4.62291547 final_probability=0.00982411
+V=65 Vp=128 rows=16384 repeats=64 max_loss_error=2.12e+00 max_prob_error=5.81e-09 max_grad_error=3.73e-09 FAIL
+V=1 Vp=128 rows=4096 repeats=8 max_loss_error=0.00e+00 max_prob_error=0.00e+00 max_grad_error=0.00e+00 PASS
+V=31 Vp=128 rows=4096 repeats=8 max_loss_error=5.74e-07 max_prob_error=1.29e-08 max_grad_error=3.69e-09 PASS
+V=32 Vp=128 rows=4096 repeats=8 max_loss_error=6.87e-07 max_prob_error=8.94e-09 max_grad_error=4.84e-09 PASS
+V=33 Vp=128 rows=4096 repeats=8 max_loss_error=6.07e-07 max_prob_error=8.02e-09 max_grad_error=3.83e-09 PASS
+V=127 Vp=128 rows=4096 repeats=8 max_loss_error=5.43e-07 max_prob_error=1.81e-09 max_grad_error=3.42e-09 PASS
+FAIL V=128 rep=5 row=2920 target=104 loss=1.75000012 expected=4.53479624 final_probability=0.01072909
+V=128 Vp=128 rows=4096 repeats=8 max_loss_error=2.78e+00 max_prob_error=2.96e-09 max_grad_error=3.72e-09 FAIL
+FAIL V=129 rep=3 row=3653 target=41 loss=1.25000012 expected=4.04847864 final_probability=0.01744890
+V=129 Vp=256 rows=4096 repeats=8 max_loss_error=2.80e+00 max_prob_error=1.01e-09 max_grad_error=3.70e-09 FAIL
+FAIL V=257 rep=0 row=725 target=211 loss=0.25000000 expected=3.70391833 final_probability=0.02462684
+V=257 Vp=384 rows=4096 repeats=8 max_loss_error=3.45e+00 max_prob_error=9.41e-10 max_grad_error=3.62e-09 FAIL
+CROSS-ENTROPY CHECK FAILED
+[clock] no busy samples -- the command was too short to judge.
+[clock] Timings above are unverified.

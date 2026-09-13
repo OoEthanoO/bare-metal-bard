@@ -88,13 +88,80 @@ static void release_model(int device, GPT &g) {
     CUDA_CHECK(cudaFreeHost(g.h_targets));
 }
 
+// Poison the actual arenas after allocation, in this process. Scrubbing free
+// VRAM in a predecessor process does not guarantee these allocations reuse it.
+// 0xffffffff is a NaN float; a correct overwrite must not depend on its value.
+static void poison_scratch(GPT &g) {
+    CUDA_CHECK(cudaMemset(g.acts_mem, 0xff, g.num_acts * sizeof(float)));
+    CUDA_CHECK(cudaMemset(g.grads_act_mem, 0xff, g.num_grad_acts * sizeof(float)));
+    CUDA_CHECK(cudaMemset(g.grads_mem, 0xff, g.num_params * sizeof(float)));
+}
+
+// Read-only post-failure localization. Forward activations remain available
+// after backward; compare the corresponding contiguous batch shard, not the
+// entire reference arena (whose per-layer strides include all ranks).
+static void trace_forward(const GPT &ref, const GPT &shard, int device, int rank) {
+    const size_t n = (size_t)shard.B * shard.T, rn = (size_t)ref.B * ref.T;
+    const int C = ref.config.n_embd, L = ref.config.n_layer;
+    auto tensor = [&](const char *name, const float *a, const float *b,
+                      size_t count, int layer) {
+        std::vector<float> want(count), got(count);
+        readback(0, a, want); readback(device, b, got);
+        size_t unequal = 0, nonfinite = 0, index = 0;
+        double error = 0;
+        for (size_t i = 0; i < count; ++i) {
+            nonfinite += !std::isfinite(want[i]) || !std::isfinite(got[i]);
+            unequal += want[i] != got[i];
+            const double e = fabs((double)want[i] - got[i]);
+            if (e > error) { error = e; index = i; }
+        }
+        printf("forward trace rank=%d layer=%d %-12s unequal=%zu/%zu nonfinite=%zu "
+               "max_abs=%.3e index=%zu ref=%.7g got=%.7g\n",
+               rank, layer, name, unequal, count, nonfinite, error, index,
+               want[index], got[index]);
+    };
+    tensor("parameters", ref.params_mem, shard.params_mem, ref.num_params, -1);
+    tensor("encoded", ref.acts.encoded + rank * n * C, shard.acts.encoded, n * C, -1);
+    for (int l = 0; l < L; ++l) {
+        auto stage = [&](const char *name, const float *a, const float *b, size_t width) {
+            tensor(name, a + ((size_t)l * rn + rank * n) * width,
+                   b + (size_t)l * n * width, n * width, l);
+        };
+        stage("ln1", ref.acts.ln1, shard.acts.ln1, C);
+        stage("ln1_mean", ref.acts.ln1_mean, shard.acts.ln1_mean, 1);
+        stage("ln1_rstd", ref.acts.ln1_rstd, shard.acts.ln1_rstd, 1);
+        stage("qkv", ref.acts.qkv, shard.acts.qkv, 3 * C);
+        stage("lse", ref.acts.lse, shard.acts.lse, ref.config.n_head);
+        stage("atty", ref.acts.atty, shard.acts.atty, C);
+        stage("residual2", ref.acts.residual2, shard.acts.residual2, C);
+        stage("ln2", ref.acts.ln2, shard.acts.ln2, C);
+        stage("ln2_mean", ref.acts.ln2_mean, shard.acts.ln2_mean, 1);
+        stage("ln2_rstd", ref.acts.ln2_rstd, shard.acts.ln2_rstd, 1);
+        stage("fch", ref.acts.fch, shard.acts.fch, 4 * C);
+        stage("fch_gelu", ref.acts.fch_gelu, shard.acts.fch_gelu, 4 * C);
+        stage("residual3", ref.acts.residual3, shard.acts.residual3, C);
+    }
+    tensor("lnf", ref.acts.lnf + rank * n * C, shard.acts.lnf, n * C, L);
+    tensor("lnf_mean", ref.acts.lnf_mean + rank * n, shard.acts.lnf_mean, n, L);
+    tensor("lnf_rstd", ref.acts.lnf_rstd + rank * n, shard.acts.lnf_rstd, n, L);
+    tensor("logits", ref.acts.logits + rank * n * ref.config.padded_vocab,
+           shard.acts.logits, n * ref.config.padded_vocab, L);
+    tensor("probs", ref.acts.probs + rank * n * ref.config.padded_vocab,
+           shard.acts.probs, n * ref.config.padded_vocab, L);
+    tensor("losses", ref.acts.losses + rank * n, shard.acts.losses, n, L);
+}
+
 int main(int argc, char **argv) {
     int nranks = 2, steps = 3;
-    bool tf32 = false, require_devices = false, inject = false;
+    bool tf32 = false, require_devices = false, inject = false, production = false;
+    bool forward_only = false, poison = false;
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--tf32")) tf32 = true;
         else if (!strcmp(argv[i], "--require-multi-gpu")) require_devices = true;
         else if (!strcmp(argv[i], "--inject-gradient-error")) inject = true;
+        else if (!strcmp(argv[i], "--production-shape")) production = true;
+        else if (!strcmp(argv[i], "--forward-only")) forward_only = true;
+        else if (!strcmp(argv[i], "--poison-scratch")) poison = true;
         else if ((!strcmp(argv[i], "--ranks") || !strcmp(argv[i], "--steps")) && i + 1 < argc) {
             const bool rank_arg = !strcmp(argv[i], "--ranks");
             char *end = nullptr;
@@ -106,9 +173,14 @@ int main(int argc, char **argv) {
             if (rank_arg) nranks = (int)n; else steps = (int)n;
         } else {
             fprintf(stderr, "usage: test_ddp_gpt [--tf32] [--ranks 1..8] [--steps 1..20]\n"
-                            "                    [--require-multi-gpu] [--inject-gradient-error]\n");
+                            "                    [--require-multi-gpu] [--inject-gradient-error]\n"
+                            "                    [--production-shape] [--forward-only] [--poison-scratch]\n");
             return 2;
         }
+    }
+    if (forward_only && inject) {
+        fprintf(stderr, "--inject-gradient-error requires backward; omit --forward-only\n");
+        return 2;
     }
     int ndevices = 0;
     CUDA_CHECK(cudaGetDeviceCount(&ndevices));
@@ -121,7 +193,9 @@ int main(int argc, char **argv) {
         return 2;
     }
     gemm_set_tf32(tf32);
-    constexpr int SHARD_B = 2, T = 64, C = 384, L = 2, V = 65, VP = 128;
+    constexpr int C = 384, V = 65, VP = 128;
+    const int SHARD_B = production ? 8 : 2, T = production ? 256 : 64;
+    const int L = production ? 6 : 2;
     const int shard_tokens = SHARD_B * T, tokens = nranks * shard_tokens;
     std::vector<int> devices(nranks);
     std::vector<GPT> replicas(nranks);
@@ -145,6 +219,8 @@ int main(int argc, char **argv) {
     printf("DDP model check: %s, global B=%d, T=%d, C=%d, L=%d, steps=%d\n",
            tf32 ? "TF32" : "FP32", reference.B, T, C, L, steps);
     printf("Checks are numerical correctness only; repeated devices are not a scaling result.\n");
+    if (forward_only) printf("Forward-only isolation: no backward, all-reduce or optimizer calls.\n");
+    if (poison) printf("Scratch poisoning: fill model activation/gradient arenas with NaN before every step.\n");
     RankPool pool;
     pool.start(nranks);
     const size_t np = reference.num_params;
@@ -165,18 +241,20 @@ int main(int argc, char **argv) {
             }
         }
         CUDA_CHECK(cudaSetDevice(0));
+        if (poison) poison_scratch(reference);
         const float full_loss = gpt_forward(reference, x.data(), y.data());
-        gpt_backward(reference);
+        if (!forward_only) gpt_backward(reference);
         CUDA_CHECK(cudaDeviceSynchronize());
-        readback(0, reference.grads_mem, expected);
+        if (!forward_only) readback(0, reference.grads_mem, expected);
         readback(0, reference.acts.losses, ref_losses);
         passed &= check_loss_mean(ref_losses, full_loss, -1);
 
         pool.run([&](int r) {
             CUDA_CHECK(cudaSetDevice(devices[r]));
+            if (poison) poison_scratch(replicas[r]);
             losses[r] = gpt_forward(replicas[r], x.data() + r * shard_tokens,
                                     y.data() + r * shard_tokens);
-            gpt_backward(replicas[r]);
+            if (!forward_only) gpt_backward(replicas[r]);
             CUDA_CHECK(cudaDeviceSynchronize());
         });
         double mean_loss = 0.0, worst_loss = 0.0, grad_budget = 0.0;
@@ -188,19 +266,32 @@ int main(int argc, char **argv) {
                                   shard_tokens * sizeof(int), cudaMemcpyDeviceToHost));
             readback(devices[r], replicas[r].acts.losses, shard_losses);
             passed &= check_loss_mean(shard_losses, losses[r], r);
+            int bad_tokens = 0;
             for (int i = 0; i < shard_tokens; ++i) {
                 const int idx = r * shard_tokens + i;
                 const double e = fabs((double)ref_losses[idx] - shard_losses[i]);
                 worst_loss = std::max(worst_loss, e);
                 if (!std::isfinite(shard_losses[i]) || !std::isfinite(ref_losses[idx]) ||
                     e > (tf32 ? 2e-3 : 2e-5) || device_x[i] != x[idx] || device_y[i] != y[idx]) {
-                    printf("FAIL rank=%d token=%d loss/input mismatch\n", r, i);
+                    if (bad_tokens++ == 0)
+                        printf("FAIL rank=%d token=%d loss full=%.7f shard=%.7f "
+                               "input=%d/%d target=%d/%d\n", r, i,
+                               ref_losses[idx], shard_losses[i], device_x[i], x[idx],
+                               device_y[i], y[idx]);
                     passed = false;
-                    break;
                 }
             }
+            if (bad_tokens) printf("FAIL rank=%d mismatched tokens=%d/%d\n", r, bad_tokens, shard_tokens);
             mean_loss += losses[r] / nranks;
             gradients[r] = replicas[r].grads_mem;
+        }
+        if (forward_only) {
+            printf("step %d loss full=%.7f shards=%.7f max_token_error=%.2e\n",
+                   step, full_loss, mean_loss, worst_loss);
+            if (!passed)
+                for (int r = 0; r < nranks; ++r)
+                    trace_forward(reference, replicas[r], devices[r], r);
+            continue;
         }
         if (inject && step == 1) {
             CUDA_CHECK(cudaSetDevice(devices[0]));
@@ -223,7 +314,11 @@ int main(int argc, char **argv) {
         }
         printf("step %d loss full=%.7f shards=%.7f max_token_error=%.2e gradient_budget=%.3f\n",
                step, full_loss, mean_loss, worst_loss, grad_budget);
-        if (!passed) break;
+        if (!passed) {
+            for (int r = 0; r < nranks; ++r)
+                trace_forward(reference, replicas[r], devices[r], r);
+            break;
+        }
 
         // Check optimizer scaling independently of the tiny reduction-order
         // differences just measured. The reference consumes a MEAN, while

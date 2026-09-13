@@ -1,0 +1,12 @@
+ddp       2 rank(s) on device(s) 0 0  [SIMULATED: one physical GPU]
+links     peer-to-peer enabled on every pair
+DDP model check: TF32, global B=16, T=256, C=384, L=6, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+Forward-only isolation: no backward, all-reduce or optimizer calls.
+Scratch poisoning: fill model activation/gradient arenas with NaN before every step.
+step 1 loss full=4.2680435 shards=4.2680438 max_token_error=0.00e+00
+step 2 loss full=4.2679253 shards=4.2679253 max_token_error=0.00e+00
+step 3 loss full=4.2688060 shards=4.2688062 max_token_error=0.00e+00
+DDP MODEL CHECK PASSED
+[clock] no busy samples -- the command was too short to judge.
+[clock] Timings above are unverified.

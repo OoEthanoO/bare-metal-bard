@@ -1,0 +1,94 @@
+nvcc  -arch=sm_86 -DBMB_TF32=1 -O3 -lineinfo -std=c++17 -Xcompiler -pthread -Xcompiler -Wall -Xcompiler -Wno-unused-function src/train_gpt.cu src/gpt.cu src/gemm.cu src/bgemm.cu src/nn.cu src/attention.cu src/flash.cu src/ddp.cu -o bench/train_gpt
+nvcc  -arch=sm_86 -DBMB_TF32=1 -O3 -lineinfo -std=c++17 -Xcompiler -pthread -Xcompiler -Wall -Xcompiler -Wno-unused-function tools/test_ddp_gpt.cu src/gpt.cu src/gemm.cu src/bgemm.cu src/nn.cu src/attention.cu src/flash.cu src/ddp.cu -o bench/test_ddp_gpt
+nvcc  -arch=sm_86 -DBMB_TF32=1 -O3 -lineinfo -std=c++17 -Xcompiler -pthread -Xcompiler -Wall -Xcompiler -Wno-unused-function tools/test_ddp.cu src/ddp.cu -o bench/test_ddp
+nvcc  -arch=sm_86 -DBMB_TF32=1 -O3 -lineinfo -std=c++17 -Xcompiler -pthread -Xcompiler -Wall -Xcompiler -Wno-unused-function tools/test_flash.cu src/flash.cu src/attention.cu src/bgemm.cu src/gemm.cu -o bench/test_flash
+nvcc  -arch=sm_86 -DBMB_TF32=1 -O3 -lineinfo -std=c++17 -Xcompiler -pthread -Xcompiler -Wall -Xcompiler -Wno-unused-function tools/test_grad.cu src/gpt.cu src/gemm.cu src/bgemm.cu src/nn.cu src/attention.cu src/flash.cu src/ddp.cu -o bench/test_grad
+src/gemm.cu(289): warning #177-D: variable "<unnamed>::TC_M" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+src/gemm.cu(289): warning #177-D: variable "<unnamed>::TC_N" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                           ^
+
+src/gemm.cu(289): warning #177-D: variable "<unnamed>::TC_K" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                                      ^
+
+src/gemm.cu(1019): warning #177-D: variable "<unnamed>::NARROW_TILE_AI" was declared but never referenced
+  constexpr double NARROW_TILE_AI = (double)SBM * SBN / (2.0 * (SBM + SBN));
+                   ^
+
+src/gemm.cu(1060): warning #177-D: function "<unnamed>::epilogue_only_k" was declared but never referenced
+  __attribute__((global)) void epilogue_only_k(float *C, GemmEpilogue ep, int N, size_t total) {
+                               ^
+
+src/gemm.cu(289): warning #177-D: variable "<unnamed>::TC_M" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+src/gemm.cu(289): warning #177-D: variable "<unnamed>::TC_N" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                           ^
+
+src/gemm.cu(289): warning #177-D: variable "<unnamed>::TC_K" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                                      ^
+
+src/gemm.cu(1019): warning #177-D: variable "<unnamed>::NARROW_TILE_AI" was declared but never referenced
+  constexpr double NARROW_TILE_AI = (double)SBM * SBN / (2.0 * (SBM + SBN));
+                   ^
+
+src/gemm.cu(1060): warning #177-D: function "<unnamed>::epilogue_only_k" was declared but never referenced
+  __attribute__((global)) void epilogue_only_k(float *C, GemmEpilogue ep, int N, size_t total) {
+                               ^
+
+src/gemm.cu(289): warning #177-D: variable "<unnamed>::TC_M" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+src/gemm.cu(289): warning #177-D: variable "<unnamed>::TC_N" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                           ^
+
+src/gemm.cu(289): warning #177-D: variable "<unnamed>::TC_K" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                                      ^
+
+src/gemm.cu(1019): warning #177-D: variable "<unnamed>::NARROW_TILE_AI" was declared but never referenced
+  constexpr double NARROW_TILE_AI = (double)SBM * SBN / (2.0 * (SBM + SBN));
+                   ^
+
+src/gemm.cu(1060): warning #177-D: function "<unnamed>::epilogue_only_k" was declared but never referenced
+  __attribute__((global)) void epilogue_only_k(float *C, GemmEpilogue ep, int N, size_t total) {
+                               ^
+
+src/gemm.cu(289): warning #177-D: variable "<unnamed>::TC_M" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+src/gemm.cu(289): warning #177-D: variable "<unnamed>::TC_N" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                           ^
+
+src/gemm.cu(289): warning #177-D: variable "<unnamed>::TC_K" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                                      ^
+
+src/gemm.cu(1019): warning #177-D: variable "<unnamed>::NARROW_TILE_AI" was declared but never referenced
+  constexpr double NARROW_TILE_AI = (double)SBM * SBN / (2.0 * (SBM + SBN));
+                   ^
+
+src/gemm.cu(1060): warning #177-D: function "<unnamed>::epilogue_only_k" was declared but never referenced
+  __attribute__((global)) void epilogue_only_k(float *C, GemmEpilogue ep, int N, size_t total) {
+                               ^
+
+nvcc  -arch=sm_86 -DBMB_TF32=1 -O3 -lineinfo -std=c++17 -Xcompiler -pthread -Xcompiler -Wall -Xcompiler -Wno-unused-function src/bench.cu src/registry.cu src/kernels/k01_naive.cu src/kernels/k02_coalesced.cu src/kernels/k03_smem.cu src/kernels/k04_tile1d.cu src/kernels/k05_tile2d.cu src/kernels/k06_vectorized.cu src/kernels/k07_warptile.cu src/kernels/k08_doublebuffer.cu src/kernels/k09_tensorcore.cu src/kernels/k10_mma.cu src/kernels/k11_cpasync.cu -o bench/sgemm -lcublas

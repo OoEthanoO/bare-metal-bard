@@ -1,0 +1,27 @@
+ddp       WARNING: peer 0->1 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+ddp       2 rank(s) on device(s) 0 1
+links     NO peer access -- every transfer staged through host memory
+DDP model check: TF32, global B=16, T=256, C=384, L=6, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+FAIL rank=0 token=1 loss/input mismatch
+FAIL rank=1 token=1 loss/input mismatch
+FAIL rank=0 mean gradient/wte index=949 abs_err=2.212e-01 limit=1.480e-03 finite=1
+FAIL rank=0 mean gradient/wpe index=75061 abs_err=4.336e-01 limit=2.169e-03 finite=1
+FAIL rank=0 mean gradient/ln1w index=365 abs_err=4.862e-01 limit=2.406e-03 finite=1
+FAIL rank=0 mean gradient/ln1b index=230 abs_err=9.899e-02 limit=1.678e-03 finite=1
+FAIL rank=0 mean gradient/qkvw index=257345 abs_err=7.706e-01 limit=3.587e-03 finite=1
+FAIL rank=0 mean gradient/qkvb index=951 abs_err=1.718e-03 limit=3.857e-05 finite=1
+FAIL rank=0 mean gradient/attprojw index=35236 abs_err=1.413e-02 limit=9.738e-05 finite=1
+FAIL rank=0 mean gradient/attprojb index=340 abs_err=1.848e-02 limit=3.431e-04 finite=1
+FAIL rank=0 mean gradient/ln2w index=343 abs_err=4.661e-04 limit=4.442e-06 finite=1
+FAIL rank=0 mean gradient/ln2b index=150 abs_err=4.096e-04 limit=7.987e-06 finite=1
+FAIL rank=0 mean gradient/fcw index=368601 abs_err=1.125e-03 limit=1.570e-05 finite=1
+FAIL rank=0 mean gradient/fcb index=1435 abs_err=6.393e-04 limit=1.898e-05 finite=1
+FAIL rank=0 mean gradient/fcprojw index=424467 abs_err=4.238e-03 limit=5.279e-05 finite=1
+FAIL rank=0 mean gradient/fcprojb index=340 abs_err=9.645e-03 limit=2.013e-04 finite=1
+FAIL rank=0 mean gradient/lnfw index=133 abs_err=3.822e-04 limit=1.188e-05 finite=1
+FAIL rank=0 mean gradient/lnfb index=255 abs_err=2.796e-04 limit=9.125e-06 finite=1
+step 1 loss full=4.2648859 shards=4.2612445 max_token_error=1.54e-01 gradient_budget=214.871
+DDP MODEL CHECK FAILED

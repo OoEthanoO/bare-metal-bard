@@ -7,6 +7,7 @@ bench/train_gpt
 bench/test_flash
 bench/test_ddp
 bench/test_ddp_gpt
+bench/test_xent
 bench/probe
 *.o
 # MSVC leaves an import library and export table beside every .exe
@@ -32,3 +33,6 @@ site/next-env.d.ts
 site/tsconfig.tsbuildinfo
 
 __pycache__/
+
+# Local cloud credentials, CLI and ephemeral provisioning state. Never publish.
+.runpod-local/

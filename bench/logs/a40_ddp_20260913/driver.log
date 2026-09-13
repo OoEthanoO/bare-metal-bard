@@ -1,0 +1,561 @@
+
+=== machine ===
+Sun Sep 13 12:52:40 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 570.195.03             Driver Version: 570.195.03     CUDA Version: 12.8     |
+|-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA A40                     On  |   00000000:52:00.0 Off |                    0 |
+|  0%   25C    P8             31W /  300W |       0MiB /  46068MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+|   1  NVIDIA A40                     On  |   00000000:D6:00.0 Off |                    0 |
+|  0%   28C    P8             33W /  300W |       0MiB /  46068MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+                                                                                         
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+
+=== topology ===
+	[4mGPU0	GPU1	NIC0	CPU Affinity	NUMA Affinity	GPU NUMA ID[0m
+GPU0	 X 	SYS	SYS	0-23,48-71	0		N/A
+GPU1	SYS	 X 	NODE	24-47,72-95	1		N/A
+NIC0	SYS	NODE	 X 				
+
+Legend:
+
+  X    = Self
+  SYS  = Connection traversing PCIe as well as the SMP interconnect between NUMA nodes (e.g., QPI/UPI)
+  NODE = Connection traversing PCIe as well as the interconnect between PCIe Host Bridges within a NUMA node
+  PHB  = Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)
+  PXB  = Connection traversing multiple PCIe bridges (without traversing the PCIe Host Bridge)
+  PIX  = Connection traversing at most a single PCIe bridge
+  NV#  = Connection traversing a bonded set of # NVLinks
+
+NIC Legend:
+
+  NIC0: mlx5_bond_0
+
+
+=== toolkit ===
+nvcc: NVIDIA (R) Cuda compiler driver
+Copyright (c) 2005-2024 NVIDIA Corporation
+Built on Tue_Oct_29_23:50:19_PDT_2024
+Cuda compilation tools, release 12.6, V12.6.85
+Build cuda_12.6.r12.6/compiler.35059454_0
+
+=== build ===
+nvcc  -arch=sm_86 -DBMB_TF32=1 -O3 -lineinfo -std=c++17 -Xcompiler -pthread -Xcompiler -Wall -Xcompiler -Wno-unused-function src/train_gpt.cu src/gpt.cu src/gemm.cu src/bgemm.cu src/nn.cu src/attention.cu src/flash.cu src/ddp.cu -o bench/train_gpt
+nvcc  -arch=sm_86 -DBMB_TF32=1 -O3 -lineinfo -std=c++17 -Xcompiler -pthread -Xcompiler -Wall -Xcompiler -Wno-unused-function tools/test_ddp_gpt.cu src/gpt.cu src/gemm.cu src/bgemm.cu src/nn.cu src/attention.cu src/flash.cu src/ddp.cu -o bench/test_ddp_gpt
+nvcc  -arch=sm_86 -DBMB_TF32=1 -O3 -lineinfo -std=c++17 -Xcompiler -pthread -Xcompiler -Wall -Xcompiler -Wno-unused-function tools/test_ddp.cu src/ddp.cu -o bench/test_ddp
+nvcc  -arch=sm_86 -DBMB_TF32=1 -O3 -lineinfo -std=c++17 -Xcompiler -pthread -Xcompiler -Wall -Xcompiler -Wno-unused-function tools/test_flash.cu src/flash.cu src/attention.cu src/bgemm.cu src/gemm.cu -o bench/test_flash
+nvcc  -arch=sm_86 -DBMB_TF32=1 -O3 -lineinfo -std=c++17 -Xcompiler -pthread -Xcompiler -Wall -Xcompiler -Wno-unused-function tools/test_grad.cu src/gpt.cu src/gemm.cu src/bgemm.cu src/nn.cu src/attention.cu src/flash.cu src/ddp.cu -o bench/test_grad
+src/gemm.cu(289): warning #177-D: variable "<unnamed>::TC_M" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+src/gemm.cu(289): warning #177-D: variable "<unnamed>::TC_N" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                           ^
+
+src/gemm.cu(289): warning #177-D: variable "<unnamed>::TC_K" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                                      ^
+
+src/gemm.cu(1019): warning #177-D: variable "<unnamed>::NARROW_TILE_AI" was declared but never referenced
+  constexpr double NARROW_TILE_AI = (double)SBM * SBN / (2.0 * (SBM + SBN));
+                   ^
+
+src/gemm.cu(1060): warning #177-D: function "<unnamed>::epilogue_only_k" was declared but never referenced
+  __attribute__((global)) void epilogue_only_k(float *C, GemmEpilogue ep, int N, size_t total) {
+                               ^
+
+src/gemm.cu(289): warning #177-D: variable "<unnamed>::TC_M" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+src/gemm.cu(289): warning #177-D: variable "<unnamed>::TC_N" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                           ^
+
+src/gemm.cu(289): warning #177-D: variable "<unnamed>::TC_K" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                                      ^
+
+src/gemm.cu(1019): warning #177-D: variable "<unnamed>::NARROW_TILE_AI" was declared but never referenced
+  constexpr double NARROW_TILE_AI = (double)SBM * SBN / (2.0 * (SBM + SBN));
+                   ^
+
+src/gemm.cu(1060): warning #177-D: function "<unnamed>::epilogue_only_k" was declared but never referenced
+  __attribute__((global)) void epilogue_only_k(float *C, GemmEpilogue ep, int N, size_t total) {
+                               ^
+
+src/gemm.cu(289): warning #177-D: variable "<unnamed>::TC_M" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+src/gemm.cu(289): warning #177-D: variable "<unnamed>::TC_N" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                           ^
+
+src/gemm.cu(289): warning #177-D: variable "<unnamed>::TC_K" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                                      ^
+
+src/gemm.cu(1019): warning #177-D: variable "<unnamed>::NARROW_TILE_AI" was declared but never referenced
+  constexpr double NARROW_TILE_AI = (double)SBM * SBN / (2.0 * (SBM + SBN));
+                   ^
+
+src/gemm.cu(1060): warning #177-D: function "<unnamed>::epilogue_only_k" was declared but never referenced
+  __attribute__((global)) void epilogue_only_k(float *C, GemmEpilogue ep, int N, size_t total) {
+                               ^
+
+src/gemm.cu(289): warning #177-D: variable "<unnamed>::TC_M" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+src/gemm.cu(289): warning #177-D: variable "<unnamed>::TC_N" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                           ^
+
+src/gemm.cu(289): warning #177-D: variable "<unnamed>::TC_K" was declared but never referenced
+  constexpr int TC_M = 16, TC_N = 16, TC_K = 8;
+                                      ^
+
+src/gemm.cu(1019): warning #177-D: variable "<unnamed>::NARROW_TILE_AI" was declared but never referenced
+  constexpr double NARROW_TILE_AI = (double)SBM * SBN / (2.0 * (SBM + SBN));
+                   ^
+
+src/gemm.cu(1060): warning #177-D: function "<unnamed>::epilogue_only_k" was declared but never referenced
+  __attribute__((global)) void epilogue_only_k(float *C, GemmEpilogue ep, int N, size_t total) {
+                               ^
+
+nvcc  -arch=sm_86 -DBMB_TF32=1 -O3 -lineinfo -std=c++17 -Xcompiler -pthread -Xcompiler -Wall -Xcompiler -Wno-unused-function src/bench.cu src/registry.cu src/kernels/k01_naive.cu src/kernels/k02_coalesced.cu src/kernels/k03_smem.cu src/kernels/k04_tile1d.cu src/kernels/k05_tile2d.cu src/kernels/k06_vectorized.cu src/kernels/k07_warptile.cu src/kernels/k08_doublebuffer.cu src/kernels/k09_tensorcore.cu src/kernels/k10_mma.cu src/kernels/k11_cpasync.cu -o bench/sgemm -lcublas
+
+=== attention ===
+B=16 T=256 C=384 NH=6 (hs=64)
+
+impl                     best ms    med ms    GFLOP/s vs unfused     norm err
+unfused (3 kernels)        0.429     0.432     1884.7      1.00x            -
+br64 bc64 t128 4x8         0.181     0.182     4456.5      2.36x     2.09e-07 ok
+br64 bc32 t128 4x4         0.134     0.137     6031.1      3.20x     2.09e-07 ok
+br64 bc64 t256 4x4         0.140     0.141     5774.7      3.06x     2.09e-07 ok
+br128 bc32 t256 4x4        0.174     0.174     4657.0      2.47x     2.09e-07 ok
+br32 bc32 t64 4x4          0.158     0.159     5118.3      2.72x     2.09e-07 ok
+mma br64 bc32 t128         0.081     0.085     9997.7      5.30x     3.76e-04 ok
+mma br64 bc64 t128         0.080     0.082    10065.4      5.34x     3.76e-04 ok
+mma br128 bc32 t256        0.080     0.080    10142.2      5.38x     3.76e-04 ok
+mma br32 bc32 t64          0.123     0.125     6546.8      3.47x     3.76e-04 ok
+
+backward                 best ms    med ms    GFLOP/s vs unfused     dq err     dk err     dv err
+unfused (7 kernels)        0.726     0.730     3897.8      1.00x
+br64 bc32 t128 kv4x4 q8x4     0.597     0.598     4740.7      1.22x   3.00e-07   4.19e-07   3.26e-07 ok
+br64 bc32 t128 kv4x4 q4x8     0.664     0.665     4259.6      1.09x   3.00e-07   4.19e-07   3.26e-07 ok
+br32 bc32 t64  kv4x8 q4x8     0.701     0.714     4035.6      1.04x   3.00e-07   4.19e-07   3.26e-07 ok
+br32 bc32 t64  kv8x4 q8x4     0.562     0.570     5035.6      1.29x   3.00e-07   4.19e-07   3.26e-07 ok
+br32 bc32 t64  kv4x4 q4x4         - (not valid for hs=64)
+br32 bc32 t128 kv4x4 q4x4     0.544     0.557     5204.2      1.34x   3.00e-07   4.19e-07   3.26e-07 ok
+br32 bc64 t128 kv8x4 q4x4     0.684     0.686     4135.1      1.06x   3.00e-07   4.19e-07   3.26e-07 ok
+br64 bc32 t64  8x4 kv8x4 q8x8     0.854     0.855     3312.9      0.85x   3.00e-07   4.19e-07   3.26e-07 ok
+br32 bc64 t128 kv8x4 q4x4 c16     0.666     0.679     4249.9      1.09x   3.00e-07   4.19e-07   3.26e-07 ok
+br32 bc64 t128 kv8x4 q4x4 c32     0.682     0.685     4147.7      1.06x   3.00e-07   4.19e-07   3.26e-07 ok
+br32 bc32 t128 kv4x4 q4x4 c16     0.571     0.585     4953.8      1.27x   3.00e-07   4.19e-07   3.26e-07 ok
+br32 bc32 t128 kv4x4 q4x4 c32     0.569     0.580     4974.9      1.28x   3.00e-07   4.19e-07   3.26e-07 ok
+br32 bc64 t128 kv8x4 q4x4 c8     0.680     0.698     4160.2      1.07x   3.00e-07   4.19e-07   3.26e-07 ok
+br64 bc32 t128 mma-q       0.490     0.492     5769.6      1.48x   5.46e-04   4.19e-07   3.26e-07 ok
+br32 bc32 t64  mma-q       0.586     0.597     4824.6      1.24x   5.46e-04   4.19e-07   3.26e-07 ok
+br32 bc64 t128 c8 mma-q     0.554     0.568     5111.8      1.31x   5.46e-04   4.19e-07   3.26e-07 ok
+br32 bc32 t128 mma-q       0.406     0.412     6966.4      1.79x   5.46e-04   4.19e-07   3.26e-07 ok
+br32 bc32 t128 c16 mma-q     0.432     0.444     6547.0      1.68x   5.46e-04   4.19e-07   3.26e-07 ok
+br32 bc32 mma-q mma-kv w2     0.283     0.287     9991.5      2.56x   5.46e-04   6.01e-04   3.53e-04 ok
+br32 bc32 mma-kv only w2     0.416     0.430     6798.7      1.74x   3.00e-07   6.01e-04   3.53e-04 ok
+br32 bc32 mma-q mma-kv w1     0.408     0.411     6930.4      1.78x   5.46e-04   6.01e-04   3.54e-04 ok
+br32 bc32 mma-kv only w1         - (not valid for hs=64)
+
+per layer, per forward pass:
+  score matrix (B,NH,T,T)       25.2 MB   written once, read twice
+  permuted qkvr (4,B,NH,T,hs)   25.2 MB   written once, read twice
+  fused saves                   50.3 MB of resident activation memory
+  lse kept instead             0.098 MB
+
+default forward + backward at the requested shape:
+  B=16  T=256   C=384  NH=6  (hs=64)   out 2.24e-07   dq 3.20e-07   dk 4.55e-07   dv 3.09e-07  ok
+
+ragged shapes (context does not divide the tile):
+  B=3   T=100   C=384  NH=6  (hs=64)   out 1.79e-07   dq 7.19e-07   dk 6.31e-07   dv 2.15e-07  ok
+  B=2   T=33    C=384  NH=6  (hs=64)   out 1.19e-07   dq 2.70e-07   dk 2.64e-07   dv 2.56e-07  ok
+  B=1   T=1     C=384  NH=6  (hs=64)   out 0.00e+00   dq 3.51e-08   dk 3.53e-08   dv 0.00e+00  ok
+  B=2   T=129   C=256  NH=8  (hs=32)   out 1.79e-07   dq 2.11e-07   dk 6.69e-07   dv 2.97e-07  ok
+  B=5   T=200   C=128  NH=4  (hs=32)   out 1.49e-07   dq 1.71e-07   dk 6.78e-07   dv 3.12e-07  ok
+
+fastest config: mma br128 bc32 t256 (0.080 ms)
+
+=== gradients ===
+gradient check: B=4 T=64 C=128 L=2 NH=4 V=65(->128)  eps=1e-02
+loss at theta = 4.230322   (ln(V) = 4.174387)
+
+tensor              n       analytic        numeric    rel err  
+---------------------------------------------------------------------------
+wte             16384   8.645445e-01   8.645300e-01   1.69e-05  ok
+wpe              8192   4.968724e-01   4.968572e-01   3.05e-05  ok
+ln1w              256   5.084888e-03   5.084649e-03   4.69e-05  ok
+ln1b              256   1.378487e-02   1.378488e-02   6.26e-07  ok
+qkvw            98304   2.373947e-01   2.373693e-01   1.07e-04  ok
+qkvb              768   6.441922e-02   6.441684e-02   3.71e-05  ok
+attprojw        32768   4.904835e-01   4.902651e-01   4.45e-04  ok
+attprojb          256   6.102864e-01   6.090487e-01   2.03e-03  ok
+ln2w              256   1.176736e-02   1.176735e-02   7.83e-07  ok
+ln2b              256   1.205508e-02   1.205513e-02   4.65e-06  ok
+fcw            131072   6.090357e-01   6.090216e-01   2.31e-05  ok
+fcb              1024   5.492948e-02   5.492973e-02   4.60e-06  ok
+fcprojw        131072   1.196840e+00   1.196720e+00   1.00e-04  ok
+fcprojb           256   4.737174e-01   4.733666e-01   7.41e-04  ok
+lnfw              128   1.551590e-02   1.551514e-02   4.93e-05  ok
+lnfb              128   1.304732e-02   1.304736e-02   3.49e-06  ok
+---------------------------------------------------------------------------
+ALL            421376   1.923418e+00   1.921363e+00   1.07e-03  ok
+
+gradient check passed (16 checked, 0 failures)
+
+=== model_fp32 ===
+ddp       WARNING: peer 0->1 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+ddp       2 rank(s) on device(s) 0 1
+links     NO peer access -- every transfer staged through host memory
+DDP model check: FP32, global B=4, T=64, C=384, L=2, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+step 1 loss full=4.2799654 shards=4.2799654 max_token_error=0.00e+00 gradient_budget=0.006
+       optimizer clipped norm=4.317203 clip=1.079301 state_budget=0.000
+step 2 loss full=4.2546902 shards=4.2546902 max_token_error=0.00e+00 gradient_budget=0.006
+       optimizer unclipped norm=4.208363 clip=8.416725 state_budget=0.000
+step 3 loss full=4.2934465 shards=4.2934463 max_token_error=0.00e+00 gradient_budget=0.007
+       optimizer clipped norm=4.094165 clip=1.023541 state_budget=0.000
+DDP MODEL CHECK PASSED
+
+=== model_tf32 ===
+ddp       WARNING: peer 0->1 is enabled but moves the wrong bytes (261888 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (261376 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+ddp       2 rank(s) on device(s) 0 1
+links     NO peer access -- every transfer staged through host memory
+DDP model check: TF32, global B=4, T=64, C=384, L=2, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+step 1 loss full=4.2799649 shards=4.2799649 max_token_error=0.00e+00 gradient_budget=0.000
+       optimizer clipped norm=4.317139 clip=1.079285 state_budget=0.000
+step 2 loss full=4.2546778 shards=4.2546780 max_token_error=0.00e+00 gradient_budget=0.000
+       optimizer unclipped norm=4.208239 clip=8.416478 state_budget=0.000
+step 3 loss full=4.2934175 shards=4.2934172 max_token_error=0.00e+00 gradient_budget=0.000
+       optimizer clipped norm=4.094204 clip=1.023551 state_budget=0.000
+DDP MODEL CHECK PASSED
+
+=== model_staged ===
+ddp       DDP_NO_P2P set: staging every transfer through host
+ddp       2 rank(s) on device(s) 0 1
+links     NO peer access -- every transfer staged through host memory
+DDP model check: TF32, global B=4, T=64, C=384, L=2, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+step 1 loss full=4.2799649 shards=4.2799649 max_token_error=0.00e+00 gradient_budget=0.000
+       optimizer clipped norm=4.317139 clip=1.079285 state_budget=0.000
+step 2 loss full=4.2546778 shards=4.2546780 max_token_error=0.00e+00 gradient_budget=0.000
+       optimizer unclipped norm=4.208239 clip=8.416478 state_budget=0.000
+step 3 loss full=4.2934175 shards=4.2934172 max_token_error=0.00e+00 gradient_budget=0.000
+       optimizer clipped norm=4.094204 clip=1.023551 state_budget=0.000
+DDP MODEL CHECK PASSED
+
+=== model_production_fp32 ===
+ddp       WARNING: peer 0->1 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+ddp       2 rank(s) on device(s) 0 1
+links     NO peer access -- every transfer staged through host memory
+DDP model check: FP32, global B=16, T=256, C=384, L=6, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+step 1 loss full=4.2630978 shards=4.2630980 max_token_error=0.00e+00 gradient_budget=0.022
+       optimizer clipped norm=2.631978 clip=0.657994 state_budget=0.000
+step 2 loss full=4.3191767 shards=4.3191767 max_token_error=0.00e+00 gradient_budget=0.021
+       optimizer unclipped norm=3.389820 clip=6.779640 state_budget=0.000
+step 3 loss full=4.2276430 shards=4.2276433 max_token_error=0.00e+00 gradient_budget=0.020
+       optimizer clipped norm=2.074134 clip=0.518533 state_budget=0.000
+DDP MODEL CHECK PASSED
+
+=== model_production_tf32 ===
+ddp       WARNING: peer 0->1 is enabled but moves the wrong bytes (258048 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (249856 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+ddp       2 rank(s) on device(s) 0 1
+links     NO peer access -- every transfer staged through host memory
+DDP model check: TF32, global B=16, T=256, C=384, L=6, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+step 1 loss full=4.2631011 shards=4.2631009 max_token_error=0.00e+00 gradient_budget=0.000
+       optimizer clipped norm=2.631949 clip=0.657987 state_budget=0.000
+step 2 loss full=4.3191991 shards=4.3191988 max_token_error=0.00e+00 gradient_budget=0.000
+       optimizer unclipped norm=3.390300 clip=6.780600 state_budget=0.000
+step 3 loss full=4.2276287 shards=4.2276292 max_token_error=0.00e+00 gradient_budget=0.000
+       optimizer clipped norm=2.073614 clip=0.518404 state_budget=0.000
+DDP MODEL CHECK PASSED
+
+=== ring ===
+2 CUDA device(s) present
+
+ring all-reduce correctness:
+  n=1  count=1          worst rel err 0.00e+00  ok
+  n=1  count=3          worst rel err 0.00e+00  ok
+  n=1  count=17         worst rel err 0.00e+00  ok
+  n=1  count=1000       worst rel err 0.00e+00  ok
+  n=1  count=65537      worst rel err 0.00e+00  ok
+  n=1  count=1048576    worst rel err 0.00e+00  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=2  count=1          worst rel err 0.00e+00  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=2  count=3          worst rel err 5.89e-08  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=2  count=17         worst rel err 5.89e-08  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=2  count=1000       worst rel err 5.95e-08  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=2  count=65537      worst rel err 5.95e-08  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=2  count=1048576    worst rel err 5.95e-08  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=3  count=1          worst rel err 0.00e+00  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=3  count=3          worst rel err 7.46e-08  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=3  count=17         worst rel err 6.27e-08  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=3  count=1000       worst rel err 1.09e-07  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=3  count=65537      worst rel err 1.12e-07  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=3  count=1048576    worst rel err 1.12e-07  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=4  count=1          worst rel err 0.00e+00  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=4  count=3          worst rel err 4.44e-08  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=4  count=17         worst rel err 6.38e-08  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=4  count=1000       worst rel err 9.44e-08  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=4  count=65537      worst rel err 1.33e-07  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=4  count=1048576    worst rel err 1.33e-07  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=8  count=1          worst rel err 1.59e-08  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=8  count=3          worst rel err 1.59e-08  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=8  count=17         worst rel err 1.17e-07  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=8  count=1000       worst rel err 1.67e-07  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=8  count=65537      worst rel err 1.72e-07  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=8  count=1048576    worst rel err 1.72e-07  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+
+ddp       2 rank(s) on device(s) 0 1
+links     NO peer access -- every transfer staged through host memory
+
+all-reduce of 43.2 MB across 2 ranks
+  best               7.528 ms
+  reduce-scatter     4.110 ms
+  all-gather         3.996 ms
+  moved/device        43.2 MB
+  effective link       5.7 GB/s
+
+A training step here is ~86 ms. This collective is 8.8% of that.
+
+all correctness checks passed
+
+=== predecessor_gemm_1 ===
+id   kernel                 size   best GF/s    med GF/s cuBLAS GF/s  %cuBLAS  err       verify
+----------------------------------------------------------------------------------------------------
+8    dbuffer                        4096     19707.8     18884.4     22487.3    87.6%  6.2e-08   ok
+9    tensorcore                     4096     34037.3     31628.1     22600.2   150.6%  2.4e-04   ok
+
+=== after_gemm_1 ===
+ddp       WARNING: peer 0->1 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+ddp       2 rank(s) on device(s) 0 1
+links     NO peer access -- every transfer staged through host memory
+DDP model check: TF32, global B=16, T=256, C=384, L=6, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+FAIL rank=0 token=1 loss/input mismatch
+FAIL rank=1 token=1 loss/input mismatch
+FAIL rank=0 mean gradient/wte index=949 abs_err=2.212e-01 limit=1.480e-03 finite=1
+FAIL rank=0 mean gradient/wpe index=75061 abs_err=4.336e-01 limit=2.169e-03 finite=1
+FAIL rank=0 mean gradient/ln1w index=365 abs_err=4.862e-01 limit=2.406e-03 finite=1
+FAIL rank=0 mean gradient/ln1b index=230 abs_err=9.899e-02 limit=1.678e-03 finite=1
+FAIL rank=0 mean gradient/qkvw index=257345 abs_err=7.706e-01 limit=3.587e-03 finite=1
+FAIL rank=0 mean gradient/qkvb index=951 abs_err=1.718e-03 limit=3.857e-05 finite=1
+FAIL rank=0 mean gradient/attprojw index=35236 abs_err=1.413e-02 limit=9.738e-05 finite=1
+FAIL rank=0 mean gradient/attprojb index=340 abs_err=1.848e-02 limit=3.431e-04 finite=1
+FAIL rank=0 mean gradient/ln2w index=343 abs_err=4.661e-04 limit=4.442e-06 finite=1
+FAIL rank=0 mean gradient/ln2b index=150 abs_err=4.096e-04 limit=7.987e-06 finite=1
+FAIL rank=0 mean gradient/fcw index=368601 abs_err=1.125e-03 limit=1.570e-05 finite=1
+FAIL rank=0 mean gradient/fcb index=1435 abs_err=6.393e-04 limit=1.898e-05 finite=1
+FAIL rank=0 mean gradient/fcprojw index=424467 abs_err=4.238e-03 limit=5.279e-05 finite=1
+FAIL rank=0 mean gradient/fcprojb index=340 abs_err=9.645e-03 limit=2.013e-04 finite=1
+FAIL rank=0 mean gradient/lnfw index=133 abs_err=3.822e-04 limit=1.188e-05 finite=1
+FAIL rank=0 mean gradient/lnfb index=255 abs_err=2.796e-04 limit=9.125e-06 finite=1
+step 1 loss full=4.2648859 shards=4.2612445 max_token_error=1.54e-01 gradient_budget=214.871
+DDP MODEL CHECK FAILED

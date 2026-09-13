@@ -1,0 +1,14 @@
+ddp       WARNING: peer 0->1 is enabled but moves the wrong bytes (258048 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (249856 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+ddp       2 rank(s) on device(s) 0 1
+links     NO peer access -- every transfer staged through host memory
+DDP model check: TF32, global B=16, T=256, C=384, L=6, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+step 1 loss full=4.2631011 shards=4.2631009 max_token_error=0.00e+00 gradient_budget=0.000
+       optimizer clipped norm=2.631949 clip=0.657987 state_budget=0.000
+step 2 loss full=4.3191991 shards=4.3191988 max_token_error=0.00e+00 gradient_budget=0.000
+       optimizer unclipped norm=3.390300 clip=6.780600 state_budget=0.000
+step 3 loss full=4.2276287 shards=4.2276292 max_token_error=0.00e+00 gradient_budget=0.000
+       optimizer clipped norm=2.073614 clip=0.518404 state_budget=0.000
+DDP MODEL CHECK PASSED

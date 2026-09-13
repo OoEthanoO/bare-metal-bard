@@ -1,0 +1,211 @@
+2 CUDA device(s) present
+
+ring all-reduce correctness:
+  n=1  count=1          worst rel err 0.00e+00  ok
+  n=1  count=3          worst rel err 0.00e+00  ok
+  n=1  count=17         worst rel err 0.00e+00  ok
+  n=1  count=1000       worst rel err 0.00e+00  ok
+  n=1  count=65537      worst rel err 0.00e+00  ok
+  n=1  count=1048576    worst rel err 0.00e+00  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=2  count=1          worst rel err 0.00e+00  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=2  count=3          worst rel err 5.89e-08  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=2  count=17         worst rel err 5.89e-08  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=2  count=1000       worst rel err 5.95e-08  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=2  count=65537      worst rel err 5.95e-08  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=2  count=1048576    worst rel err 5.95e-08  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=3  count=1          worst rel err 0.00e+00  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=3  count=3          worst rel err 7.46e-08  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=3  count=17         worst rel err 6.27e-08  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=3  count=1000       worst rel err 1.09e-07  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=3  count=65537      worst rel err 1.12e-07  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=3  count=1048576    worst rel err 1.12e-07  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=4  count=1          worst rel err 0.00e+00  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=4  count=3          worst rel err 4.44e-08  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=4  count=17         worst rel err 6.38e-08  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=4  count=1000       worst rel err 9.44e-08  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=4  count=65537      worst rel err 1.33e-07  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=4  count=1048576    worst rel err 1.33e-07  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=8  count=1          worst rel err 1.59e-08  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=8  count=3          worst rel err 1.59e-08  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=8  count=17         worst rel err 1.17e-07  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=8  count=1000       worst rel err 1.67e-07  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=8  count=65537      worst rel err 1.72e-07  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+  n=8  count=1048576    worst rel err 1.72e-07  ok
+ddp       WARNING: peer 1->0 is enabled but moves the wrong bytes (262144 of 262144 floats wrong). Not trusted.
+ddp       at least one peer link failed the probe: staging EVERY transfer through host memory rather than running a mixed ring
+
+ddp       2 rank(s) on device(s) 0 1
+links     NO peer access -- every transfer staged through host memory
+
+all-reduce of 43.2 MB across 2 ranks
+  best               7.528 ms
+  reduce-scatter     4.110 ms
+  all-gather         3.996 ms
+  moved/device        43.2 MB
+  effective link       5.7 GB/s
+
+A training step here is ~86 ms. This collective is 8.8% of that.
+
+all correctness checks passed

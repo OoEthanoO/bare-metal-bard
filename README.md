@@ -3032,11 +3032,12 @@ four scalar stores.
    4.2655 on the two ranks —  *both* wrong, against 4.2873 and 4.2693 — with
    |g| 32.750 in place of 15.023, and then trains visibly worse; run it again
    immediately and it is clean. The same wrong digits every time, on two
-   different A40 hosts, so it is neither a race nor a datacenter. The trace
+   different A40 hosts; repeatability alone does not rule out a race. The trace
    does not hide it, and the post-all-reduce gradients are identical across
-   ranks, so the fault is in the forward, before any communication, and
-   depends on what the previous process left in device memory: a read of
-   memory that was never written. ([run 9](bench/logs/multigpu_a40_run9_decider.txt),
+   ranks. This locates the discrepancy before gradient exchange, but does
+   not distinguish forward computation, earlier setup, or corruption during
+   backward. A read of unwritten memory was one hypothesis, not an established
+   cause. ([run 9](bench/logs/multigpu_a40_run9_decider.txt),
    [run 10](bench/logs/multigpu_a40_run10_decider2.txt); the earlier
    "host-correlated" reading, from bisections that lacked the predecessor,
    was wrong.) `tools/gpu_scrub.cu` fills every free byte on every device
@@ -3047,9 +3048,8 @@ four scalar stores.
 
    **That test did not need the rented hardware after all, and it has now
    run** — [`bench/logs/anomaly_decider_5080.txt`](bench/logs/anomaly_decider_5080.txt).
-   The scrub is the *strong* form of the experiment: it does not depend on the
-   anomaly reproducing, because a read of poisoned memory yields NaN whether
-   or not the values would otherwise have been wrong. On one 5080, both ranks
+   The scrub tests reuse of poisoned free VRAM, but does not guarantee which
+   physical memory the next process receives. On one 5080, both ranks
    on one device, after filling all 15 GB of free memory with `0x7fc00000`:
 
    | case | rank 0 | rank 1 | \|g\| |
@@ -3060,18 +3060,17 @@ four scalar stores.
    | `test_ddp`, then 2-rank | 4.2577 | 4.2672 | 15.666 |
 
    Bit-identical. `initcheck` agrees from the other direction — 0 errors on
-   both the one-rank and two-rank paths. **So the forward reads nothing a
-   predecessor left behind**, and the recorded diagnosis is not sufficient on
-   its own.
+   both the one-rank and two-rank paths. These checks found no uninitialized
+   reads on that device; they do not establish that the A40 path is clean.
 
-   What survives is narrower and better posed: not *does the forward read
-   uninitialized memory* — it does not — but *what does the two-**device**
-   path read that the two-**rank** path does not*. That is `cudaMemcpyPeerAsync`
+   The next question is *what does the two-**device** path do that the
+   two-**rank** path does not*. Candidates include `cudaMemcpyPeerAsync`
    between distinct devices, the per-device `thread_local` caches, and
    `ddp_init`'s probe, which is exactly where every earlier bug of this family
-   lived. The ring is ruled out by inspection: `chunk_of` bounds every transfer
+   lived. Inspection shows that `chunk_of` bounds every transfer
    and every `add_into_k` to `c.len` rather than the padded `per`, so `d.recv`
-   is never read past what was written into it.
+   is intended to stay within the written chunk. This is not an exhaustive
+   proof against memory corruption.
 
    Caveat kept deliberately: this is Blackwell and the anomaly is Ampere, so a
    clean result here does not prove the A40s are clean. It establishes that the
@@ -3079,6 +3078,25 @@ four scalar stores.
    against memory deliberately poisoned to expose it. Until the two-device
    question is answered, every multi-rank run prints each rank's own step-1
    loss, and this stays on the list as reproducible and unexplained.
+
+   **September 13: the full-model gate reproduced it on another two-A40
+   run.** The clean production-size fixture passed three updates; after
+   `sgemm`, both ranks disagreed with a full-batch reference and the worst
+   gradient tensor exceeded tolerance by **214.871 times**. The validation
+   stopped before further experiments, and the pod was terminated when work
+   paused. The [new investigation record](docs/a40-forward-investigation.md)
+   preserves the raw logs and the limits of the evidence. It also records
+   a flaw in the isolation control: `DDP_NO_P2P` used to enable peer access
+   before forcing host transfers. It now skips peer setup entirely. This
+   correction, a forward-only mode, and poisoning actual allocated scratch
+   buffers are controls for the next run, **not a claim that the anomaly is
+   fixed**.
+
+   The local investigation did catch and fix a separate loss-kernel race:
+   thread 0 could read another warp's probability before normalization.
+   The probability's owner now writes the loss, and a new CPU-reference
+   regression fails on the old kernel and passes on the fixed one across
+   nine vocabulary sizes. [Before/after evidence and mechanism](docs/a40-forward-investigation.md#a-separate-race-caught-locally-and-fixed).
 
    That fourth run also corrected an attribution above. Its traced runs read
    90 ms while the untraced one read 41, and the difference was the checksum

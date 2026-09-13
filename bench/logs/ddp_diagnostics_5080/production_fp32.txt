@@ -1,0 +1,13 @@
+ddp       2 rank(s) on device(s) 0 0  [SIMULATED: one physical GPU]
+links     peer-to-peer enabled on every pair
+DDP model check: FP32, global B=16, T=256, C=384, L=6, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+step 1 loss full=4.2680454 shards=4.2680452 max_token_error=0.00e+00 gradient_budget=0.026
+       optimizer clipped norm=2.915433 clip=0.728858 state_budget=0.000
+step 2 loss full=4.3148069 shards=4.3148069 max_token_error=0.00e+00 gradient_budget=0.022
+       optimizer unclipped norm=3.511520 clip=7.023040 state_budget=0.000
+step 3 loss full=4.2301779 shards=4.2301776 max_token_error=0.00e+00 gradient_budget=0.026
+       optimizer clipped norm=1.794478 clip=0.448620 state_budget=0.000
+DDP MODEL CHECK PASSED
+[clock] no busy samples -- the command was too short to judge.
+[clock] Timings above are unverified.

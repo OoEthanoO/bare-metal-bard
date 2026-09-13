@@ -1,0 +1,11 @@
+========= COMPUTE-SANITIZER
+ddp       2 rank(s) on device(s) 0 0  [SIMULATED: one physical GPU]
+links     peer-to-peer enabled on every pair
+DDP model check: TF32, global B=16, T=256, C=384, L=6, steps=2
+Checks are numerical correctness only; repeated devices are not a scaling result.
+step 1 loss full=4.2680435 shards=4.2680438 max_token_error=0.00e+00 gradient_budget=0.000
+       optimizer clipped norm=2.915400 clip=0.728850 state_budget=0.000
+step 2 loss full=4.3148212 shards=4.3148212 max_token_error=0.00e+00 gradient_budget=0.000
+       optimizer unclipped norm=3.511761 clip=7.023522 state_budget=0.000
+DDP MODEL CHECK PASSED
+========= ERROR SUMMARY: 0 errors

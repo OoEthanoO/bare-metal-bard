@@ -79,11 +79,15 @@ void ddp_init(DDP &d, int n, const int *devices) {
     d.n = n;
     for (int r = 0; r < n; ++r) d.dev[r] = devices[r];
 
+    const bool force_host = getenv("DDP_NO_P2P") != nullptr;
     d.any_peer = false;
     for (int i = 0; i < n; ++i) {
         for (int j = 0; j < n; ++j) {
             d.peer[i][j] = false;
-            if (i == j) continue;
+            // The isolation switch must bypass peer setup, not merely avoid
+            // peer copies later. Enabling mappings on a broken virtualized
+            // host is itself a side effect the control must exclude.
+            if (i == j || force_host) continue;
             if (d.dev[i] == d.dev[j]) {
                 // Same physical device: a "peer" copy is just a device-to-device
                 // copy, always available. This is the single-GPU rehearsal path.
@@ -122,11 +126,8 @@ void ddp_init(DDP &d, int n, const int *devices) {
     // moves a megabyte of pattern, three times, checks every element, and if
     // ANY pair fails the whole ring stages through the host: a ring is only as
     // trustworthy as its least trustworthy link, and it should not be mixed.
-    if (getenv("DDP_NO_P2P")) {
-        for (int i = 0; i < n; ++i)
-            for (int j = 0; j < n; ++j) d.peer[i][j] = false;
-        printf("ddp       DDP_NO_P2P set: staging every transfer through host\n");
-    }
+    if (force_host)
+        printf("ddp       DDP_NO_P2P set: skipping peer setup; staging every transfer through host\n");
     bool any_bad = false;
     {
         constexpr size_t PROBE = 1u << 18;  // floats: 1 MB

@@ -1,0 +1,93 @@
+ddp       2 rank(s) on device(s) 0 0  [SIMULATED: one physical GPU]
+links     peer-to-peer enabled on every pair
+DDP model check: TF32, global B=4, T=64, C=384, L=2, steps=3
+Checks are numerical correctness only; repeated devices are not a scaling result.
+Injected sign reversal on rank 0: same gradient norm, wrong direction.
+FAIL rank=0 mean gradient/wte index=7049 abs_err=8.047e-02 limit=3.186e-04 finite=1
+FAIL rank=0 mean gradient/wpe index=379 abs_err=5.612e-02 limit=1.797e-04 finite=1
+FAIL rank=0 mean gradient/ln1w index=397 abs_err=3.921e-03 limit=2.915e-05 finite=1
+FAIL rank=0 mean gradient/ln1b index=254 abs_err=1.325e-02 limit=6.160e-05 finite=1
+FAIL rank=0 mean gradient/qkvw index=442085 abs_err=2.295e-02 limit=7.178e-05 finite=1
+FAIL rank=0 mean gradient/qkvb index=1151 abs_err=3.808e-02 limit=1.173e-04 finite=1
+FAIL rank=0 mean gradient/attprojw index=239649 abs_err=5.406e-02 limit=1.666e-04 finite=1
+FAIL rank=0 mean gradient/attprojb index=165 abs_err=1.689e-01 limit=7.082e-04 finite=1
+FAIL rank=0 mean gradient/ln2w index=237 abs_err=5.541e-03 limit=1.958e-05 finite=1
+FAIL rank=0 mean gradient/ln2b index=343 abs_err=5.065e-03 limit=2.126e-05 finite=1
+FAIL rank=0 mean gradient/fcw index=198285 abs_err=1.724e-02 limit=5.399e-05 finite=1
+FAIL rank=0 mean gradient/fcb index=1063 abs_err=8.458e-03 limit=3.270e-05 finite=1
+FAIL rank=0 mean gradient/fcprojw index=125409 abs_err=3.588e-02 limit=1.332e-04 finite=1
+FAIL rank=0 mean gradient/fcprojb index=170 abs_err=6.576e-02 limit=2.866e-04 finite=1
+FAIL rank=0 mean gradient/lnfw index=306 abs_err=9.633e-03 limit=3.578e-05 finite=1
+FAIL rank=0 mean gradient/lnfb index=306 abs_err=6.695e-03 limit=2.526e-05 finite=1
+step 1 loss full=4.3030272 shards=4.3030272 max_token_error=0.00e+00 gradient_budget=324.666
+forward trace rank=0 layer=-1 parameters   unequal=0/3623424 nonfinite=0 max_abs=0.000e+00 index=0 ref=-0.03268975 got=-0.03268975
+forward trace rank=0 layer=-1 encoded      unequal=0/49152 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.002535913 got=0.002535913
+forward trace rank=0 layer=0 ln1          unequal=0/49152 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.09499903 got=0.09499903
+forward trace rank=0 layer=0 ln1_mean     unequal=0/128 nonfinite=0 max_abs=0.000e+00 index=0 ref=-2.11321e-06 got=-2.11321e-06
+forward trace rank=0 layer=0 ln1_rstd     unequal=0/128 nonfinite=0 max_abs=0.000e+00 index=0 ref=37.43028 got=37.43028
+forward trace rank=0 layer=0 qkv          unequal=0/147456 nonfinite=0 max_abs=0.000e+00 index=0 ref=-0.4813076 got=-0.4813076
+forward trace rank=0 layer=0 lse          unequal=0/768 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.02324869 got=0.02324869
+forward trace rank=0 layer=0 atty         unequal=0/49152 nonfinite=0 max_abs=0.000e+00 index=0 ref=-0.3344727 got=-0.3344727
+forward trace rank=0 layer=0 residual2    unequal=0/49152 nonfinite=0 max_abs=0.000e+00 index=0 ref=-0.03010828 got=-0.03010828
+forward trace rank=0 layer=0 ln2          unequal=0/49152 nonfinite=0 max_abs=0.000e+00 index=0 ref=-0.3240486 got=-0.3240486
+forward trace rank=0 layer=0 ln2_mean     unequal=0/128 nonfinite=0 max_abs=0.000e+00 index=0 ref=-0.003296311 got=-0.003296311
+forward trace rank=0 layer=0 ln2_rstd     unequal=0/128 nonfinite=0 max_abs=0.000e+00 index=0 ref=12.08597 got=12.08597
+forward trace rank=0 layer=0 fch          unequal=0/196608 nonfinite=0 max_abs=0.000e+00 index=0 ref=-0.2770277 got=-0.2770277
+forward trace rank=0 layer=0 fch_gelu     unequal=0/196608 nonfinite=0 max_abs=0.000e+00 index=0 ref=-0.1082863 got=-0.1082863
+forward trace rank=0 layer=0 residual3    unequal=0/49152 nonfinite=0 max_abs=0.000e+00 index=0 ref=-0.1388057 got=-0.1388057
+forward trace rank=0 layer=1 ln1          unequal=0/49152 nonfinite=0 max_abs=0.000e+00 index=0 ref=-1.204543 got=-1.204543
+forward trace rank=0 layer=1 ln1_mean     unequal=0/128 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.002362086 got=0.002362086
+forward trace rank=0 layer=1 ln1_rstd     unequal=0/128 nonfinite=0 max_abs=0.000e+00 index=0 ref=8.532709 got=8.532709
+forward trace rank=0 layer=1 qkv          unequal=0/147456 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.2999347 got=0.2999347
+forward trace rank=0 layer=1 lse          unequal=0/768 nonfinite=0 max_abs=0.000e+00 index=0 ref=-0.0537051 got=-0.0537051
+forward trace rank=0 layer=1 atty         unequal=0/49152 nonfinite=0 max_abs=0.000e+00 index=0 ref=-0.1135864 got=-0.1135864
+forward trace rank=0 layer=1 residual2    unequal=0/49152 nonfinite=0 max_abs=0.000e+00 index=0 ref=-0.04261611 got=-0.04261611
+forward trace rank=0 layer=1 ln2          unequal=0/49152 nonfinite=0 max_abs=0.000e+00 index=0 ref=-0.2932715 got=-0.2932715
+forward trace rank=0 layer=1 ln2_mean     unequal=0/128 nonfinite=0 max_abs=0.000e+00 index=0 ref=-0.0006724605 got=-0.0006724605
+forward trace rank=0 layer=1 ln2_rstd     unequal=0/128 nonfinite=0 max_abs=0.000e+00 index=0 ref=6.992035 got=6.992035
+forward trace rank=0 layer=1 fch          unequal=0/196608 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.9706433 got=0.9706433
+forward trace rank=0 layer=1 fch_gelu     unequal=0/196608 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.8095072 got=0.8095072
+forward trace rank=0 layer=1 residual3    unequal=0/49152 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.006240781 got=0.006240781
+forward trace rank=0 layer=2 lnf          unequal=0/49152 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.02955526 got=0.02955526
+forward trace rank=0 layer=2 lnf_mean     unequal=0/128 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.001355197 got=0.001355197
+forward trace rank=0 layer=2 lnf_rstd     unequal=0/128 nonfinite=0 max_abs=0.000e+00 index=0 ref=6.049484 got=6.049484
+forward trace rank=0 layer=2 logits       unequal=0/16384 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.08287131 got=0.08287131
+forward trace rank=0 layer=2 probs        unequal=0/16384 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.0151398 got=0.0151398
+forward trace rank=0 layer=2 losses       unequal=0/128 nonfinite=0 max_abs=0.000e+00 index=0 ref=4.425473 got=4.425473
+forward trace rank=1 layer=-1 parameters   unequal=0/3623424 nonfinite=0 max_abs=0.000e+00 index=0 ref=-0.03268975 got=-0.03268975
+forward trace rank=1 layer=-1 encoded      unequal=0/49152 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.007797576 got=0.007797576
+forward trace rank=1 layer=0 ln1          unequal=0/49152 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.2618024 got=0.2618024
+forward trace rank=1 layer=0 ln1_mean     unequal=0/128 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.0004148061 got=0.0004148061
+forward trace rank=1 layer=0 ln1_rstd     unequal=0/128 nonfinite=0 max_abs=0.000e+00 index=0 ref=35.46127 got=35.46127
+forward trace rank=1 layer=0 qkv          unequal=0/147456 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.3629574 got=0.3629574
+forward trace rank=1 layer=0 lse          unequal=0/768 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.128675 got=0.128675
+forward trace rank=1 layer=0 atty         unequal=0/49152 nonfinite=0 max_abs=0.000e+00 index=0 ref=-0.1331787 got=-0.1331787
+forward trace rank=1 layer=0 residual2    unequal=0/49152 nonfinite=0 max_abs=0.000e+00 index=0 ref=-0.003387151 got=-0.003387151
+forward trace rank=1 layer=0 ln2          unequal=0/49152 nonfinite=0 max_abs=0.000e+00 index=0 ref=-0.05730695 got=-0.05730695
+forward trace rank=1 layer=0 ln2_mean     unequal=0/128 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.001555191 got=0.001555191
+forward trace rank=1 layer=0 ln2_rstd     unequal=0/128 nonfinite=0 max_abs=0.000e+00 index=0 ref=11.5951 got=11.5951
+forward trace rank=1 layer=0 fch          unequal=0/196608 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.174857 got=0.174857
+forward trace rank=1 layer=0 fch_gelu     unequal=0/196608 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.09956397 got=0.09956397
+forward trace rank=1 layer=0 residual3    unequal=0/49152 nonfinite=0 max_abs=0.000e+00 index=0 ref=-0.176576 got=-0.176576
+forward trace rank=1 layer=1 ln1          unequal=0/49152 nonfinite=0 max_abs=0.000e+00 index=0 ref=-1.560808 got=-1.560808
+forward trace rank=1 layer=1 ln1_mean     unequal=0/128 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.00966105 got=0.00966105
+forward trace rank=1 layer=1 ln1_rstd     unequal=0/128 nonfinite=0 max_abs=0.000e+00 index=0 ref=8.380763 got=8.380763
+forward trace rank=1 layer=1 qkv          unequal=0/147456 nonfinite=0 max_abs=0.000e+00 index=0 ref=-0.3634666 got=-0.3634666
+forward trace rank=1 layer=1 lse          unequal=0/768 nonfinite=0 max_abs=0.000e+00 index=0 ref=-0.005032723 got=-0.005032723
+forward trace rank=1 layer=1 atty         unequal=0/49152 nonfinite=0 max_abs=0.000e+00 index=0 ref=-0.1159058 got=-0.1159058
+forward trace rank=1 layer=1 residual2    unequal=0/49152 nonfinite=0 max_abs=0.000e+00 index=0 ref=-0.1994398 got=-0.1994398
+forward trace rank=1 layer=1 ln2          unequal=0/49152 nonfinite=0 max_abs=0.000e+00 index=0 ref=-1.433892 got=-1.433892
+forward trace rank=1 layer=1 ln2_mean     unequal=0/128 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.01141685 got=0.01141685
+forward trace rank=1 layer=1 ln2_rstd     unequal=0/128 nonfinite=0 max_abs=0.000e+00 index=0 ref=6.80032 got=6.80032
+forward trace rank=1 layer=1 fch          unequal=0/196608 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.5559788 got=0.5559788
+forward trace rank=1 layer=1 fch_gelu     unequal=0/196608 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.3952131 got=0.3952131
+forward trace rank=1 layer=1 residual3    unequal=0/49152 nonfinite=0 max_abs=0.000e+00 index=0 ref=-0.2277477 got=-0.2277477
+forward trace rank=1 layer=2 lnf          unequal=0/49152 nonfinite=0 max_abs=0.000e+00 index=0 ref=-1.375322 got=-1.375322
+forward trace rank=1 layer=2 lnf_mean     unequal=0/128 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.003786335 got=0.003786335
+forward trace rank=1 layer=2 lnf_rstd     unequal=0/128 nonfinite=0 max_abs=0.000e+00 index=0 ref=5.940043 got=5.940043
+forward trace rank=1 layer=2 logits       unequal=0/16384 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.3803463 got=0.3803463
+forward trace rank=1 layer=2 probs        unequal=0/16384 nonfinite=0 max_abs=0.000e+00 index=0 ref=0.01849128 got=0.01849128
+forward trace rank=1 layer=2 losses       unequal=0/128 nonfinite=0 max_abs=0.000e+00 index=0 ref=4.397532 got=4.397532
+DDP MODEL CHECK FAILED
+[clock] no busy samples -- the command was too short to judge.
+[clock] Timings above are unverified.

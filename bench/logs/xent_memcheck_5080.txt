@@ -1,0 +1,12 @@
+========= COMPUTE-SANITIZER
+V=65 Vp=128 rows=16384 repeats=64 max_loss_error=2.74e-07 max_prob_error=5.81e-09 max_grad_error=3.73e-09 PASS
+V=1 Vp=128 rows=4096 repeats=8 max_loss_error=0.00e+00 max_prob_error=0.00e+00 max_grad_error=0.00e+00 PASS
+V=31 Vp=128 rows=4096 repeats=8 max_loss_error=5.74e-07 max_prob_error=1.29e-08 max_grad_error=3.69e-09 PASS
+V=32 Vp=128 rows=4096 repeats=8 max_loss_error=6.87e-07 max_prob_error=8.94e-09 max_grad_error=4.84e-09 PASS
+V=33 Vp=128 rows=4096 repeats=8 max_loss_error=6.07e-07 max_prob_error=8.02e-09 max_grad_error=3.83e-09 PASS
+V=127 Vp=128 rows=4096 repeats=8 max_loss_error=5.43e-07 max_prob_error=1.81e-09 max_grad_error=3.42e-09 PASS
+V=128 Vp=128 rows=4096 repeats=8 max_loss_error=4.83e-07 max_prob_error=2.96e-09 max_grad_error=3.72e-09 PASS
+V=129 Vp=256 rows=4096 repeats=8 max_loss_error=5.14e-07 max_prob_error=1.01e-09 max_grad_error=3.70e-09 PASS
+V=257 Vp=384 rows=4096 repeats=8 max_loss_error=1.32e-07 max_prob_error=9.41e-10 max_grad_error=3.62e-09 PASS
+CROSS-ENTROPY CHECK PASSED
+========= ERROR SUMMARY: 0 errors

@@ -453,10 +453,17 @@ __global__ void softmax_xent_fwd_k(float *probs, float *losses,
     s = block_reduce<false>(s);
     const float inv = 1.0f / s;
 
-    for (int i = threadIdx.x; i < V; i += blockDim.x) p[i] *= inv;
+    const int target = targets[row];
+    for (int i = threadIdx.x; i < V; i += blockDim.x) {
+        const float normalized = p[i] * inv;
+        p[i] = normalized;
+        // The probability's owner also writes the loss. Thread 0 cannot
+        // read p[target] here without a block barrier: another warp may
+        // still hold its UNNORMALIZED value. This keeps the value local
+        // and covers targets in later iterations when V > blockDim.x.
+        if (i == target) losses[row] = -logf(fmaxf(normalized, 1e-30f));
+    }
     for (int i = V + threadIdx.x; i < Vp; i += blockDim.x) p[i] = 0.0f;
-
-    if (threadIdx.x == 0) losses[row] = -logf(fmaxf(p[targets[row]], 1e-30f));
 }
 
 // d(loss)/d(logit_i) = (p_i - [i == target]) * scale. The softmax and the

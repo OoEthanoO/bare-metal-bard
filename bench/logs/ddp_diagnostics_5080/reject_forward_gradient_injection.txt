@@ -1,0 +1,9 @@
+measure.bat : --inject-gradient-error requires backward; omit --forward-only
+At C:\Users\ethan\bare-metal-bard\scripts\check_ddp_local.ps1:20 char:5
++     & scripts\measure.bat bench\test_ddp_gpt.exe @Options 2>&1 |
++     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (--inject-gradie... --forward-only:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[clock] no busy samples -- the command was too short to judge.
+[clock] Timings above are unverified.

@@ -52,6 +52,9 @@ bench/test_grad: tools/test_grad.cu src/gpt.cu src/gemm.cu src/bgemm.cu src/nn.c
 bench/test_ddp: tools/test_ddp.cu src/ddp.cu src/ddp.h | bench
 	$(NVCC) $(NVCCFLAGS) tools/test_ddp.cu src/ddp.cu -o $@
 
+bench/test_xent: tools/test_xent.cu src/nn.cu src/nn.h src/reduce.cuh src/gelu.cuh | bench
+	$(NVCC) $(NVCCFLAGS) tools/test_xent.cu src/nn.cu -o $@
+
 bench/test_ddp_gpt: tools/test_ddp_gpt.cu $(filter-out src/train_gpt.cu,$(GPT_SRC)) $(GPT_DEP) | bench
 	$(NVCC) $(NVCCFLAGS) tools/test_ddp_gpt.cu $(filter-out src/train_gpt.cu,$(GPT_SRC)) -o $@
 
@@ -60,8 +63,9 @@ bench/test_flash: tools/test_flash.cu src/flash.cu src/attention.cu src/bgemm.cu
 
 gpt: bench/train_gpt
 
-test: bench/test_gemm
+test: bench/test_gemm bench/test_xent
 	./bench/test_gemm
+	./bench/test_xent
 
 bench:
 	mkdir -p bench
@@ -70,4 +74,4 @@ run: $(BIN)
 	./$(BIN)
 
 clean:
-	rm -f $(BIN) $(TOOLS) bench/train_gpt bench/test_grad bench/test_flash bench/test_ddp bench/test_ddp_gpt
+	rm -f $(BIN) $(TOOLS) bench/train_gpt bench/test_grad bench/test_flash bench/test_ddp bench/test_ddp_gpt bench/test_xent
