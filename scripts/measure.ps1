@@ -70,12 +70,15 @@ $sampler = Start-Job -ScriptBlock {
     $ceil = 0
     $m = (nvidia-smi --query-gpu=clocks.max.sm --format=csv,noheader,nounits 2>$null)
     if ($m -match '^\s*(\d+)') { $ceil = [int]$Matches[1] }
+    # Each busy sample carries its time, so the verdict can drop the ramp the
+    # same way the profiler does. See the comment above $ramp below.
+    $sw = [Diagnostics.Stopwatch]::StartNew()
     while ($true) {
         $line = (nvidia-smi --query-gpu=clocks.sm,utilization.gpu,power.draw --format=csv,noheader,nounits 2>$null)
         if ($line -match '^\s*(\d+)\s*,\s*(\d+)\s*,\s*([\d.]+)') {
             $c = [int]$Matches[1]
             if ([int]$Matches[2] -ge $busyPct -and ($ceil -eq 0 -or $c -le $ceil)) {
-                $out += $c; $pw += [double]$Matches[3]
+                $out += ("{0}:{1}" -f $sw.ElapsedMilliseconds, $c); $pw += [double]$Matches[3]
             }
         }
         Write-Output $out.Count  # keeps the job's output stream alive
@@ -96,12 +99,50 @@ try {
 }
 
 $raw = if (Test-Path "$env:TEMP\bmb_clock_samples.txt") { Get-Content "$env:TEMP\bmb_clock_samples.txt" } else { "" }
-$samples = @($raw -split ',' | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ })
+$timed = @($raw -split ',' | Where-Object { $_ -match '^\d+:\d+$' } | ForEach-Object {
+    $p = $_ -split ':'; [pscustomobject]@{ ms = [long]$p[0]; mhz = [int]$p[1] } })
 
-if ($samples.Count -eq 0) {
+if ($timed.Count -eq 0) {
     Write-Host "[clock] no busy samples -- the command was too short to judge."
     Write-Host "[clock] Timings above are unverified."
     exit $rc
+}
+
+# THE RAMP IS DROPPED HERE FOR THE SAME REASON THE PROFILER DROPS IT.
+#
+# A card that has been idle -- which with the display on the iGPU is any card
+# between runs -- wakes from deep idle when the first kernel lands, and its
+# first busy sample can be caught mid-climb. A 500-step training run on this
+# machine sampled, in order:
+#
+#   397 1162 1162 1162 1162 1162 1162 1162 1170 1192 1192 1192 ... 1192
+#
+# The verdict judged all thirty and called six of eight such runs "MOVED
+# during the run: 397-1192 MHz", while train_gpt's own profiler had already
+# discarded that window (it drops steps by elapsed time -- see prof::reset)
+# and every step it did measure ran at 1192. The two instruments disagreed
+# about which part of the run counted, and the stricter one was judging time
+# the result did not contain.
+#
+# So samples inside the first BMB_RAMP_MS (3000, matching the profiler) after
+# the FIRST BUSY sample are not judged -- counted from GPU busy rather than
+# from launch, because a command can spend seconds on the host before the GPU
+# does anything, and that is not ramp. They are still reported, and if the
+# command is so short that every sample falls inside the ramp, the verdict
+# says so instead of pretending to have judged a steady state.
+$ramp = if ($env:BMB_RAMP_MS) { [int]$env:BMB_RAMP_MS } else { 3000 }
+$t0 = $timed[0].ms
+$settled = @($timed | Where-Object { $_.ms -ge $t0 + $ramp })
+$rampOnly = $settled.Count -eq 0
+$judged = if ($rampOnly) { $timed } else { $settled }
+$samples = @($judged | ForEach-Object { $_.mhz })
+$dropped = $timed.Count - $settled.Count
+if ($rampOnly) {
+    Write-Host ("[clock] every busy sample fell inside the {0} ms ramp window -- judging them, but this" -f $ramp)
+    Write-Host "[clock] is the card waking up, not a steady state."
+} elseif ($dropped -gt 0) {
+    $rampLo = ($timed | Select-Object -First $dropped | Measure-Object -Property mhz -Minimum).Minimum
+    Write-Host ("[clock] {0} ramp sample(s) in the first {1} ms not judged (lowest {2} MHz)." -f $dropped, $ramp, $rampLo)
 }
 
 $lo = ($samples | Measure-Object -Minimum).Minimum

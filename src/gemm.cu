@@ -530,13 +530,36 @@ __device__ __forceinline__ void mma_m16n8k8(float (&d)[4],
 // nothing at all: the transposed cases were 16-way conflicted and 20% slower
 // than the WMMA path they replaced, while the untransposed ones were fine.
 // tools/smem_banks.py simulates all four.
+//
+// THE KEY MUST ALSO SPAN ALL EIGHT VALUES, and at a 64-wide tile it did not.
+// The modulo branch is `unit % P` with P = BM/16 or BN/16. At 128, P is 8 and
+// the key covers 0..7. At 64 -- the NARROW tile this card dispatches by
+// default, and the compact one -- P is 4, the key covers {0,1,2,3}, and the
+// `& 7` does nothing. Those four values sit in the same two low slot bits that
+// k % 4 occupies, so lanes the key was meant to separate collide instead:
+// 4-way staging stores where the 128 tile gets 2. It is not a correctness bug
+// -- XOR with any key permutes a unit's slots -- which is why no test saw it
+// and tools/smem_banks.py, which only ever checked the 128 tile, did not
+// either. It hit the narrow tile's transposed-A staging, i.e. every dW GEMM.
+//
+// swz_spread scales the modulo branch by 8/P: {0,2,4,6} at P=4, the identity
+// at P=8, so the 128-wide tiles are unchanged bit for bit. It stays below 8,
+// so a fragment load's `lane ^ key` stays inside its own octet and the 128-bit
+// loads remain 1-way. smem_banks.py section 4 checks every tile the model
+// dispatches, and reads this function's name to know which key is shipped.
+template <int P>
+__device__ __forceinline__ constexpr int swz_spread() {
+    return P < 8 ? 8 / P : 1;
+}
 template <int BM, bool TA>
 __device__ __forceinline__ int a_swz(int unit) {
-    return (TA ? unit % (BM / MMA_M) : unit / (BM / MMA_M)) & 7;
+    constexpr int P = BM / MMA_M;
+    return (TA ? (unit % P) * swz_spread<P>() : unit / P) & 7;
 }
 template <int BN, bool TB>
 __device__ __forceinline__ int b_swz(int unit) {
-    return (TB ? unit / (BN / 16) : unit % (BN / 16)) & 7;
+    constexpr int P = BN / 16;
+    return (TB ? unit / P : (unit % P) * swz_spread<P>()) & 7;
 }
 
 template <bool TA, bool TB, int BM, int BN, int BK, int WM, int WN,
@@ -1227,9 +1250,20 @@ void dispatch_epi(int M, int N, int K, float alpha, const float *A,
                 C, ep, N, total);
         }
 #else
+        // The default rule only applies where the NARROW tile is the baseline,
+        // because that is the only tile it was measured against. On a card
+        // where prefer_narrow_tile() is false -- the 4070 this project began
+        // on, whose ridge point sits above the wide tile's intensity -- the
+        // alternative would be the 128x128 tile, which compact has never been
+        // compared with. And the reasoning points the wrong way there: the
+        // wide tile is chosen BECAUSE that machine is bandwidth-starved, and
+        // compact drops intensity to 16 FLOP/byte. The forced arm (> 0) still
+        // selects it anywhere, so the A/B that would justify widening this can
+        // be run on such a card with one binary.
         const bool compact =
             (g_compact_block > 0 ||
-             (g_compact_block == 0 && prefer_compact_block(N, K))) &&
+             (g_compact_block == 0 && prefer_narrow_tile() &&
+              prefer_compact_block(N, K))) &&
             M % CBM == 0 && N % CBN == 0;
         const bool narrow = !compact && prefer_narrow_tile() && M % SBM == 0;
         const int bm = compact ? CBM : (narrow ? SBM : TBM);

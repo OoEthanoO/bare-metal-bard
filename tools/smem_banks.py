@@ -412,6 +412,132 @@ for _, _, after in rows:
     check(after <= 2, "a swizzled access is still %d-way conflicted" % after)
 
 print()
+
+
+# ------------------------- 4. EVERY tile the model GEMM actually dispatches
+#
+# Section 2c checks the model kernel's staging -- but only at BM=BN=128 with
+# 256 threads, and that is not the tile the model runs on this card. Since the
+# tile rule was recalibrated, the 5080 dispatches the NARROW 64x128 tile by
+# default, and since commit de28559 the COMPACT 64x64 tile on the attention
+# projection and the vocab head. Neither had ever been through this file, while
+# the comment above a_swz in gemm.cu said "tools/smem_banks.py simulates all
+# four" -- true of the transpose cases, false of the tiles.
+#
+# And the swizzle key does not scale with the tile. It is `unit % P` or
+# `unit / P` with P = BM/16 or BN/16, masked to 3 bits. At BM or BN = 128, P is
+# 8 and the modulo branch spans all eight XOR keys. At 64, P is 4: the key
+# spans {0,1,2,3} and the `& 7` does nothing. Those four values land in the
+# same two low slot bits that k % 4 already occupies, so pairs of lanes that
+# the key was meant to separate collide instead.
+#
+# The fix keeps the key a function of the same coordinate and only spreads it:
+# (unit % P) * (8 / P) gives {0,2,4,6} at P=4 and is the identity at P=8, so
+# the 128-wide tiles are bit-for-bit unchanged. It stays below 8, so a load
+# octet's `lane ^ key` stays inside its own octet and the 128-bit fragment
+# loads remain 1-way. And since XOR with any key is a permutation of a unit's
+# slots, correctness is untouched either way -- which is exactly why this is
+# only visible to a tool like this one and never to a test.
+#
+# Which key the kernel ships is READ FROM THE SOURCE, not set by hand here. A
+# flag in this file saying "scaled" while gemm.cu said otherwise would be the
+# same drift this section exists to catch, one level up.
+import os
+_GEMM = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src", "gemm.cu")
+SCALED_KEY = "swz_spread" in open(_GEMM, encoding="utf-8", errors="replace").read()
+print("src/gemm.cu ships the %s swizzle key" % ("SCALED" if SCALED_KEY else "current"))
+
+MODEL_TILES = [  # (name, BM, BN, BK, threads) -- the constants in gemm.cu
+    ("wide 128x128", 128, 128, 32, 256),
+    ("narrow 64x128", 64, 128, 32, 128),
+    ("compact 64x64", 64, 64, 32, 128),
+]
+
+
+def key(unit, per, along_k, scaled):
+    if along_k:
+        return (unit // per) & 7
+    spread = (8 // per) if (scaled and per < 8) else 1
+    return ((unit % per) * spread) & 7
+
+
+def tile_stage(bm, bn, bk, nt, kind, trans, scaled):
+    """Replay one operand's staging for one tile; return (map ok, worst way)."""
+    is_a = kind == "a"
+    along_k = (not trans) if is_a else trans
+    per_u = (bm // MMA_M) if is_a else (bn // 16)
+    wide = bm if (is_a and trans) else (bk if (is_a or trans) else bn)
+    per = wide // 4
+    stride = nt // per
+    outer = (bk if is_a else bn) if trans else (bm if is_a else bk)
+    step = 1 if along_k else 4
+    seen, worst = set(), 0
+    for off in range(0, outer, stride):
+        for warp in range(nt // 32):
+            for j in range(4):
+                banks = {}
+                for l in range(32):
+                    tid = warp * 32 + l
+                    row, col = tid // per, tid % per
+                    if is_a:
+                        bm_ = col * 4 if trans else row + off
+                        bk_ = row + off if trans else col * 4
+                        unit = (bk_ // MMA_K) * (bm // MMA_M) + bm_ // MMA_M
+                        base = unit * UNIT + ((bk_ % MMA_K) // 4) * 2 + (bm_ % MMA_M) // 8
+                        slot = ((bm_ % 8) * 4 + (bk_ % 4)) ^ key(unit, per_u, along_k, scaled)
+                    else:
+                        bk_ = col * 4 if trans else row + off
+                        bn_ = row + off if trans else col * 4
+                        unit = (bk_ // MMA_K) * (bn // 16) + bn_ // 16
+                        base = unit * UNIT + (bk_ % MMA_K) // 4 + ((bn_ % 16) // 8) * 2
+                        slot = ((bn_ % 8) * 4 + (bk_ % 4)) ^ key(unit, per_u, along_k, scaled)
+                    addr = base + ((slot ^ (j * step)) * 4)
+                    seen.add(addr)
+                    banks[addr % 32] = banks.get(addr % 32, 0) + 1
+                worst = max(worst, max(banks.values()))
+    total = (bm if is_a else bn) * bk
+    return len(seen) == total, worst
+
+
+def tile_loads(bm, bn, bk, kind, trans, scaled):
+    """Worst 128-bit fragment-load conflict: eight lanes per phase."""
+    is_a = kind == "a"
+    along_k = (not trans) if is_a else trans
+    per_u = (bm // MMA_M) if is_a else (bn // 16)
+    nunits = (bk // MMA_K) * per_u
+    worst = 0
+    for unit in range(nunits):
+        f = key(unit, per_u, along_k, scaled)
+        for phase in range(4):
+            banks = {}
+            for l in range(phase * 8, phase * 8 + 8):
+                for e in range(4):
+                    b = ((l ^ f) * 4 + e) % 32
+                    banks[b] = banks.get(b, 0) + 1
+            worst = max(worst, max(banks.values()))
+    return worst
+
+
+CASES = (("a", False, "A transA=false"), ("a", True, "A transA=true"),
+         ("b", False, "B transB=false"), ("b", True, "B transB=true"))
+print("every model tile, staging stores / fragment loads, worst bank way:")
+print("%-15s %-16s %13s %13s" % ("tile", "operand", "current key", "scaled key"))
+for name, bm, bn, bk, nt in MODEL_TILES:
+    for kind, trans, label in CASES:
+        ok0, s0 = tile_stage(bm, bn, bk, nt, kind, trans, False)
+        ok1, s1 = tile_stage(bm, bn, bk, nt, kind, trans, True)
+        l0 = tile_loads(bm, bn, bk, kind, trans, False)
+        l1 = tile_loads(bm, bn, bk, kind, trans, True)
+        flag = "  <- fixed" if s1 < s0 else ""
+        print("%-15s %-16s %7dx /%2dx %7dx /%2dx%s" % (name, label, s0, l0, s1, l1, flag))
+        # Both keys must be bijective; only the key the kernel SHIPS is held to
+        # the <=2-way bar. SCALED_KEY below says which one that is.
+        check(ok0 and ok1, "%s %s: staging map is not a bijection" % (name, label))
+        s, l = (s1, l1) if SCALED_KEY else (s0, l0)
+        check(s <= 2, "%s %s: staging is %d-way conflicted" % (name, label, s))
+        check(l <= 2, "%s %s: fragment load is %d-way conflicted" % (name, label, l))
+print()
+
 if fails:
     for f in fails:
         print("FAIL:", f)

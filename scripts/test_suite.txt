@@ -1,0 +1,43 @@
+# The test suite, in ONE place, read by both scripts\test.ps1 and scripts/test.sh.
+#
+# Why a file and not two lists: the whole point of the gate below is that the
+# tested path and the trained path must not drift apart, and two hand-kept
+# copies of the suite would be the first thing to drift.
+#
+# Format: name, kind, then the command (binary name without .exe, then args).
+#   test   -- must exit 0; its BMB_COVER branches count as COVERED.
+#   train  -- a real training configuration; its branches are what must be
+#             covered. The gate fails if a train line reaches any dispatch
+#             branch that no test line reaches.
+#
+# HOW THIS LIST WAS ARRIVED AT, so nobody trims it back to what `make test`
+# used to be (test_gemm in fp32 plus test_xent):
+#   - test_gemm with no flag checks only the fp32 kernels. Every recent
+#     training run uses --tf32, whose epilogues are a SEPARATE implementation.
+#   - --compact-block 1 forces the compact tile onto every shape, because the
+#     default rule only fires at K == 384 and the correctness shapes mostly
+#     are not.
+#   - test_grad defaults to C=128, which takes the block-per-row layernorm;
+#     the model runs C=384 on the warp-per-row kernel. --C 384 is the model's
+#     width, and --tf32 is what makes the GEMM epilogues the tensor-core ones.
+#   - test_flash --tf32 makes the dispatcher pick the backward config a --tf32
+#     training run picks (18, not 5).
+#
+# Short training runs only: coverage records whether a branch is REACHED, not
+# how often, and two steps reach everything a full run does.
+
+gemm_fp32        test   test_gemm
+gemm_tf32        test   test_gemm --tf32
+gemm_compact     test   test_gemm --tf32 --compact-block 1
+gemm_nocompact   test   test_gemm --tf32 --compact-block -1
+grad_fp32        test   test_grad
+grad_tf32_384    test   test_grad --fused --C 384 --tf32
+grad_tf32_768    test   test_grad --fused --C 768 --tf32
+flash_fp32       test   test_flash
+flash_tf32       test   test_flash --tf32
+xent             test   test_xent
+ddp_ring         test   test_ddp
+ddp_model_tf32   test   test_ddp_gpt --tf32 --ranks 2
+
+train_fp32       train  train_gpt -n 2 --eval 10000 --sample 10000 --len 0
+train_tf32       train  train_gpt -n 2 --tf32 --eval 10000 --sample 10000 --len 0

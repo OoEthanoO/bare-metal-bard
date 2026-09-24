@@ -1,0 +1,199 @@
+Swizzle-key fix, end to end: train_gpt -n 500 --tf32 --profile, before vs after,
+four interleaved rounds. The clock lines here predate the ramp-aware verdict: the
+'MOVED' runs are one startup sample at ~400 MHz, sample 0, inside the window the
+profiler discards; see scripts/measure.ps1.
+
+===== round 1 before =====
+step     1/500  loss 4.2625  lr 1.00e-05  |g| 15.666   119.53 ms    34266 tok/s   2462 GFLOP/s
+step   100/500  loss 2.4958  lr 1.00e-03  |g| 0.702    25.95 ms   157813 tok/s  11339 GFLOP/s
+step   200/500  loss 2.3775  lr 8.68e-04  |g| 0.775    26.01 ms   157497 tok/s  11316 GFLOP/s
+step   300/500  loss 1.9975  lr 5.50e-04  |g| 0.893    25.99 ms   157576 tok/s  11322 GFLOP/s
+step   400/500  loss 1.8676  lr 2.32e-04  |g| 0.902    26.02 ms   157400 tok/s  11309 GFLOP/s
+step   500/500  loss 1.7268  lr 1.00e-04  |g| 0.906    25.98 ms   157650 tok/s  11327 GFLOP/s
+(profile discards steps 1-110: allocator warm-up and the SM
+GEMM bwd dW                       6.763    26.6%
+GEMM bwd dX                       6.526    25.6%
+attention bwd                     2.944    11.6%
+GEMM mlp down                     2.179     8.6%
+GEMM mlp up                       2.038     8.0%
+GEMM qkv proj                     1.519     6.0%
+layernorm bwd                     0.836     3.3%
+attention fwd                     0.744     2.9%
+optimizer                         0.725     2.8%
+GEMM attn proj                    0.649     2.5%
+layernorm                         0.259     1.0%
+GEMM logits bwd                   0.114     0.4%
+GEMM logits                       0.052     0.2%
+measured total                   25.457
+[clock] MOVED during the run: 405-1192 MHz (194.3% spread) across 30 busy samples.
+[clock] The timings above are not internally comparable -- the clock changed under them.
+===== round 1 after =====
+step     1/500  loss 4.2625  lr 1.00e-05  |g| 15.666   121.42 ms    33735 tok/s   2424 GFLOP/s
+step   100/500  loss 2.4958  lr 1.00e-03  |g| 0.702    26.45 ms   154865 tok/s  11127 GFLOP/s
+step   200/500  loss 2.3778  lr 8.68e-04  |g| 0.775    25.93 ms   157941 tok/s  11348 GFLOP/s
+step   300/500  loss 1.9994  lr 5.50e-04  |g| 0.846    25.90 ms   158117 tok/s  11360 GFLOP/s
+step   400/500  loss 1.8702  lr 2.32e-04  |g| 0.912    25.94 ms   157931 tok/s  11347 GFLOP/s
+step   500/500  loss 1.7264  lr 1.00e-04  |g| 0.883    25.90 ms   158142 tok/s  11362 GFLOP/s
+(profile discards steps 1-110: allocator warm-up and the SM
+GEMM bwd dW                       6.714    26.4%
+GEMM bwd dX                       6.507    25.6%
+attention bwd                     2.950    11.6%
+GEMM mlp down                     2.185     8.6%
+GEMM mlp up                       2.021     8.0%
+GEMM qkv proj                     1.521     6.0%
+layernorm bwd                     0.835     3.3%
+attention fwd                     0.747     2.9%
+optimizer                         0.727     2.9%
+GEMM attn proj                    0.650     2.6%
+layernorm                         0.258     1.0%
+GEMM logits bwd                   0.113     0.4%
+GEMM logits                       0.052     0.2%
+measured total                   25.389
+[clock] MOVED during the run: 397-1192 MHz (200.3% spread) across 30 busy samples.
+[clock] The timings above are not internally comparable -- the clock changed under them.
+===== round 2 before =====
+step     1/500  loss 4.2625  lr 1.00e-05  |g| 15.666   115.66 ms    35415 tok/s   2544 GFLOP/s
+step   100/500  loss 2.4958  lr 1.00e-03  |g| 0.702    26.59 ms   154069 tok/s  11070 GFLOP/s
+step   200/500  loss 2.3778  lr 8.68e-04  |g| 0.776    25.95 ms   157816 tok/s  11339 GFLOP/s
+step   300/500  loss 2.0009  lr 5.50e-04  |g| 0.965    25.93 ms   157991 tok/s  11351 GFLOP/s
+step   400/500  loss 1.8659  lr 2.32e-04  |g| 0.897    26.09 ms   157013 tok/s  11281 GFLOP/s
+step   500/500  loss 1.7256  lr 1.00e-04  |g| 0.915    25.99 ms   157617 tok/s  11324 GFLOP/s
+(profile discards steps 1-110: allocator warm-up and the SM
+GEMM bwd dW                       6.780    26.6%
+GEMM bwd dX                       6.540    25.6%
+attention bwd                     2.954    11.6%
+GEMM mlp down                     2.187     8.6%
+GEMM mlp up                       2.028     8.0%
+GEMM qkv proj                     1.523     6.0%
+layernorm bwd                     0.835     3.3%
+attention fwd                     0.747     2.9%
+optimizer                         0.723     2.8%
+GEMM attn proj                    0.651     2.6%
+layernorm                         0.258     1.0%
+GEMM logits bwd                   0.114     0.4%
+GEMM logits                       0.052     0.2%
+measured total                   25.502
+[clock] MOVED during the run: 397-1192 MHz (200.3% spread) across 30 busy samples.
+[clock] The timings above are not internally comparable -- the clock changed under them.
+===== round 2 after =====
+step     1/500  loss 4.2625  lr 1.00e-05  |g| 15.666   117.50 ms    34860 tok/s   2505 GFLOP/s
+step   100/500  loss 2.4958  lr 1.00e-03  |g| 0.702    26.60 ms   154006 tok/s  11065 GFLOP/s
+step   200/500  loss 2.3770  lr 8.68e-04  |g| 0.773    25.90 ms   158120 tok/s  11361 GFLOP/s
+step   300/500  loss 2.0064  lr 5.50e-04  |g| 0.927    25.93 ms   157970 tok/s  11350 GFLOP/s
+step   400/500  loss 1.8680  lr 2.32e-04  |g| 0.885    25.87 ms   158322 tok/s  11375 GFLOP/s
+step   500/500  loss 1.7285  lr 1.00e-04  |g| 0.881    25.92 ms   158043 tok/s  11355 GFLOP/s
+(profile discards steps 1-110: allocator warm-up and the SM
+GEMM bwd dW                       6.723    26.4%
+GEMM bwd dX                       6.516    25.6%
+attention bwd                     2.954    11.6%
+GEMM mlp down                     2.188     8.6%
+GEMM mlp up                       2.027     8.0%
+GEMM qkv proj                     1.523     6.0%
+layernorm bwd                     0.834     3.3%
+attention fwd                     0.747     2.9%
+optimizer                         0.727     2.9%
+GEMM attn proj                    0.651     2.6%
+layernorm                         0.259     1.0%
+GEMM logits bwd                   0.113     0.4%
+GEMM logits                       0.052     0.2%
+measured total                   25.424
+[clock] HELD BELOW THE PIN: 1162-1192 MHz across 30 busy samples, target 1200, peak 78.94 W.
+[clock] The lock is applied; the card cannot reach it under this load. Timings are
+[clock] comparable ONLY to other runs at 1162-1192 MHz -- quote the clock with them.
+===== round 3 before =====
+step     1/500  loss 4.2625  lr 1.00e-05  |g| 15.666   118.57 ms    34546 tok/s   2482 GFLOP/s
+step   100/500  loss 2.4958  lr 1.00e-03  |g| 0.702    26.62 ms   153865 tok/s  11055 GFLOP/s
+step   200/500  loss 2.3777  lr 8.68e-04  |g| 0.775    26.03 ms   157364 tok/s  11306 GFLOP/s
+step   300/500  loss 1.9992  lr 5.50e-04  |g| 0.939    25.96 ms   157781 tok/s  11336 GFLOP/s
+step   400/500  loss 1.8692  lr 2.32e-04  |g| 0.897    26.07 ms   157139 tok/s  11290 GFLOP/s
+step   500/500  loss 1.7267  lr 1.00e-04  |g| 0.885    26.04 ms   157307 tok/s  11302 GFLOP/s
+(profile discards steps 1-110: allocator warm-up and the SM
+GEMM bwd dW                       6.781    26.6%
+GEMM bwd dX                       6.541    25.6%
+attention bwd                     2.953    11.6%
+GEMM mlp down                     2.188     8.6%
+GEMM mlp up                       2.028     8.0%
+GEMM qkv proj                     1.523     6.0%
+layernorm bwd                     0.835     3.3%
+attention fwd                     0.748     2.9%
+optimizer                         0.722     2.8%
+GEMM attn proj                    0.651     2.6%
+layernorm                         0.258     1.0%
+GEMM logits bwd                   0.114     0.4%
+GEMM logits                       0.052     0.2%
+measured total                   25.506
+[clock] MOVED during the run: 397-1192 MHz (200.3% spread) across 30 busy samples.
+[clock] The timings above are not internally comparable -- the clock changed under them.
+===== round 3 after =====
+step     1/500  loss 4.2625  lr 1.00e-05  |g| 15.666   115.64 ms    35420 tok/s   2545 GFLOP/s
+step   100/500  loss 2.4958  lr 1.00e-03  |g| 0.702    26.51 ms   154534 tok/s  11103 GFLOP/s
+step   200/500  loss 2.3776  lr 8.68e-04  |g| 0.775    25.90 ms   158131 tok/s  11361 GFLOP/s
+step   300/500  loss 1.9987  lr 5.50e-04  |g| 0.925    25.87 ms   158317 tok/s  11375 GFLOP/s
+step   400/500  loss 1.8693  lr 2.32e-04  |g| 0.907    25.93 ms   157970 tok/s  11350 GFLOP/s
+step   500/500  loss 1.7276  lr 1.00e-04  |g| 0.895    25.86 ms   158388 tok/s  11380 GFLOP/s
+(profile discards steps 1-110: allocator warm-up and the SM
+GEMM bwd dW                       6.722    26.4%
+GEMM bwd dX                       6.516    25.6%
+attention bwd                     2.953    11.6%
+GEMM mlp down                     2.188     8.6%
+GEMM mlp up                       2.027     8.0%
+GEMM qkv proj                     1.523     6.0%
+layernorm bwd                     0.835     3.3%
+attention fwd                     0.748     2.9%
+optimizer                         0.723     2.8%
+GEMM attn proj                    0.651     2.6%
+layernorm                         0.259     1.0%
+GEMM logits bwd                   0.113     0.4%
+GEMM logits                       0.052     0.2%
+measured total                   25.417
+[clock] HELD BELOW THE PIN: 1162-1192 MHz across 30 busy samples, target 1200, peak 79.39 W.
+[clock] The lock is applied; the card cannot reach it under this load. Timings are
+[clock] comparable ONLY to other runs at 1162-1192 MHz -- quote the clock with them.
+===== round 4 before =====
+step     1/500  loss 4.2625  lr 1.00e-05  |g| 15.666   116.03 ms    35302 tok/s   2536 GFLOP/s
+step   100/500  loss 2.4959  lr 1.00e-03  |g| 0.702    26.57 ms   154173 tok/s  11077 GFLOP/s
+step   200/500  loss 2.3770  lr 8.68e-04  |g| 0.775    26.01 ms   157492 tok/s  11316 GFLOP/s
+step   300/500  loss 1.9960  lr 5.50e-04  |g| 0.893    25.94 ms   157880 tok/s  11343 GFLOP/s
+step   400/500  loss 1.8681  lr 2.32e-04  |g| 0.878    26.05 ms   157256 tok/s  11299 GFLOP/s
+step   500/500  loss 1.7289  lr 1.00e-04  |g| 0.924    25.97 ms   157745 tok/s  11334 GFLOP/s
+(profile discards steps 1-110: allocator warm-up and the SM
+GEMM bwd dW                       6.780    26.6%
+GEMM bwd dX                       6.539    25.6%
+attention bwd                     2.953    11.6%
+GEMM mlp down                     2.188     8.6%
+GEMM mlp up                       2.027     7.9%
+GEMM qkv proj                     1.523     6.0%
+layernorm bwd                     0.836     3.3%
+attention fwd                     0.748     2.9%
+optimizer                         0.720     2.8%
+GEMM attn proj                    0.651     2.6%
+layernorm                         0.259     1.0%
+GEMM logits bwd                   0.114     0.4%
+GEMM logits                       0.052     0.2%
+measured total                   25.499
+[clock] MOVED during the run: 397-1192 MHz (200.3% spread) across 30 busy samples.
+[clock] The timings above are not internally comparable -- the clock changed under them.
+===== round 4 after =====
+step     1/500  loss 4.2625  lr 1.00e-05  |g| 15.666   115.46 ms    35477 tok/s   2549 GFLOP/s
+step   100/500  loss 2.4958  lr 1.00e-03  |g| 0.702    26.48 ms   154708 tok/s  11115 GFLOP/s
+step   200/500  loss 2.3777  lr 8.68e-04  |g| 0.774    25.85 ms   158439 tok/s  11384 GFLOP/s
+step   300/500  loss 1.9996  lr 5.50e-04  |g| 0.999    25.89 ms   158226 tok/s  11368 GFLOP/s
+step   400/500  loss 1.8642  lr 2.32e-04  |g| 0.866    25.99 ms   157585 tok/s  11322 GFLOP/s
+step   500/500  loss 1.7243  lr 1.00e-04  |g| 0.910    25.86 ms   158382 tok/s  11379 GFLOP/s
+(profile discards steps 1-110: allocator warm-up and the SM
+GEMM bwd dW                       6.722    26.5%
+GEMM bwd dX                       6.514    25.6%
+attention bwd                     2.953    11.6%
+GEMM mlp down                     2.189     8.6%
+GEMM mlp up                       2.027     8.0%
+GEMM qkv proj                     1.523     6.0%
+layernorm bwd                     0.834     3.3%
+attention fwd                     0.747     2.9%
+optimizer                         0.719     2.8%
+GEMM attn proj                    0.651     2.6%
+layernorm                         0.258     1.0%
+GEMM logits bwd                   0.113     0.4%
+GEMM logits                       0.052     0.2%
+measured total                   25.413
+[clock] MOVED during the run: 397-1192 MHz (200.3% spread) across 30 busy samples.
+[clock] The timings above are not internally comparable -- the clock changed under them.
