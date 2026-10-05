@@ -46,7 +46,7 @@ machine. What that does *not* establish is T4 runtime behaviour: an sm_75 cubin
 cannot execute on this card, so the fp32 path is verified as logic and not as
 silicon.
 
-**Writeup:** <https://bare-metal-bard.vercel.app>
+**Writeup:** <https://sgemm.ethanyanxu.com>
 
 ---
 
@@ -2380,8 +2380,13 @@ card's memory, which is why `train_gpt` now prints it.
 
 A longer writeup -- the profiling story, the measurement problem, the charts --
 is a Next.js app under [`site/`](site/), live at
-<https://bare-metal-bard.vercel.app> and deployed on Vercel (auto-deploys on
-push to `main`). Every number on the
+<https://sgemm.ethanyanxu.com>. It is a static export served by Caddy from a
+home server, by the scripts in [`deploy/windows/`](deploy/windows/): a
+scheduled task checks `main` every two minutes, and a push that changes
+`site/` or those scripts is built into a new release, switched in only after
+it answers over HTTPS on loopback, with the previous release kept for
+`activate.ps1 -Rollback`. (It was on Vercel until that deployment was
+disabled.) Every number on the
 page is generated from `bench/results.csv` and the training log by
 `tools/make_site_data.py`, so the page cannot drift from the measurements.
 
