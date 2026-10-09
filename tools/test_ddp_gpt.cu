@@ -97,6 +97,36 @@ static void poison_scratch(GPT &g) {
     CUDA_CHECK(cudaMemset(g.grads_mem, 0xff, g.num_params * sizeof(float)));
 }
 
+// Peer probes can return success while DMA lands outside their destination
+// on a misconfigured host. Check model state around setup, before launching
+// any model kernel: weights must match initialization, Adam moments be zero.
+static bool check_setup(const GPT &g, int device, int rank, const char *phase,
+                        const std::vector<float> &weights) {
+    std::vector<float> got(g.num_params);
+    bool ok = true;
+    for (int field = 0; field < 3; ++field) {
+        readback(device, field == 0 ? g.params_mem : field == 1 ? g.m_mem : g.v_mem, got);
+        size_t count = 0, first = 0, last = 0;
+        for (size_t i = 0; i < got.size(); ++i) {
+            const float expected = field == 0 ? weights[i] : 0.0f;
+            if (!std::isfinite(got[i]) || got[i] != expected) {
+                if (!count) first = i;
+                last = i;
+                ++count;
+            }
+        }
+        if (count) {
+            printf("FAIL setup %s rank=%d field=%s changed=%zu first=%zu last=%zu "
+                   "first_value=%.9g expected=%.9g last_value=%.9g\n", phase, rank,
+                   field == 0 ? "parameters" : field == 1 ? "Adam_m" : "Adam_v",
+                   count, first, last, got[first], field == 0 ? weights[first] : 0.0f,
+                   got[last]);
+            ok = false;
+        }
+    }
+    return ok;
+}
+
 // Read-only post-failure localization. Forward activations remain available
 // after backward; compare the corresponding contiguous batch shard, not the
 // entire reference arena (whose per-layer strides include all ranks).
@@ -154,7 +184,7 @@ static void trace_forward(const GPT &ref, const GPT &shard, int device, int rank
 int main(int argc, char **argv) {
     int nranks = 2, steps = 3;
     bool tf32 = false, require_devices = false, inject = false, production = false;
-    bool forward_only = false, poison = false;
+    bool forward_only = false, poison = false, setup_only = false;
     for (int i = 1; i < argc; ++i) {
         if (!strcmp(argv[i], "--tf32")) tf32 = true;
         else if (!strcmp(argv[i], "--require-multi-gpu")) require_devices = true;
@@ -162,6 +192,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--production-shape")) production = true;
         else if (!strcmp(argv[i], "--forward-only")) forward_only = true;
         else if (!strcmp(argv[i], "--poison-scratch")) poison = true;
+        else if (!strcmp(argv[i], "--setup-only")) setup_only = true;
         else if ((!strcmp(argv[i], "--ranks") || !strcmp(argv[i], "--steps")) && i + 1 < argc) {
             const bool rank_arg = !strcmp(argv[i], "--ranks");
             char *end = nullptr;
@@ -174,7 +205,8 @@ int main(int argc, char **argv) {
         } else {
             fprintf(stderr, "usage: test_ddp_gpt [--tf32] [--ranks 1..8] [--steps 1..20]\n"
                             "                    [--require-multi-gpu] [--inject-gradient-error]\n"
-                            "                    [--production-shape] [--forward-only] [--poison-scratch]\n");
+                            "                    [--production-shape] [--forward-only] [--poison-scratch]\n"
+                            "                    [--setup-only]\n");
             return 2;
         }
     }
@@ -213,9 +245,26 @@ int main(int argc, char **argv) {
         gpt_alloc(g);
         gpt_init(g, 1337);
     }
+    std::vector<float> initial_weights(reference.num_params);
+    readback(0, reference.params_mem, initial_weights);
+    bool setup_ok = check_setup(reference, 0, -1, "before_peer", initial_weights);
+    for (int r = 0; r < nranks; ++r)
+        setup_ok &= check_setup(replicas[r], devices[r], r, "before_peer", initial_weights);
+    if (!setup_ok) return 1;
+    printf("Model initialization verified before peer setup.\n");
     DDP ddp;
     ddp_init(ddp, nranks, devices.data());
     ddp_report_topology(ddp);
+    setup_ok &= check_setup(reference, 0, -1, "after_peer", initial_weights);
+    for (int r = 0; r < nranks; ++r)
+        setup_ok &= check_setup(replicas[r], devices[r], r, "after_peer", initial_weights);
+    if (!setup_ok || setup_only) {
+        ddp_free(ddp);
+        for (int r = 0; r < nranks; ++r) release_model(devices[r], replicas[r]);
+        release_model(0, reference);
+        printf("DDP SETUP CHECK %s (no forward/backward/optimizer executed)\n", setup_ok ? "PASSED" : "FAILED");
+        return setup_ok ? 0 : 1;
+    }
     printf("DDP model check: %s, global B=%d, T=%d, C=%d, L=%d, steps=%d\n",
            tf32 ? "TF32" : "FP32", reference.B, T, C, L, steps);
     printf("Checks are numerical correctness only; repeated devices are not a scaling result.\n");
